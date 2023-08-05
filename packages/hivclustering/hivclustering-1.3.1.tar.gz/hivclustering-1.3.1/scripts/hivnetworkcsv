@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+
+import json
+import csv
+import os.path
+
+from hivclustering import *
+from hivclustering.networkbuild import *
+
+
+def make_hiv_network():
+
+    network = build_a_network()
+
+    if settings().json:
+
+        network_info = describe_network(network, True, settings().singletons)
+
+        if settings().contaminant_file:
+            network_info['Settings'] = {'threshold': settings().threshold,
+                                        'edge-filtering': settings().edge_filtering,
+                                        'contaminants': settings().contaminants,
+                                        'contaminant-ids': list(settings().contaminant_file)
+                                        }
+        else:
+            network_info['Settings'] = {'threshold': settings().threshold,
+                                        'edge-filtering': settings().edge_filtering,
+                                        'contaminants': settings().contaminants
+                                        }
+
+        if settings().singletons:
+            network_info['Settings']['singletons'] = True
+
+
+        nodes = []
+
+        cluster_info = network.retrieve_clusters()
+
+        node_idx = {}
+
+        for idx, cluster in cluster_info.items():
+            for n in cluster:
+                if idx is not None:
+                    nodes.append({'id': n.id, 'cluster': idx, 'attributes': list(n.attributes),
+                                  'edi': n.get_edi(), 'baseline': n.get_baseline_date(True)})
+                node_idx[n] = len(nodes) - 1
+
+        edges = []
+        for e in network.reduce_edge_set():
+            if e.visible:
+                edge_source = e.compute_direction()
+                if edge_source is not None:
+                    src = node_idx[edge_source]
+                    rcp = node_idx[e.p2 if edge_source != e.p2 else e.p1]
+                    directed = True
+                else:
+                    src = node_idx[e.p1]
+                    rcp = node_idx[e.p2]
+                    directed = False
+                edges.append({'source': src, 'target': rcp, 'directed': directed, 'length': network.distances[
+                             e], 'support': e.edge_reject_p, 'removed': not e.has_support(), 'sequences': e.sequences, 'attributes': list(e.attribute)})
+
+        network_info['Nodes'] = sorted(nodes, key=lambda node: node['id'])
+        network_info['Edges'] = sorted(edges, key=lambda edge: ''.join([sequence for sequence in edge['sequences']]))
+
+        print(json.dumps(network_info, indent=4, sort_keys=True))
+
+    else:
+        describe_network(network)
+
+    if settings().dot:
+        network.generate_dot(settings().dot)
+
+    if settings().cluster:
+        network.write_clusters(settings().cluster)
+
+    if settings().centralities:
+        network.write_centralities(settings().centralities)
+
+    return network
+
+if __name__ == '__main__':
+    make_hiv_network()
+
