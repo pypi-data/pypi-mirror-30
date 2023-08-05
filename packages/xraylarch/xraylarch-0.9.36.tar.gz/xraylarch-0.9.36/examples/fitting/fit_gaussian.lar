@@ -1,0 +1,56 @@
+doc =  """
+   Example fit to Gaussian line shape.
+"""
+
+log2 = log(2.0)
+s2pi = sqrt(log2/pi)
+parformat = " %4i    % .4f    % .4f    % .4f    % .4f"
+
+def ga(x, off, amp, cen, wid):
+    """standard gaussian with scale and constant offset """
+    return off + amp*(s2pi / wid) * exp(-log2 * (x-cen)**2 / wid**2)
+enddef
+
+def resid(pars, data, verbose=False, update_rate=15):
+    model = ga(data.x, pars.off, pars.amp, pars.cen, pars.wid)
+    if verbose:
+        if pars.fit_iter == 0:
+            print( " Iteration   Offset   Amplitude   Center  Sigma")
+        endif
+        if pars.fit_iter % update_rate == 0:
+            print( parformat % (pars.fit_iter, pars.off.value,
+                               pars.amp.value, pars.cen.value, pars.wid.value))
+            update_trace(data.x, model, trace=2)
+        endif
+    endif
+    pars.fit_iter += 1
+    return  model - data.y
+enddef
+
+# create data
+xdat = None
+mdat = group()
+mdat.x = arange(501)/25.0
+mdat.y = ga(mdat.x, -2.0, 15.0, 11.0, 2.0) + \
+         random.normal(size=len(mdat.x), scale=0.250)
+
+# create group for parameters
+params = param_group(off = param(1,   vary=True),
+                     amp = param(1.0, vary=True),
+                     cen = param(10.0, vary=True),
+                     wid = param(1.0, vary=True),
+                     fit_iter=0)
+init = ga(mdat.x, params.off, params.amp, params.cen, params.wid)
+
+newplot(mdat.x, mdat.y)
+plot(mdat.x, init)
+plot(mdat.x, init, color='black', style='--')
+
+result = minimize(resid, params, args=(mdat,),
+                  kws={'verbose':True, 'update_rate': 5})
+
+final = ga(mdat.x, params.off, params.amp, params.cen, params.wid)
+
+update_trace(mdat.x, final, trace=2)
+
+print(fit_report(result))
