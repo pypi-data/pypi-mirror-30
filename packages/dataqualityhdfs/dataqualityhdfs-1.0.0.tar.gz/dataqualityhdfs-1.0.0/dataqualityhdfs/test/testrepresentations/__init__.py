@@ -1,0 +1,3 @@
+from dataqualityhdfs.test.testrepresentations.testrepresentation import TestRepresentation
+from dataqualityhdfs.test.testrepresentations.testrepresentationpercentage import TestRepresentationPercentage
+from dataqualityhdfs.test.testrepresentations.testtepresentationvalue import TestRepresentationValue
