@@ -1,0 +1,349 @@
+import typing as tp
+from fractions import Fraction
+from unittest import TestCase, main
+from unittest.mock import MagicMock, patch
+from abc import ABCMeta, abstractmethod
+
+# feature extractor base classes
+from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtractorBase, \
+    MonophonicRhythmFeatureExtractor, PolyphonicRhythmFeatureExtractor
+
+# feature extractor implementations
+from beatsearch.feature_extraction import (
+    BinaryOnsetVector,
+    BinarySchillingerChain,
+    ChronotonicChain,
+    OnsetDensity,
+    OnsetPositionVector,
+    SyncopationVector,
+    SyncopatedOnsetRatio,
+    MeanSyncopationStrength,
+    IOIVector,
+    IOIDifferenceVector,
+    IOIHistogram
+)
+
+# misc
+from beatsearch.rhythm import Rhythm, MonophonicRhythm, Unit
+from beatsearch.test_rhythm import mock_onset
+
+
+def get_rhythm_mock_with_23_rumba_clave_onsets(resolution):
+    rhythm_mock = MagicMock(MonophonicRhythm)
+    assert resolution >= 4, "the 2/3 claves pattern is is not representable with a resolution smaller than 4"
+
+    onset_positions = (
+        int(resolution / 4.0 * 0),
+        int(resolution / 4.0 * 3),
+        int(resolution / 4.0 * 7),
+        int(resolution / 4.0 * 10),
+        int(resolution / 4.0 * 12)
+    )
+
+    mocked_onsets = tuple(mock_onset(tick, 100) for tick in onset_positions)
+
+    rhythm_mock.get_resolution.return_value = resolution
+    rhythm_mock.resolution = rhythm_mock.get_resolution.return_value
+    rhythm_mock.get_onsets.return_value = mocked_onsets
+    rhythm_mock.onsets = rhythm_mock.get_onsets.return_value
+    rhythm_mock.get_duration_in_ticks.return_value = int(resolution * 4)
+    rhythm_mock.duration_in_ticks = rhythm_mock.get_duration_in_ticks.return_value
+    rhythm_mock.get_duration.return_value = int(resolution * 4)
+
+    return rhythm_mock
+
+
+class TestFeatureExtractor(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, FeatureExtractor)
+
+
+class TestRhythmFeatureExtractor(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, RhythmFeatureExtractorBase)
+
+
+class TestMonophonicRhythmFeatureExtractor(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, MonophonicRhythmFeatureExtractor)
+
+
+#######################################################
+# Monophonic rhythm feature extractor implementations #
+#######################################################
+
+
+class TestMonophonicRhythmFeatureExtractorImplementationMixin(object, metaclass=ABCMeta):
+    def test_instantiable(self):
+        cls = self.get_impl_class()
+        cls()  # shouldn't cause any problems
+
+    def __init__(self, *args, **kw):
+        # noinspection PyArgumentList
+        super().__init__(*args, **kw)
+        self.rhythm = get_rhythm_mock_with_23_rumba_clave_onsets(4)  # type: MonophonicRhythm
+        self.feature_extractor = None  # type: tp.Union[MonophonicRhythmFeatureExtractor, None]
+
+    # noinspection PyPep8Naming
+    def setUp(self):
+        cls = self.get_impl_class()
+        self.feature_extractor = cls()
+        self.feature_extractor.unit = 1/16
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_with_first_positional_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            with self.subTest(unit):
+                obj = cls(unit)
+                self.assertEqual(obj.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_with_named_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            with self.subTest(unit):
+                obj = cls(unit=unit)
+                self.assertEqual(obj.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_to_pre_processors_with_first_positional_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            obj = cls(unit=unit)
+            for pre_processor in obj.pre_processors:
+                with self.subTest("%s.%s" % (unit, pre_processor.__class__.__name__)):
+                    self.assertEqual(pre_processor.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_to_preprocessors_with_named_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            obj = cls(unit=unit)
+            for pre_processor in obj.pre_processors:
+                with self.subTest("%s.%s" % (unit, pre_processor.__class__.__name__)):
+                    self.assertEqual(pre_processor.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_property_sets_preprocessor_units(self):
+        cls = self.get_impl_class()
+        obj = cls()
+        for unit in self.get_legal_units():
+            obj.unit = unit
+            for pre_processor in obj.pre_processors:
+                with self.subTest("%s.%s" % (unit, pre_processor.__class__.__name__)):
+                    self.assertEqual(pre_processor.unit, unit)
+
+    @staticmethod
+    def get_legal_units():
+        # noinspection PyTypeChecker
+        return [None] + list(Unit)
+
+    @staticmethod
+    @abstractmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        raise NotImplementedError
+
+
+class TestBinaryOnsetVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return BinaryOnsetVector
+
+    def test_process(self):
+        expected_binary_ticks = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
+        actual_binary_ticks = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_binary_ticks, expected_binary_ticks)
+
+
+class TestIOIVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class():
+        return IOIVector
+
+    def test_process_in_pre_note_mode(self):
+        extractor = self.feature_extractor  # type: IOIVector
+        extractor.mode = IOIVector.Mode.PRE_NOTE
+
+        expected_ioi_vector = [0, 3, 4, 3, 2]
+        actual_ioi_vector = extractor.process(self.rhythm)
+        self.assertEqual(actual_ioi_vector, expected_ioi_vector)
+
+    def test_process_in_post_note_mode(self):
+        extractor = self.feature_extractor  # type: IOIVector
+        extractor.mode = IOIVector.Mode.POST_NOTE
+
+        expected_ioi_vector = [3, 4, 3, 2, 4]
+        actual_ioi_vector = extractor.process(self.rhythm)
+        self.assertEqual(actual_ioi_vector, expected_ioi_vector)
+
+
+class TestIOIHistogram(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return IOIHistogram
+
+    def test_process(self):
+        expected_histogram = (
+            [1, 2, 2],  # occurrences
+            [2, 3, 4]  # intervals
+        )
+        actual_histogram = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_histogram, expected_histogram)
+
+
+class TestBinarySchillingerChain(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return BinarySchillingerChain
+
+    def test_process_with_values_one_zero(self):
+        extractor = self.feature_extractor  # type: BinarySchillingerChain
+        extractor.values = (1, 0)
+
+        expected_chain = [1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1]
+        actual_chain = extractor.process(self.rhythm)
+        self.assertEqual(actual_chain, expected_chain)
+
+    def test_process_with_values_zero_one(self):
+        extractor = self.feature_extractor  # type: BinarySchillingerChain
+        extractor.values = (0, 1)
+
+        expected_chain = [0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0]
+        actual_chain = extractor.process(self.rhythm)
+        self.assertEqual(actual_chain, expected_chain)
+
+
+class TestChronotonicChain(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return ChronotonicChain
+
+    def test_process(self):
+        expected_chain = [3, 3, 3, 4, 4, 4, 4, 3, 3, 3, 2, 2, 4, 4, 4, 4]
+        actual_chain = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_chain, expected_chain)
+
+
+class TestIOIDifferenceVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return IOIDifferenceVector
+
+    def test_process_in_non_cyclic_mode(self):
+        extractor = self.feature_extractor  # type: IOIDifferenceVector
+        extractor.cyclic = False
+
+        expected_vector = [4 / 3, 3 / 4, 2 / 3, 4 / 2]
+        actual_vector = extractor.process(self.rhythm)
+        self.assertEqual(actual_vector, expected_vector)
+
+    def test_process_in_cyclic_mode(self):
+        extractor = self.feature_extractor  # type: IOIDifferenceVector
+        extractor.cyclic = True
+
+        expected_vector = [4 / 3, 3 / 4, 2 / 3, 4 / 2, 3 / 4]
+        actual_vector = extractor.process(self.rhythm)
+        self.assertEqual(actual_vector, expected_vector)
+
+
+class TestOnsetPositionVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return OnsetPositionVector
+
+    def test_process(self):
+        expected_vector = [0, 3, 7, 10, 12]
+        actual_vector = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_vector, expected_vector)
+
+
+class TestSyncopationVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return SyncopationVector
+
+    @staticmethod
+    def get_legal_units():
+        # noinspection PyTypeChecker
+        # Syncopation vector does not support tick-based computation
+        return list(Unit)
+
+    # TODO Add test_process
+
+
+class TestSyncopatedOnsetRatio(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return SyncopatedOnsetRatio
+
+    @staticmethod
+    def get_legal_units():
+        return TestSyncopationVector.get_legal_units()
+
+    def test_default_ret_float(self):
+        self.assertFalse(self.feature_extractor.ret_fraction, "should return a float by default")
+
+    @patch.object(SyncopationVector, "process")
+    def test_process_ret_fraction(self, mock_syncopation_vector_process):
+        syncopations = "first", "second", "third"
+        mock_syncopation_vector_process.return_value = syncopations
+
+        extractor = self.feature_extractor  # type: SyncopatedOnsetRatio
+        extractor.ret_fraction = True
+
+        expected_ratio = Fraction(len(syncopations), 5)  # self.rhythm contains 5 onsets
+        actual_ratio = extractor.process(self.rhythm)
+        self.assertEqual(actual_ratio, expected_ratio)
+
+    @patch.object(SyncopationVector, "process")
+    def test_process_ret_float(self, mock_syncopation_vector_process):
+        syncopations = "first", "second", "third"
+        mock_syncopation_vector_process.return_value = syncopations
+
+        extractor = self.feature_extractor  # type: SyncopatedOnsetRatio
+        extractor.ret_fraction = False
+
+        expected_ratio = 3 / float(5)
+        actual_ratio = extractor.process(self.rhythm)
+        self.assertAlmostEqual(actual_ratio, expected_ratio)
+
+
+class TestMeanSyncopationStrength(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return MeanSyncopationStrength
+
+    @staticmethod
+    def get_legal_units():
+        return TestSyncopationVector.get_legal_units()
+
+    @patch.object(SyncopationVector, "process")
+    def test_process(self, mock_syncopation_vector_process):
+        syncopations = [0, 7], [1, 2], [2, 5]  # total sync strength = 14
+        mock_syncopation_vector_process.return_value = syncopations
+        self.rhythm.get_duration.return_value = 123
+
+        expected_mean_sync_strength = 14 / 123
+        actual_mean_sync_strength = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_mean_sync_strength, expected_mean_sync_strength)
+
+
+class TestOnsetDensity(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return OnsetDensity
+
+    def test_process(self):
+        expected_onset_density = 0.3125  # rumba rhythm has 5 onsets and 16 available positions
+        actual_onset_density = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_onset_density, expected_onset_density)
+
+
+class TestPolyphonicRhythmFeatureExtractor(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, PolyphonicRhythmFeatureExtractor)
+
+
+if __name__ == "__main__":
+    main()
