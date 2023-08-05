@@ -1,0 +1,63 @@
+# Advise GitLab that these environment vars should be loaded from the Variables config.
+variables:
+  TESTPYPI_USERNAME: SECURE
+  TESTPYPI_PASSWORD: SECURE
+  PRODPYPI_USERNAME: SECURE
+  PRODPYPI_PASSWORD: SECURE
+
+# Define the stages
+stages:
+  - test
+  - deploy
+
+# Test with tox
+tox:
+  stage: test
+  image: python
+  script: 
+  - pip install tox
+  - tox
+  artifacts:
+    paths:
+      - htmlcov/
+
+# Deploy to staging PyPi.
+pypi_staging:
+  stage: deploy
+  image: python
+  script:
+    - echo "[server-login]" >> ~/.pypirc
+    - echo "repository=https://test.pypi.org/legacy/"  >> ~/.pypirc
+    - echo "username="${TESTPYPI_USERNAME} >> ~/.pypirc
+    - echo "password="${TESTPYPI_PASSWORD} >> ~/.pypirc
+    - python setup.py sdist bdist_wheel upload
+    - echo "" > ~/.pypirc && rm ~/.pypirc
+
+# Deploy to production PyPi, only major version
+pypi_production:
+  stage: deploy
+  image: python
+  script:
+    - echo "[server-login]" >> ~/.pypirc
+    - echo "username=" ${PRODPYPI_USERNAME} >> ~/.pypirc
+    - echo "password=" ${PRODPYPI_PASSWORD} >> ~/.pypirc
+    - python setup.py sdist bdist_wheel upload
+    - echo "" > ~/.pypirc && rm ~/.pypirc
+  only:
+    - /^\d+\.\d+\.\d+?$/  # PEP-440 compliant version (tags)
+  except:
+    - branches
+
+# Deploy the coverage report to gitlab's Page
+pages:
+  stage: deploy
+  image: alpine:latest
+  dependencies:
+    - tox
+  script:
+  - mv htmlcov public
+  artifacts:
+    paths:
+    - public
+  only:
+  - master
