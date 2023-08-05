@@ -1,0 +1,36 @@
+import abc
+import asyncio
+from typing import List
+
+from Cipher.core import CipherCore
+from Cipher.core.config import ConfigMeta, ConnectionConfig
+from Cipher.core.models import Channel, User, Target
+
+
+class Connection(abc.ABC):
+    config_class: ConfigMeta
+    type: str
+    multiline: bool
+
+    def __init__(self, core: CipherCore, conn_id: str, loop: asyncio.AbstractEventLoop): ...
+    id: str
+    core: CipherCore
+    loop: asyncio.AbstractEventLoop
+    channels: List[Channel]
+    users: List[User]
+    connected: bool
+
+    async def connect(self) -> None: ...
+    async def _connect(self) -> None: ...
+    async def disconnect(self) -> None: ...
+    async def _disconnect(self) -> None: ...
+    async def send_message(self, target: Target, message: str, source: str = '') -> None: ...
+    async def _send_message(self, target: Target, message: str, source: str = '') -> None: ...
+    def get_channel(self, name: str) -> Channel: ...
+    def get_user(self, name: str) -> User: ...
+    def get_message_maxlen(self, target: Target) -> int: ...
+    def get_message_maxlines(self, target: Target) -> int: ...
+
+    config: ConnectionConfig
+    c: ConnectionConfig
+    displayname: str
