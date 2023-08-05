@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.load &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.load</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">int</span>
+
+<span class="kn">import</span> <span class="nn">getpass</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="kn">from</span> <span class="nn">os</span> <span class="kn">import</span> <span class="n">path</span>
+<span class="kn">from</span> <span class="nn">six</span> <span class="kn">import</span> <span class="n">string_types</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span><span class="p">,</span> <span class="n">fill</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">layout</span><span class="p">,</span> <span class="n">version</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">ArgList</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">StringList</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">sv</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="n">ReadDataOption</span><span class="p">,</span> <span class="n">RemoteConnectionMethod</span><span class="p">,</span> <span class="n">VarLoadMode</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">_tecplot_loader_load_data</span><span class="p">(</span><span class="n">arglist</span><span class="p">,</span>
+                              <span class="n">frame</span><span class="p">,</span>
+                              <span class="n">read_data_option</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                              <span class="n">reset_style</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                              <span class="n">initial_plot_first_zone_only</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                              <span class="n">initial_plot_type</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                              <span class="n">assign_strand_ids</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                              <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="n">frame</span> <span class="ow">or</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span>
+
+    <span class="c1"># If read_data_option is append and there is no data, we</span>
+    <span class="c1"># need to silently change it to &quot;Replace in Active Frame&quot;</span>
+    <span class="k">if</span> <span class="n">read_data_option</span> <span class="o">==</span> <span class="n">ReadDataOption</span><span class="o">.</span><span class="n">Append</span> <span class="ow">and</span> <span class="p">(</span>
+                <span class="ow">not</span> <span class="n">frame</span><span class="o">.</span><span class="n">has_dataset</span> <span class="ow">or</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="n">read_data_option</span> <span class="o">=</span> <span class="n">ReadDataOption</span><span class="o">.</span><span class="n">ReplaceInActiveFrame</span>
+    <span class="k">if</span> <span class="n">read_data_option</span> <span class="o">==</span> <span class="n">ReadDataOption</span><span class="o">.</span><span class="n">ReplaceInActiveFrame</span><span class="p">:</span>
+        <span class="n">read_data_option</span> <span class="o">=</span> <span class="bp">None</span>  <span class="c1"># Replace in active frame is the TecUtil default</span>
+
+    <span class="k">with</span> <span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+        <span class="n">arglist</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="o">**</span><span class="p">{</span>
+            <span class="n">sv</span><span class="o">.</span><span class="n">READDATAOPTION</span><span class="p">:</span> <span class="n">read_data_option</span><span class="p">,</span>
+            <span class="n">sv</span><span class="o">.</span><span class="n">RESETSTYLE</span><span class="p">:</span> <span class="n">reset_style</span><span class="p">,</span>
+            <span class="n">sv</span><span class="o">.</span><span class="n">INITIALPLOTFIRSTZONEONLY</span><span class="p">:</span> <span class="n">initial_plot_first_zone_only</span><span class="p">,</span>
+            <span class="n">sv</span><span class="o">.</span><span class="n">INITIALPLOTTYPE</span><span class="p">:</span> <span class="n">initial_plot_type</span><span class="p">,</span>
+            <span class="n">sv</span><span class="o">.</span><span class="n">ASSIGNSTRANDIDS</span><span class="p">:</span> <span class="n">assign_strand_ids</span><span class="p">,</span>
+            <span class="n">sv</span><span class="o">.</span><span class="n">ADDZONESTOEXISTINGSTRANDS</span><span class="p">:</span> <span class="n">add_zones_to_existing_strands</span><span class="p">})</span>
+
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;loading data:&#39;</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">arglist</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">k</span> <span class="o">==</span> <span class="n">sv</span><span class="o">.</span><span class="n">FILENAMESORINSTRUCTIONS</span><span class="p">:</span>
+                    <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">    {}:&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">v</span><span class="p">:</span>
+                        <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">        {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">    {}: {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetReadX</span><span class="p">(</span><span class="n">arglist</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span>
+
+
+<div class="viewcode-block" id="load_cgns"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.load_cgns">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">load_cgns</span><span class="p">(</span><span class="n">filenames</span><span class="p">,</span>
+
+              <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+              <span class="n">read_data_option</span><span class="o">=</span><span class="n">ReadDataOption</span><span class="o">.</span><span class="n">Append</span><span class="p">,</span>
+              <span class="n">reset_style</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">initial_plot_first_zone_only</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">initial_plot_type</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+              <span class="n">zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+              <span class="n">load_convergence_history</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">combine_fe_sections</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">average_to_nodes</span><span class="o">=</span><span class="s1">&#39;Arithmetic&#39;</span><span class="p">,</span>
+              <span class="n">uniform_grid</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">assign_strand_ids</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+              <span class="n">include_boundary_conditions</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read CGNS data files.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filenames (`string &lt;str&gt;` or `list` of `strings &lt;str&gt;`): CGNS data</span>
+<span class="sd">            files to be read. (See note below conerning absolute and relative</span>
+<span class="sd">            paths.)</span>
+<span class="sd">        frame (`Frame`, optional): The `Frame` to attach the resulting</span>
+<span class="sd">            `Dataset`. If `None`, the currently active `Frame` is used and the</span>
+<span class="sd">            zones are appended by default.</span>
+<span class="sd">        read_data_option (`ReadDataOption`, optional): Specify how the data</span>
+<span class="sd">            is loaded into Tecplot. (default: `ReadDataOption.Append`)</span>
+
+<span class="sd">            Possible values are:</span>
+<span class="sd">                * `ReadDataOption.ReplaceInActiveFrame`</span>
+<span class="sd">                    Remove the dataset from the active frame prior to reading</span>
+<span class="sd">                    in the new dataset. If other frames use the same `DataSet`</span>
+<span class="sd">                    in the active frame, they will continue to use the old one.</span>
+<span class="sd">                * `ReadDataOption.Append`</span>
+<span class="sd">                    Append the new `DataSet` to the dataset to the existing dataset.</span>
+<span class="sd">                * `ReadDataOption.Replace`</span>
+<span class="sd">                    Replace the `DataSet` attached to the active frame and to all</span>
+<span class="sd">                    other frames that use the same `DataSet`.</span>
+<span class="sd">        reset_style (`boolean &lt;bool&gt;`, optional): Reset the style for</span>
+<span class="sd">            destination `Frame`, if `False`, the `Frame`&#39;s current style is</span>
+<span class="sd">            preserved. (default: `True`)</span>
+<span class="sd">        initial_plot_first_zone_only (`boolean &lt;bool&gt;`, optional): Informs</span>
+<span class="sd">            the |Tecplot Engine| that after the data is loaded it only needs to</span>
+<span class="sd">            activate the first enabled `Zone &lt;data_access&gt;` for the initial</span>
+<span class="sd">            plot. This option is particularly useful if you have many `Zones</span>
+<span class="sd">            &lt;data_access&gt;` and want to get the data into the |Tecplot Engine|</span>
+<span class="sd">            and the first `Zone &lt;data_access&gt;` drawn as fast as possible. The</span>
+<span class="sd">            inactive `Zones &lt;data_access&gt;` can always be activated when needed.</span>
+<span class="sd">            (default: `False`)</span>
+<span class="sd">        initial_plot_type (`PlotType`, optional): Forces a specific type of</span>
+<span class="sd">            plot upon loading of the data. Only used if *resetstyle* is `True`.</span>
+<span class="sd">            To have |Tecplot 360| determine the most appropriate plot type</span>
+<span class="sd">            for the data, use `PlotType.Automatic`. Possible values are:</span>
+<span class="sd">            `PlotType.Automatic` (default), `Cartesian3D`, `Cartesian2D`,</span>
+<span class="sd">            `XYLine`, `PlotType.Sketch`, `PolarLine`.</span>
+
+<span class="sd">        zones (`list` of `integers &lt;int&gt;`, optional): List of zone indexes to</span>
+<span class="sd">            load starting from zero. `None` implies loading all zones.</span>
+<span class="sd">            (default: `None`)</span>
+<span class="sd">        variables (`list` of `integers &lt;int&gt;`, optional): List of variable</span>
+<span class="sd">            indexes, beyond the first coordinate variables, to load starting</span>
+<span class="sd">            from zero. `None` implies loading all variables. The grid will</span>
+<span class="sd">            always be loaded and an index of zero indicates the first</span>
+<span class="sd">            non-coordinate variable. (default: `None`)</span>
+
+<span class="sd">        load_convergence_history (`boolean &lt;bool&gt;`, optional): Load the</span>
+<span class="sd">            global convergence history rather than any grid or solution data.</span>
+<span class="sd">            (default: `False`)</span>
+<span class="sd">        combine_fe_sections (`boolean &lt;bool&gt;`, optional): Combine all</span>
+<span class="sd">            finite-element sections with the zone cell-dimension into one</span>
+<span class="sd">            zone. (default: `False`)</span>
+<span class="sd">        average_to_nodes (`string &lt;str&gt;`, optional): Average</span>
+<span class="sd">            cell-centered data to grid nodes using the specified method.</span>
+<span class="sd">            (Options: `None`, &quot;Arithmetic&quot;, &quot;Laplacian&quot;, default: &quot;Arithmetic&quot;)</span>
+<span class="sd">        uniform_grid (`boolean &lt;bool&gt;`, optional): Indicates the grid</span>
+<span class="sd">            structure is the same for all time steps. (default: `True`)</span>
+<span class="sd">        assign_strand_ids (`boolean &lt;bool&gt;`, optional): Assign strand ID&#39;s to</span>
+<span class="sd">            zones that have a strand ID of -1. (default: `True`)</span>
+<span class="sd">        add_zones_to_existing_strands (`boolean &lt;bool&gt;`, optional): Add the</span>
+<span class="sd">            `Zones &lt;data_access&gt;` to matching strands, if they exist.</span>
+<span class="sd">            Otherwise, if the new data specifies strands, new ones will be</span>
+<span class="sd">            created beginning after the last strand in the `Dataset`. (default:</span>
+<span class="sd">            `False`)</span>
+
+<span class="sd">        include_boundary_conditions (`boolean &lt;bool&gt;`, optional): Load the</span>
+<span class="sd">            boundary conditions along with the data. Upon loading, the</span>
+<span class="sd">            associated fieldmaps will remain inactive. For unstructured data,</span>
+<span class="sd">            boundary conditions are always loaded and this option is ignored.</span>
+<span class="sd">            (default: `True`)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `Dataset`: The `Dataset` holding the loaded data.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: Internal error when loading data.</span>
+<span class="sd">        `TecplotTypeError`: Invalid input.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="n">avg_to_nodes_opts</span> <span class="o">=</span> <span class="p">[</span><span class="bp">None</span><span class="p">,</span> <span class="s1">&#39;Arithmetic&#39;</span><span class="p">,</span> <span class="s1">&#39;Laplacian&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">average_to_nodes</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">avg_to_nodes_opts</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;average_to_nodes must be one of: &#39;</span>
+            <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">avg_to_nodes_opts</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">StringList</span><span class="p">(</span><span class="s1">&#39;STANDARDSYNTAX&#39;</span><span class="p">,</span> <span class="s1">&#39;1.0&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">instr</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">DATASETREADER</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;CGNS LOADER&#39;</span>
+            <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LoaderVersion&#39;</span><span class="p">,</span> <span class="s1">&#39;V3&#39;</span><span class="p">]</span>
+
+            <span class="c1"># We need to add the cgns library version to the arglist,</span>
+            <span class="c1"># although this setting is not exposed in the API.</span>
+            <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;CgnsLibraryVersion&#39;</span><span class="p">,</span> <span class="s1">&#39;3.1.4&#39;</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">filenames</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+                <span class="n">filenames</span> <span class="o">=</span> <span class="n">filenames</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;,&#39;</span><span class="p">)</span>
+            <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;FILELIST_CGNSFILES&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">filenames</span><span class="p">))]</span>
+            <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">filenames</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">zones</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">indexes</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">z</span><span class="p">))</span> <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;ZoneList&#39;</span><span class="p">,</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">indexes</span><span class="p">)]</span>
+            <span class="k">if</span> <span class="n">variables</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">indexes</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">variables</span><span class="p">]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;VarList&#39;</span><span class="p">,</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">indexes</span><span class="p">)]</span>
+
+            <span class="k">if</span> <span class="n">average_to_nodes</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AverageToNodes&#39;</span><span class="p">,</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">average_to_nodes</span> <span class="o">!=</span> <span class="s1">&#39;Arithmetic&#39;</span><span class="p">:</span>
+                <span class="c1"># Default for &#39;AverageToNoes&#39; is &#39;Yes&#39;</span>
+                <span class="c1"># Default for AveragingMethods is &#39;Arithmetic&#39;</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AveragingMethod&#39;</span><span class="p">,</span> <span class="n">average_to_nodes</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">uniform_grid</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;UniformGridStructure&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">uniform_grid</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">combine_fe_sections</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span>
+                    <span class="s1">&#39;SectionLoad&#39;</span><span class="p">,</span> <span class="s1">&#39;SeparateZones&#39;</span>
+                    <span class="k">if</span> <span class="n">combine_fe_sections</span> <span class="k">else</span> <span class="s1">&#39;Combine&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">include_boundary_conditions</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LoadBCs&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">include_boundary_conditions</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">load_convergence_history</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LoadConvergenceHistory&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">load_convergence_history</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">assign_strand_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AssignStrandIDs&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">assign_strand_ids</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">FILENAMESORINSTRUCTIONS</span><span class="p">]</span> <span class="o">=</span> <span class="n">instr</span>
+
+            <span class="k">return</span> <span class="n">_tecplot_loader_load_data</span><span class="p">(</span>
+                <span class="n">arglist</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="n">frame</span><span class="p">,</span> <span class="n">read_data_option</span><span class="o">=</span><span class="n">read_data_option</span><span class="p">,</span>
+                <span class="n">reset_style</span><span class="o">=</span><span class="n">reset_style</span><span class="p">,</span>
+                <span class="n">initial_plot_first_zone_only</span><span class="o">=</span><span class="n">initial_plot_first_zone_only</span><span class="p">,</span>
+                <span class="n">initial_plot_type</span><span class="o">=</span><span class="n">initial_plot_type</span><span class="p">,</span>
+                <span class="n">assign_strand_ids</span><span class="o">=</span><span class="n">assign_strand_ids</span><span class="p">,</span>
+                <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="n">add_zones_to_existing_strands</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="load_fluent"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.load_fluent">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">load_fluent</span><span class="p">(</span><span class="n">case_filenames</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">data_filenames</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                <span class="n">append</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                <span class="n">zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                <span class="n">all_poly_zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">average_to_nodes</span><span class="o">=</span><span class="s1">&#39;Arithmetic&#39;</span><span class="p">,</span>
+                <span class="n">time_interval</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">assign_strand_ids</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                <span class="n">include_particle_data</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">include_additional_quantities</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                <span class="n">save_uncompressed_files</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read Fluent data files.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        case_filenames (`string &lt;str&gt;` or `list` of `strings &lt;str&gt;`, optional):</span>
+<span class="sd">            Case (*.cas*, *.cas.gz*) files to be read. Compressed files with extension *.gz* are supported. (See note below conerning absolute and relative paths.)</span>
+<span class="sd">        data_filenames (`string &lt;str&gt;` or `list` of `strings &lt;str&gt;`, optional):</span>
+<span class="sd">            Data (*.dat*, *.xml*, *.dat.gz*, *.fdat*, *.fdat.gz*, etc.) files to be read. Compressed files with extension *.gz* are supported.</span>
+<span class="sd">        frame (`Frame`, optional): The `Frame` to attach the resulting</span>
+<span class="sd">            `Dataset`. If `None`, the currently active `Frame` is used and the</span>
+<span class="sd">            zones are appended by default.</span>
+<span class="sd">        append (`boolean &lt;bool&gt;`, optional): Append the data to the existing</span>
+<span class="sd">            `Dataset`. If `False`, the existing data attached to the `Frame` is</span>
+<span class="sd">            deleted and replaced. (default: `True`)</span>
+
+<span class="sd">        zones (`string &lt;str&gt;` or `list` of `integers &lt;int&gt;`, optional): List of</span>
+<span class="sd">            zone indexes (zero-based) to load or string specifying the type of</span>
+<span class="sd">            zones to load. Possible values are: &quot;CellsAndBoundaries&quot;,</span>
+<span class="sd">            &quot;CellsOnly&quot; and &quot;BoundariesOnly&quot;. Specifying one of these options</span>
+<span class="sd">            is mutually exclusive with the ``variables`` option. (default:</span>
+<span class="sd">            &quot;CellsAndBoundaries&quot;)</span>
+<span class="sd">        variables (`list` of `strings &lt;str&gt;`, optional): List of variable</span>
+<span class="sd">            names to load. `None` implies loading all variables. (default:</span>
+<span class="sd">            `None`)</span>
+
+<span class="sd">        all_poly_zones (`boolean &lt;bool&gt;`, optional): Converts all zones to</span>
+<span class="sd">            Tecplot polytope (polyhedral or polygonal) zones. (default:</span>
+<span class="sd">            `False`)</span>
+<span class="sd">        average_to_nodes (`string &lt;str&gt;`, optional): Average</span>
+<span class="sd">            cell-centered data to grid nodes using the specified method.</span>
+<span class="sd">            (Options: `None`, &quot;Arithmetic&quot;, &quot;Laplacian&quot;, default: &quot;Arithmetic&quot;)</span>
+<span class="sd">        time_interval (`float`, optional): Use a constant time interval between</span>
+<span class="sd">            each *.dat* file. If `None`, the flow-data parameter of each</span>
+<span class="sd">            solution *.dat* file is used. (default: `None`)</span>
+<span class="sd">        assign_strand_ids (`boolean &lt;bool&gt;`, optional): Assign strand ID&#39;s to</span>
+<span class="sd">            zones that have a strand ID of -1. (default: `True`)</span>
+
+<span class="sd">            .. note::</span>
+<span class="sd">                assign_strand_ids only applies if you have also provided a</span>
+<span class="sd">                time_interval, otherwise it will be ignored.</span>
+<span class="sd">        add_zones_to_existing_strands (`boolean &lt;bool&gt;`, optional): Add the</span>
+<span class="sd">            `Zones &lt;data_access&gt;` to matching strands, if they exist.</span>
+<span class="sd">            Otherwise, if the new data specifies strands, new ones will be</span>
+<span class="sd">            created beginning after the last strand in the `Dataset`. (default:</span>
+<span class="sd">            `False`)</span>
+
+<span class="sd">        include_particle_data (`boolean &lt;bool&gt;`, optional): Load particle</span>
+<span class="sd">            data from the *.dat* files. If loading particle data from an XML</span>
+<span class="sd">            file, the XML file should be included in the ``data_filenames``</span>
+<span class="sd">            list. (default: `False`)</span>
+<span class="sd">        include_additional_quantities (`boolean &lt;bool&gt;`, optional): Load</span>
+<span class="sd">            quantities that were derived from the FLUENT&#39;s standard quantities.</span>
+<span class="sd">            (default: `True`) *New in Tecplot 360 2017 R2*.</span>
+<span class="sd">        save_uncompressed_files (`boolean &lt;bool&gt;`, optional): Save the</span>
+<span class="sd">            uncompressed files to the compressed files&#39; location.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `Dataset`: The `Dataset` holding the loaded data.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: Internal error when loading data.</span>
+<span class="sd">        `TecplotTypeError`: In-valid input.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    Notes:</span>
+<span class="sd">        The ``zones`` option takes either a `list` of zone indexes to be</span>
+<span class="sd">        imported or one of &quot;CellsAndBoundaries&quot;, &quot;CellsOnly&quot; or</span>
+<span class="sd">        &quot;BoundariesOnly&quot; to indicate the type of zones the user wants to load,</span>
+<span class="sd">        however these options are mutually exclusive with the ``variables``</span>
+<span class="sd">        option::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; dataset = tecplot.data.load_fluent([&#39;one.cas&#39;, &#39;two.cas&#39;],</span>
+<span class="sd">            ...     data_filenames=[&#39;one.dat&#39;, &#39;two.dat&#39;],</span>
+<span class="sd">            ...     variables = [&#39;Pressure&#39;,&#39;Velocity&#39;],</span>
+<span class="sd">            ...     zones = [0,1,3])</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">case_filenames</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+        <span class="n">case_filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">case_filenames</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data_filenames</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+        <span class="n">data_filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">data_filenames</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="n">zone_types_opts</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;CellsAndBoundaries&#39;</span><span class="p">,</span> <span class="s1">&#39;CellsOnly&#39;</span><span class="p">,</span> <span class="s1">&#39;BoundariesOnly&#39;</span><span class="p">]</span>
+        <span class="n">avg_to_nodes_opts</span> <span class="o">=</span> <span class="p">[</span><span class="bp">None</span><span class="p">,</span> <span class="s1">&#39;Arithmetic&#39;</span><span class="p">,</span> <span class="s1">&#39;Laplacian&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">zones</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">zones</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">zone_types_opts</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Zones must be list of indexes or one of: &#39;</span>
+                <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zone_types_opts</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">variables</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Loading a subset of variables is allowed only if&#39;</span>
+                <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39; zones is None or a list of zones.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">case_filenames</span> <span class="ow">or</span> <span class="n">data_filenames</span><span class="p">)</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="s1">&#39;You must specify a case or data file.&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">case_filenames</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">data_filenames</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Case file is required when loading multiple data files&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">average_to_nodes</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">avg_to_nodes_opts</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;average_to_nodes must be one of: &#39;</span>
+            <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">avg_to_nodes_opts</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">include_additional_quantities</span><span class="p">:</span>
+            <span class="n">sdk_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_required</span><span class="p">:</span>
+                <span class="k">def</span> <span class="nf">format_msg</span><span class="p">(</span><span class="n">msg</span><span class="p">):</span>
+                    <span class="sd">&quot;&quot;&quot;reflow message, adjusting spaces&quot;&quot;&quot;</span>
+                    <span class="k">return</span> <span class="n">fill</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">split</span><span class="p">())),</span> <span class="n">width</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Out-of-date Tecplot 360.</span><span class="se">\n</span><span class="s1">&#39;</span>
+                <span class="n">msg</span> <span class="o">+=</span> <span class="n">format_msg</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                    Loading of FLUENT&#39;s additional quantities requires Tecplot</span>
+<span class="s1">                    360 version {} R{} or later. Data will be loaded without</span>
+<span class="s1">                    these additional quantities.&#39;&#39;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">*</span><span class="n">sdk_required</span><span class="p">))</span>
+                <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">StringList</span><span class="p">(</span><span class="s1">&#39;STANDARDSYNTAX&#39;</span><span class="p">,</span> <span class="s1">&#39;1.0&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">instr</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">DATASETREADER</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Fluent Data Loader&#39;</span>
+
+            <span class="k">if</span> <span class="n">append</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;Append&#39;</span><span class="p">,</span> <span class="s1">&#39;Yes&#39;</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">case_filenames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">data_filenames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">nfiles</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">case_filenames</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">data_filenames</span><span class="p">)</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LoadOption&#39;</span><span class="p">,</span> <span class="s1">&#39;MultipleCaseAndData&#39;</span><span class="p">,</span>
+                              <span class="s1">&#39;FILELIST_Files&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">nfiles</span><span class="p">)]</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="nb">list</span><span class="p">(</span><span class="n">case_filenames</span><span class="p">)</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">data_filenames</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LoadOption&#39;</span><span class="p">,</span> <span class="s1">&#39;MultipleCaseAndData&#39;</span><span class="p">,</span>
+                              <span class="s1">&#39;FILELIST_Files&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">case_filenames</span><span class="p">))]</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="nb">list</span><span class="p">(</span><span class="n">case_filenames</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LoadOption&#39;</span><span class="p">,</span> <span class="s1">&#39;ResidualsOnly&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;FILENAME_DataFile&#39;</span><span class="p">,</span> <span class="n">data_filenames</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+
+            <span class="k">if</span> <span class="n">time_interval</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;UnsteadyOption&quot;</span><span class="p">,</span> <span class="s1">&#39;ApplyConstantTimeInterval&#39;</span><span class="p">]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;TimeInterval&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">time_interval</span><span class="p">))]</span>
+
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">zones</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;GridZones&#39;</span><span class="p">,</span> <span class="n">zones</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="p">(</span><span class="n">zones</span> <span class="ow">or</span> <span class="n">variables</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;GridZones&quot;</span><span class="p">,</span> <span class="s1">&#39;SelectedZones&#39;</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">zones</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">zone_indexes</span> <span class="o">=</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">z</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">)</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;ZoneList&#39;</span><span class="p">,</span> <span class="n">zone_indexes</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">variables</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">var_names</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">variables</span><span class="p">)</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;VarNameList&#39;</span><span class="p">,</span> <span class="n">var_names</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">include_particle_data</span><span class="p">:</span>  <span class="c1"># &quot;No&quot; is the default</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;IncludeParticleData&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">all_poly_zones</span><span class="p">:</span>  <span class="c1"># &quot;No&quot; is the default</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AllPolyZones&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">average_to_nodes</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AverageToNodes&#39;</span><span class="p">,</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">average_to_nodes</span> <span class="o">!=</span> <span class="s1">&#39;Arithmetic&#39;</span><span class="p">:</span>
+                <span class="c1"># Default for &#39;AverageToNoes&#39; is &#39;Yes&#39;</span>
+                <span class="c1"># Default for AveragingMethods is &#39;Arithmetic&#39;</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AveragingMethod&#39;</span><span class="p">,</span> <span class="n">average_to_nodes</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">assign_strand_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AssignStrandIDs&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">assign_strand_ids</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">add_zones_to_existing_strands</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AddZonesToExistingStrands&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">add_zones_to_existing_strands</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="c1"># Always explicitly provide SaveUncompressedFiles</span>
+            <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;SaveUncompressedFiles&#39;</span><span class="p">,</span>
+                        <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">save_uncompressed_files</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">):</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LoadAdditionalQuantities&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">include_additional_quantities</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">FILENAMESORINSTRUCTIONS</span><span class="p">]</span> <span class="o">=</span> <span class="n">instr</span>
+
+            <span class="k">return</span> <span class="n">_tecplot_loader_load_data</span><span class="p">(</span><span class="n">arglist</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="n">frame</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="load_plot3d"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.load_plot3d">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">load_plot3d</span><span class="p">(</span><span class="n">grid_filenames</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">solution_filenames</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">function_filenames</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                <span class="n">name_filename</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                <span class="n">append</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                <span class="c1"># setting any of these three implies auto_detect=False</span>
+                <span class="n">data_structure</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>  <span class="c1"># (1D|2D|3DP|3DW|UNSTRUCTURED)</span>
+                <span class="n">is_multi_grid</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>  <span class="c1"># (True|False)</span>
+                <span class="n">style</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>  <span class="c1"># (PLOT2DCLASSIC|PLOT3DFUNCTION|OVERFLOW)</span>
+
+                <span class="n">ascii_is_double</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>  <span class="c1"># (True|False)</span>
+                <span class="n">ascii_has_blanking</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>  <span class="c1"># (True|False)</span>
+                <span class="n">uniform_grid</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>  <span class="c1"># (True|False)</span>
+
+                <span class="n">assign_strand_ids</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                <span class="n">append_function_variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>  <span class="c1"># (True|False)</span>
+                <span class="n">include_boundaries</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read Plot3D data files.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        grid_filenames (`list` of `strings &lt;str&gt;`, optional): One or more grid</span>
+<span class="sd">            file names to be read. (See note below conerning absolute and</span>
+<span class="sd">            relative paths.)</span>
+<span class="sd">        solution_filenames (`list` of `strings &lt;str&gt;`, optional): One or more</span>
+<span class="sd">            solution data file names to be read.</span>
+<span class="sd">        function_filenames (`list` of `strings &lt;str&gt;`, optional): One or more</span>
+<span class="sd">            function file names.</span>
+<span class="sd">        name_filename (`string &lt;str&gt;`, optional): Path to the name file.</span>
+<span class="sd">        frame (`Frame`, optional): The `Frame` to attach the resulting</span>
+<span class="sd">            `Dataset`. If `None`, the currently active `Frame` is used and the</span>
+<span class="sd">            zones are appended by default.</span>
+<span class="sd">        append (`boolean &lt;bool&gt;`, optional): Append the data to the existing</span>
+<span class="sd">            `Dataset`. If `False`, the existing data attached to the `Frame` is</span>
+<span class="sd">            deleted and replaced. (default: `True`)</span>
+<span class="sd">        data_structure (`string &lt;str&gt;`, optional): Specifies the data</span>
+<span class="sd">            structure and overrides the automatic detection. Options are:</span>
+<span class="sd">            ``1D``, ``2D``, ``3DP``, ``3DW``, ``UNSTRUCTURED``. Setting this</span>
+<span class="sd">            requires ``is_multi_grid`` and ``style`` to be set as well.</span>
+<span class="sd">        is_multi_grid (`boolean &lt;bool&gt;`, optional): Sets data as multi-grid</span>
+<span class="sd">            and overrides the automatic data structure detection. Setting</span>
+<span class="sd">            this requires ``data_structure`` and ``style`` to be set as well.</span>
+<span class="sd">        style (`boolean &lt;bool&gt;`, optional): Specifies the data style and</span>
+<span class="sd">            overrides the automatic data structure detection. Options are:</span>
+<span class="sd">            ``PLOT3DCLASSIC``, ``PLOT3DFUNCTION``, ``OVERFLOW``. Setting this</span>
+<span class="sd">            requires ``data_structure`` and ``is_multi_grid`` to be set as</span>
+<span class="sd">            well.</span>
+
+<span class="sd">        ascii_is_double (`boolean &lt;bool&gt;`, optional): Indicates that</span>
+<span class="sd">            floating-point numbers found in the text data files should be</span>
+<span class="sd">            store with 64-bit precision. (default: `False`)</span>
+<span class="sd">        ascii_has_blanking (`boolean &lt;bool&gt;`, optional): Indicates that the</span>
+<span class="sd">            text data files contain blanking. (default: `False`)</span>
+<span class="sd">        uniform_grid (`boolean &lt;bool&gt;`, optional): Indicates the grid</span>
+<span class="sd">            structure is the same for all time steps. (default: `True`)</span>
+
+<span class="sd">        assign_strand_ids (`boolean &lt;bool&gt;`, optional): Assign strand ID&#39;s to</span>
+<span class="sd">            zones that have a strand ID of -1. (default: `True`)</span>
+<span class="sd">        add_zones_to_existing_strands (`boolean &lt;bool&gt;`, optional): Add the</span>
+<span class="sd">            `Zones &lt;data_access&gt;` to matching strands, if they exist.</span>
+<span class="sd">            Otherwise, if the new data specifies strands, new ones will be</span>
+<span class="sd">            created beginning after the last strand in the `Dataset`. (default:</span>
+<span class="sd">            `True`)</span>
+<span class="sd">        append_function_variables (`boolean &lt;bool&gt;`, optional): Append</span>
+<span class="sd">            variables in function files to those found in solution files.</span>
+<span class="sd">            (default: `False`)</span>
+<span class="sd">        include_boundaries (`boolean &lt;bool&gt;`, optional): Loads boundary zones</span>
+<span class="sd">            found in the &quot;.g.fvbnd&quot; file located in the same directory as the</span>
+<span class="sd">            grid file, if available. (default: `True`)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `Dataset`: The `Dataset` holding the loaded data.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: Internal error when loading data.</span>
+<span class="sd">        `TecplotValueError`: In-valid input.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    .. note:: Data structure is automatically detected by default.</span>
+
+<span class="sd">        The options ``data_structure``, ``is_multi_grid`` and ``style``</span>
+<span class="sd">        must be supplied together or not at all. When all of these are</span>
+<span class="sd">        `None`, the data structure is automatically detected.</span>
+
+<span class="sd">    The variables from the function files can be appended to the dataset</span>
+<span class="sd">    upon loading::</span>
+
+<span class="sd">        &gt;&gt;&gt; dataset = tecplot.data.load_plot3d(</span>
+<span class="sd">        ...     grid_filenames = &#39;data.g&#39;,</span>
+<span class="sd">        ...     solution_filenames = [&#39;t0.q&#39;, &#39;t1.q&#39;],</span>
+<span class="sd">        ...     function_filenames = [&#39;t0.f&#39;, &#39;t1.f&#39;],</span>
+<span class="sd">        ...     append_function_variables = True)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">grid_filenames</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+        <span class="n">grid_filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">grid_filenames</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">solution_filenames</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+        <span class="n">solution_filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">solution_filenames</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">function_filenames</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+        <span class="n">function_filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">function_filenames</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="n">data_structure_opts</span> <span class="o">=</span> <span class="p">[</span><span class="bp">None</span><span class="p">,</span> <span class="s1">&#39;1D&#39;</span><span class="p">,</span> <span class="s1">&#39;2D&#39;</span><span class="p">,</span> <span class="s1">&#39;3DP&#39;</span><span class="p">,</span> <span class="s1">&#39;3DW&#39;</span><span class="p">,</span> <span class="s1">&#39;UNSTRUCTURED&#39;</span><span class="p">]</span>
+        <span class="n">style_opts</span> <span class="o">=</span> <span class="p">[</span><span class="bp">None</span><span class="p">,</span> <span class="s1">&#39;PLOT3DCLASSIC&#39;</span><span class="p">,</span> <span class="s1">&#39;PLOT3DFUNCTION&#39;</span><span class="p">,</span> <span class="s1">&#39;OVERFLOW&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">data_structure</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">data_structure_opts</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;data_structure must be one of: &#39;</span>
+            <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">data_structure_opts</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">style</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">style_opts</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;style must be one of: &#39;</span>
+            <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">style_opts</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">grid_filenames</span> <span class="ow">and</span> <span class="n">solution_filenames</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">grid_filenames</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span> <span class="ow">and</span> \
+               <span class="nb">len</span><span class="p">(</span><span class="n">grid_filenames</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">solution_filenames</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                    You must specify a single grid file or</span>
+<span class="s1">                    the same number of grid and solution files.&#39;&#39;&#39;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">solution_filenames</span> <span class="ow">and</span> <span class="n">function_filenames</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">solution_filenames</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">function_filenames</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                    You must specify the same number of</span>
+<span class="s1">                    solution and function files.&#39;&#39;&#39;</span><span class="p">))</span>
+        <span class="n">autodetect_opts</span> <span class="o">=</span> <span class="p">[</span><span class="n">data_structure</span><span class="p">,</span> <span class="n">is_multi_grid</span><span class="p">,</span> <span class="n">style</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">sum</span><span class="p">([</span><span class="n">x</span> <span class="ow">is</span> <span class="bp">None</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">autodetect_opts</span><span class="p">])</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">]:</span>
+            <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                The options: data_structure, is_multi_grid and style</span>
+<span class="s1">                must be supplied all together or not at all.&#39;&#39;&#39;</span><span class="p">))</span>
+
+    <span class="n">frame</span> <span class="o">=</span> <span class="n">frame</span> <span class="ow">or</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span>
+
+    <span class="k">with</span> <span class="n">StringList</span><span class="p">(</span><span class="s1">&#39;STANDARDSYNTAX&#39;</span><span class="p">,</span> <span class="s1">&#39;1.0&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">instr</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">DATASETREADER</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;PLOT3D Loader&#39;</span>
+
+            <span class="n">preexisting_dataset</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">has_dataset</span> <span class="ow">and</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span>
+            <span class="k">if</span> <span class="n">append</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">append</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">preexisting_dataset</span><span class="p">:</span>
+                        <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;Append&#39;</span><span class="p">,</span> <span class="s1">&#39;Yes&#39;</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;Append&#39;</span><span class="p">,</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">grid_filenames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;FILELIST_GRIDFILES&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">grid_filenames</span><span class="p">))]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="n">grid_filenames</span>
+            <span class="k">if</span> <span class="n">solution_filenames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;FILELIST_SOLUTIONFILES&#39;</span><span class="p">,</span>
+                          <span class="nb">str</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">solution_filenames</span><span class="p">))]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="n">solution_filenames</span>
+            <span class="k">if</span> <span class="n">function_filenames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;FILELIST_FUNCTIONFILES&#39;</span><span class="p">,</span>
+                          <span class="nb">str</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">function_filenames</span><span class="p">))]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="n">function_filenames</span>
+            <span class="k">if</span> <span class="n">name_filename</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;FILENAME_NAMEFILE&#39;</span><span class="p">,</span> <span class="n">name_filename</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">data_structure</span> <span class="ow">or</span> <span class="n">is_multi_grid</span> <span class="ow">or</span> <span class="n">style</span><span class="p">)</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AUTODETECT&#39;</span><span class="p">,</span> <span class="s1">&#39;Yes&#39;</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;AUTODETECT&#39;</span><span class="p">,</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;DATASTRUCTURE&#39;</span><span class="p">,</span> <span class="n">data_structure</span><span class="p">]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;ISMULTIGRID&#39;</span><span class="p">,</span> <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">is_multi_grid</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;STYLE&#39;</span><span class="p">,</span> <span class="n">style</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">ascii_is_double</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;ASCIIISDOUBLE&#39;</span><span class="p">,</span> <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">ascii_is_double</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">ascii_has_blanking</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;ASCIIHASBLANK&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">ascii_has_blanking</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">uniform_grid</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;UNIFORMGRIDSTRUCTURE&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">uniform_grid</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">assign_strand_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;ASSIGNSTRANDIDS&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">assign_strand_ids</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">add_zones_to_existing_strands</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">preexisting_dataset</span><span class="p">:</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;ADDTOEXISTINGSTRANDS&#39;</span><span class="p">,</span>
+                              <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">add_zones_to_existing_strands</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">append_function_variables</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">solution_filenames</span> <span class="ow">or</span> <span class="n">preexisting_dataset</span><span class="p">:</span>
+                    <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;APPENDFUNCTIONVARIABLES&#39;</span><span class="p">,</span>
+                              <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">append_function_variables</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">include_boundaries</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;LOADBOUNDARY&#39;</span><span class="p">,</span> <span class="s1">&#39;Yes&#39;</span> <span class="k">if</span> <span class="n">include_boundaries</span> <span class="k">else</span> <span class="s1">&#39;No&#39;</span><span class="p">]</span>
+
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">FILENAMESORINSTRUCTIONS</span><span class="p">]</span> <span class="o">=</span> <span class="n">instr</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">_tecplot_loader_load_data</span><span class="p">(</span>
+                    <span class="n">arglist</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="n">frame</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">TecplotLogicError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;The boundary file does not&#39;</span><span class="p">):</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span><span class="o">.</span><span class="n">dataset</span>
+                <span class="k">raise</span></div>
+
+
+<div class="viewcode-block" id="load_tecplot"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.load_tecplot">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">load_tecplot</span><span class="p">(</span><span class="n">filenames</span><span class="p">,</span>
+
+                 <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                 <span class="n">read_data_option</span><span class="o">=</span><span class="n">ReadDataOption</span><span class="o">.</span><span class="n">Append</span><span class="p">,</span>
+                 <span class="n">reset_style</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">initial_plot_first_zone_only</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">initial_plot_type</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                 <span class="n">zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                 <span class="n">collapse</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">skip</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">assign_strand_ids</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                 <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                 <span class="n">include_text</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">include_geom</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">include_custom_labels</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">include_data</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read a tecplot data file.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filenames (`string &lt;str&gt;` or `list` of `strings &lt;str&gt;`): Files to be</span>
+<span class="sd">            read. (See note below conerning absolute and relative paths.)</span>
+<span class="sd">        frame (`Frame`, optional): The `Frame` to attach the resulting</span>
+<span class="sd">            `Dataset`. If `None`, the currently active `Frame` is used and the</span>
+<span class="sd">            zones are appended by default.</span>
+<span class="sd">        read_data_option (`ReadDataOption`, optional): Specify how the data</span>
+<span class="sd">            is loaded into Tecplot. (default: `ReadDataOption.Append`)</span>
+
+<span class="sd">            Possible values are:</span>
+<span class="sd">                * `ReadDataOption.ReplaceInActiveFrame`</span>
+<span class="sd">                    The `DataSet` in the active frame is replaced by the new</span>
+<span class="sd">                    `DataSet`. If other frames were using the same `DataSet`</span>
+<span class="sd">                    originally in the active frame, they will continue to use it.</span>
+<span class="sd">                * `ReadDataOption.Append`</span>
+<span class="sd">                    Append the new `DataSet` to the existing `DataSet`.</span>
+<span class="sd">                * `ReadDataOption.Replace`</span>
+<span class="sd">                    Replace the `DataSet` attached to the active frame, and to all</span>
+<span class="sd">                    other frames that use the same `DataSet`.</span>
+
+<span class="sd">                Default: `ReadDataOption.Append`</span>
+<span class="sd">        reset_style (`boolean &lt;bool&gt;`, optional): Reset the style for</span>
+<span class="sd">            destination `Frame`, if `False`, the `Frame`&#39;s current style is</span>
+<span class="sd">            preserved. (default: `True`)</span>
+<span class="sd">        initial_plot_first_zone_only (`boolean &lt;bool&gt;`, optional): Informs</span>
+<span class="sd">            the |Tecplot Engine| that after the data is loaded it only needs to</span>
+<span class="sd">            activate the first enabled `Zone &lt;data_access&gt;` for the initial</span>
+<span class="sd">            plot. This option is particularly useful if you have many `Zones</span>
+<span class="sd">            &lt;data_access&gt;` and want to get the data into the |Tecplot Engine|</span>
+<span class="sd">            and the first `Zone &lt;data_access&gt;` drawn as fast as possible. The</span>
+<span class="sd">            inactive `Zones &lt;data_access&gt;` can always be activated when needed.</span>
+<span class="sd">            (default: `False`)</span>
+<span class="sd">        initial_plot_type (`PlotType`, optional): Forces a specific type of</span>
+<span class="sd">            plot upon loading of the data. Only used if *resetstyle* is `True`.</span>
+<span class="sd">            To have |Tecplot 360| determine the most appropriate plot type</span>
+<span class="sd">            for the data, use `PlotType.Automatic`. Possible values are:</span>
+<span class="sd">            `PlotType.Automatic` (default), `Cartesian3D`, `Cartesian2D`,</span>
+<span class="sd">            `XYLine`, `PlotType.Sketch`, `PolarLine`.</span>
+
+<span class="sd">        zones (`set` of `integers &lt;int&gt;`, optional): Set of `Zones</span>
+<span class="sd">            &lt;data_access&gt;` to load. Use `None` to load all zones. (default:</span>
+<span class="sd">            `None`)</span>
+<span class="sd">        variables (`set` of `strings &lt;str&gt;` or `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            Set of `Variables &lt;Variable&gt;` to load. Use `None` to load all</span>
+<span class="sd">            variables. (default: `None`)</span>
+
+<span class="sd">        collapse (`boolean &lt;bool&gt;`, optional): Reindex `Zones &lt;data_access&gt;` and</span>
+<span class="sd">            `Variables &lt;Variable&gt;` if any are disabled. (default: `False`)</span>
+<span class="sd">        skip: (3-`tuple` of `integers &lt;int&gt;`, optional) The *ijk*-skip. A value</span>
+<span class="sd">            of (1,1,1) loads every data point in the *(i,j,k)* directions. A</span>
+<span class="sd">            value of (2,2,2) loads every other data point and so forth. This</span>
+<span class="sd">            only applies to ordered data. (default: (1,1,1))</span>
+<span class="sd">        assign_strand_ids (`boolean &lt;bool&gt;`, optional): Assign strand ID&#39;s to</span>
+<span class="sd">            zones that have a strand ID of -1. (default: `True`)</span>
+<span class="sd">        add_zones_to_existing_strands (`boolean &lt;bool&gt;`, optional): Add the</span>
+<span class="sd">            `Zones &lt;data_access&gt;` to matching strands, if they exist.</span>
+<span class="sd">            Otherwise, if the new data specifies strands, new ones will be</span>
+<span class="sd">            created beginning after the last strand in the `Dataset`. (default:</span>
+<span class="sd">            `False`)</span>
+
+<span class="sd">        include_text (`boolean &lt;bool&gt;`, optional): Load any text, geometries, or</span>
+<span class="sd">            custom labels (default: `True`)</span>
+<span class="sd">        include_geom (`boolean &lt;bool&gt;`, optional): Load geometries. (default:</span>
+<span class="sd">            `True`)</span>
+<span class="sd">        include_custom_labels (`boolean &lt;bool&gt;`, optional):  (default: `True`)</span>
+<span class="sd">        include_data (`boolean &lt;bool&gt;`, optional): Load data. Set this to</span>
+<span class="sd">            `False` if you only want annotations such as text or geometries.</span>
+<span class="sd">            (default: `True`)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `Dataset`: The `Dataset` holding the loaded data.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: Internal error when loading data.</span>
+<span class="sd">        `TecplotTypeError`: In-valid input.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="n">StringList</span><span class="p">(</span><span class="n">filenames</span><span class="p">)</span> <span class="k">as</span> <span class="n">fnames</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+            <span class="n">allocd</span> <span class="o">=</span> <span class="p">[]</span>
+
+            <span class="n">arglist</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="o">**</span><span class="p">{</span>
+                <span class="n">sv</span><span class="o">.</span><span class="n">DATASETREADER</span><span class="p">:</span> <span class="s1">&#39;TECPLOT&#39;</span><span class="p">,</span>
+                <span class="n">sv</span><span class="o">.</span><span class="n">FILENAMESORINSTRUCTIONS</span><span class="p">:</span> <span class="n">fnames</span><span class="p">,</span>
+                <span class="n">sv</span><span class="o">.</span><span class="n">INCLUDETEXT</span><span class="p">:</span> <span class="n">include_text</span><span class="p">,</span>
+                <span class="n">sv</span><span class="o">.</span><span class="n">INCLUDEGEOM</span><span class="p">:</span> <span class="n">include_geom</span><span class="p">,</span>
+                <span class="n">sv</span><span class="o">.</span><span class="n">INCLUDECUSTOMLABELS</span><span class="p">:</span> <span class="n">include_custom_labels</span><span class="p">,</span>
+                <span class="n">sv</span><span class="o">.</span><span class="n">INCLUDEDATA</span><span class="p">:</span> <span class="n">include_data</span><span class="p">,</span>
+                <span class="n">sv</span><span class="o">.</span><span class="n">COLLAPSEZONESANDVARS</span><span class="p">:</span> <span class="n">collapse</span><span class="p">})</span>
+
+            <span class="k">if</span> <span class="n">zones</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">zoneset</span> <span class="o">=</span> <span class="n">IndexSet</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span>
+                <span class="n">allocd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">zoneset</span><span class="p">)</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ZONELIST</span><span class="p">]</span> <span class="o">=</span> <span class="n">zoneset</span>
+
+            <span class="k">if</span> <span class="n">variables</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VARLOADMODE</span><span class="p">]</span> <span class="o">=</span> <span class="n">VarLoadMode</span><span class="o">.</span><span class="n">ByName</span>
+
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variables</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">int</span><span class="p">):</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VARLOADMODE</span><span class="p">]</span> <span class="o">=</span> <span class="n">VarLoadMode</span><span class="o">.</span><span class="n">ByPosition</span>
+                    <span class="n">varset</span> <span class="o">=</span> <span class="n">IndexSet</span><span class="p">(</span><span class="o">*</span><span class="n">variables</span><span class="p">)</span>
+                    <span class="n">allocd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">varset</span><span class="p">)</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VARPOSITIONLIST</span><span class="p">]</span> <span class="o">=</span> <span class="n">varset</span>
+                <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variables</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">string_types</span><span class="p">):</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VARLOADMODE</span><span class="p">]</span> <span class="o">=</span> <span class="n">VarLoadMode</span><span class="o">.</span><span class="n">ByName</span>
+                    <span class="n">var_string_list</span> <span class="o">=</span> <span class="n">StringList</span><span class="p">(</span><span class="o">*</span><span class="n">variables</span><span class="p">)</span>
+                    <span class="n">allocd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">var_string_list</span><span class="p">)</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VARNAMELIST</span><span class="p">]</span> <span class="o">=</span> <span class="n">var_string_list</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">err</span> <span class="o">=</span> <span class="s1">&#39;unknown type for variables: {}&#39;</span>
+                    <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">err</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">variables</span><span class="p">)))</span>
+            <span class="k">if</span> <span class="n">skip</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">k</span> <span class="o">=</span> <span class="n">skip</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ISKIP</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">JSKIP</span><span class="p">]</span> <span class="o">=</span> <span class="n">j</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">KSKIP</span><span class="p">]</span> <span class="o">=</span> <span class="n">k</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">_tecplot_loader_load_data</span><span class="p">(</span>
+                    <span class="n">arglist</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="n">frame</span><span class="p">,</span> <span class="n">read_data_option</span><span class="o">=</span><span class="n">read_data_option</span><span class="p">,</span>
+                    <span class="n">reset_style</span><span class="o">=</span><span class="n">reset_style</span><span class="p">,</span>
+                    <span class="n">initial_plot_first_zone_only</span><span class="o">=</span><span class="n">initial_plot_first_zone_only</span><span class="p">,</span>
+                    <span class="n">initial_plot_type</span><span class="o">=</span><span class="n">initial_plot_type</span><span class="p">,</span>
+                    <span class="n">assign_strand_ids</span><span class="o">=</span><span class="n">assign_strand_ids</span><span class="p">,</span>
+                    <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="n">add_zones_to_existing_strands</span><span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">allocd</span><span class="p">:</span>
+                    <span class="n">a</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="load_tecplot_szl"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.load_tecplot_szl">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">load_tecplot_szl</span><span class="p">(</span><span class="n">filenames</span><span class="p">,</span>
+
+                     <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                     <span class="n">read_data_option</span><span class="o">=</span><span class="n">ReadDataOption</span><span class="o">.</span><span class="n">Append</span><span class="p">,</span>
+                     <span class="n">reset_style</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">initial_plot_first_zone_only</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">initial_plot_type</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">assign_strand_ids</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                     <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+
+                     <span class="n">server</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">connection_method</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">user</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">ssh_private_keyfile</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read tecplot SZL data file.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filenames (`string &lt;str&gt;` or `list` of `strings &lt;str&gt;`): Files to be</span>
+<span class="sd">            read. (See note below conerning absolute and relative paths.)</span>
+<span class="sd">        frame (`Frame`, optional): The `Frame` to attach the resulting</span>
+<span class="sd">            `Dataset`. If `None`, the currently active `Frame` is used and the</span>
+<span class="sd">            zones are appended by default.</span>
+<span class="sd">        read_data_option (`ReadDataOption`, optional): Specify how the data</span>
+<span class="sd">            is loaded into Tecplot. (default: `ReadDataOption.Append`)</span>
+
+<span class="sd">            Possible values are:</span>
+<span class="sd">                * `ReadDataOption.ReplaceInActiveFrame`</span>
+<span class="sd">                    Remove the dataset from the active frame prior to reading</span>
+<span class="sd">                    in the new dataset. If other frames use the same `DataSet`</span>
+<span class="sd">                    in the active frame, they will continue to use the old one.</span>
+<span class="sd">                * `ReadDataOption.Append`</span>
+<span class="sd">                    Append the new `DataSet` to the dataset to the existing dataset.</span>
+<span class="sd">                * `ReadDataOption.Replace`</span>
+<span class="sd">                    Replace the `DataSet` attached to the active frame and to all</span>
+<span class="sd">                    other frames that use the same `DataSet`.</span>
+<span class="sd">        reset_style (`boolean &lt;bool&gt;`, optional): Reset the style for</span>
+<span class="sd">            destination `Frame`, if `False`, the `Frame`&#39;s current style is</span>
+<span class="sd">            preserved. (default: `True`)</span>
+<span class="sd">        initial_plot_first_zone_only (`boolean &lt;bool&gt;`, optional): Informs</span>
+<span class="sd">            the |Tecplot Engine| that after the data is loaded it only needs to</span>
+<span class="sd">            activate the first enabled `Zone &lt;data_access&gt;` for the initial</span>
+<span class="sd">            plot. This option is particularly useful if you have many `Zones</span>
+<span class="sd">            &lt;data_access&gt;` and want to get the data into the |Tecplot Engine|</span>
+<span class="sd">            and the first `Zone &lt;data_access&gt;` drawn as fast as possible. The</span>
+<span class="sd">            inactive `Zones &lt;data_access&gt;` can always be activated when needed.</span>
+<span class="sd">            (default: `False`)</span>
+<span class="sd">        initial_plot_type (`PlotType`, optional): Forces a specific type of</span>
+<span class="sd">            plot upon loading of the data. Only used if *resetstyle* is `True`.</span>
+<span class="sd">            To have |Tecplot 360| determine the most appropriate plot type</span>
+<span class="sd">            for the data, use `PlotType.Automatic`. Possible values are:</span>
+<span class="sd">            `PlotType.Automatic` (default), `Cartesian3D`, `Cartesian2D`,</span>
+<span class="sd">            `XYLine`, `PlotType.Sketch`, `PolarLine`.</span>
+
+<span class="sd">        assign_strand_ids (`boolean &lt;bool&gt;`, optional): Assign strand ID&#39;s to</span>
+<span class="sd">            zones that have a strand ID of -1. (default: `True`)</span>
+<span class="sd">        add_zones_to_existing_strands (`boolean &lt;bool&gt;`, optional): Add the</span>
+<span class="sd">            `Zones &lt;data_access&gt;` to matching strands, if they exist.</span>
+<span class="sd">            Otherwise, if the new data specifies strands, new ones will be</span>
+<span class="sd">            created beginning after the last strand in the `Dataset`. (default:</span>
+<span class="sd">            `False`)</span>
+
+<span class="sd">        server (`string &lt;str&gt;`, optional): Load the data remotely from this</span>
+<span class="sd">            server address. (default: `None`)</span>
+<span class="sd">        connection_method (`RemoteConnectionMethod`, optional): When *server*</span>
+<span class="sd">            is given, this specifies the type of connection to be made.</span>
+<span class="sd">            Possible values are: `RemoteConnectionMethod.Tunneled` (default),</span>
+<span class="sd">            `RemoteConnectionMethod.Direct`, `RemoteConnectionMethod.Manual`.</span>
+<span class="sd">        user (`string &lt;str&gt;`, optional): When *server* is given, this specifies</span>
+<span class="sd">            the username to use when logging into the server. This will default</span>
+<span class="sd">            to the client&#39;s user name.</span>
+<span class="sd">        private_ssh_keyfile (`string &lt;str&gt;`, optional): When *server* is given,</span>
+<span class="sd">            this specifies the full path to the private SSH keyfile which</span>
+<span class="sd">            defaults to ``~/.ssh/id_rsa`` where ``~`` expands out to the local</span>
+<span class="sd">            user&#39;s home directory.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `Dataset`: The `Dataset` holding the loaded data.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">filenames</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+        <span class="n">filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">filenames</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">server</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">connection_method</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">connection_method</span> <span class="o">=</span> <span class="n">RemoteConnectionMethod</span><span class="o">.</span><span class="n">Tunneled</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">connection_method</span> <span class="o">=</span> <span class="n">RemoteConnectionMethod</span><span class="p">(</span><span class="n">connection_method</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+        <span class="n">allocd</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">instr</span> <span class="o">=</span> <span class="n">StringList</span><span class="p">(</span><span class="s1">&#39;STANDARDSYNTAX&#39;</span><span class="p">,</span> <span class="s1">&#39;1.0&#39;</span><span class="p">)</span>
+        <span class="n">allocd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">instr</span><span class="p">)</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">server</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;FILELIST_DATAFILES&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">filenames</span><span class="p">))]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="n">filenames</span>
+
+                <span class="n">arglist</span><span class="p">[</span><span class="s1">&#39;DATASETREADER&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Tecplot Subzone Data Loader&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">user</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">user</span> <span class="o">=</span> <span class="n">getpass</span><span class="o">.</span><span class="n">getuser</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">ssh_private_keyfile</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">homedir</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~&#39;</span><span class="p">)</span>
+                    <span class="n">ssh_private_keyfile</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">homedir</span><span class="p">,</span> <span class="s1">&#39;.ssh&#39;</span><span class="p">,</span> <span class="s1">&#39;id_rsa&#39;</span><span class="p">)</span>
+
+                <span class="n">instr</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;Connection Method&#39;</span><span class="p">,</span> <span class="n">connection_method</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                          <span class="s1">&#39;MACHINE&#39;</span><span class="p">,</span> <span class="n">server</span><span class="p">,</span>
+                          <span class="s1">&#39;USER&#39;</span><span class="p">,</span> <span class="n">user</span><span class="p">,</span>
+                          <span class="s1">&#39;KEY_PATH&#39;</span><span class="p">,</span> <span class="n">ssh_private_keyfile</span><span class="p">,</span>
+                          <span class="s1">&#39;FILELIST_DATAFILES&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">filenames</span><span class="p">))]</span>
+                <span class="n">instr</span> <span class="o">+=</span> <span class="n">filenames</span>
+
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">DATASETREADER</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;SZL Remote Loader&#39;</span>
+
+            <span class="n">arglist</span><span class="p">[</span><span class="s1">&#39;FILENAMESORINSTRUCTIONS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">instr</span>
+
+            <span class="k">return</span> <span class="n">_tecplot_loader_load_data</span><span class="p">(</span>
+                <span class="n">arglist</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="n">frame</span><span class="p">,</span> <span class="n">read_data_option</span><span class="o">=</span><span class="n">read_data_option</span><span class="p">,</span>
+                <span class="n">reset_style</span><span class="o">=</span><span class="n">reset_style</span><span class="p">,</span>
+                <span class="n">initial_plot_first_zone_only</span><span class="o">=</span><span class="n">initial_plot_first_zone_only</span><span class="p">,</span>
+                <span class="n">initial_plot_type</span><span class="o">=</span><span class="n">initial_plot_type</span><span class="p">,</span>
+                <span class="n">assign_strand_ids</span><span class="o">=</span><span class="n">assign_strand_ids</span><span class="p">,</span>
+                <span class="n">add_zones_to_existing_strands</span><span class="o">=</span><span class="n">add_zones_to_existing_strands</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">allocd</span><span class="p">:</span>
+                <span class="n">a</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,1567 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.plot.slice &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.plot.slice</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">int</span>
+
+<span class="kn">import</span> <span class="nn">itertools</span> <span class="kn">as</span> <span class="nn">it</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">numbers</span> <span class="kn">import</span> <span class="n">Integral</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">session</span><span class="p">,</span> <span class="n">version</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">Index</span><span class="p">,</span> <span class="n">color_spec</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">sv</span>
+
+
+<span class="k">class</span> <span class="nc">SliceGroupStyle</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">slice_group</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">slice_group</span> <span class="o">=</span> <span class="n">slice_group</span>
+        <span class="n">kw</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">uniqueid</span><span class="o">=</span><span class="n">slice_group</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                  <span class="n">offset1</span><span class="o">=</span><span class="n">slice_group</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">slice_group</span><span class="o">.</span><span class="n">_sv</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="SliceMesh"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceMesh">[docs]</a><span class="k">class</span> <span class="nc">SliceMesh</span><span class="p">(</span><span class="n">SliceGroupStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Mesh attributes of the slice group.</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 11-12</span>
+
+<span class="sd">            from os import path</span>
+<span class="sd">            import tecplot as tp</span>
+<span class="sd">            from tecplot.constant import SliceSurface, ContourType</span>
+
+<span class="sd">            examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">            datafile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;DuctFlow.plt&#39;)</span>
+<span class="sd">            dataset = tp.data.load_tecplot(datafile)</span>
+<span class="sd">            plot = tp.active_frame().plot()</span>
+<span class="sd">            plot.show_slices = True</span>
+<span class="sd">            plot.contour(0).variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+
+<span class="sd">            plot.slice(0).mesh.show = True</span>
+
+<span class="sd">            tp.export.save_png(&#39;slice_mesh.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        .. figure:: /_static/images/slice_mesh.png</span>
+<span class="sd">            :width: 300px</span>
+<span class="sd">            :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mesh</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">mesh</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">MESH</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show mesh lines.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).mesh.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Slice mesh line `Color` or `ContourGroup`.</span>
+
+<span class="sd">        :type: `Color` or `ContourGroup`</span>
+
+<span class="sd">        Slice mesh lines can be a solid color or be colored by a</span>
+<span class="sd">        `ContourGroup` as obtained through the ``plot.contour`` property.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).mesh.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).mesh.color = Color.Green</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">color_spec</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">),</span>
+                          <span class="bp">self</span><span class="o">.</span><span class="n">slice_group</span><span class="o">.</span><span class="n">plot</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">color_spec</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mesh line thickness.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        The mesh line thickness is specified as a percentage of the frame width.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).mesh.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).mesh.line_thickness = 0.8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SliceShade"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceShade">[docs]</a><span class="k">class</span> <span class="nc">SliceShade</span><span class="p">(</span><span class="n">SliceGroupStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Shade attributes of the slice group.</span>
+
+<span class="sd">        Show shading on the slice when `SliceContour.show` has not been</span>
+<span class="sd">        selected or is set to `ContourType.Lines`.</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 11-14</span>
+
+<span class="sd">            from os import path</span>
+<span class="sd">            import tecplot as tp</span>
+<span class="sd">            from tecplot.constant import Color</span>
+
+<span class="sd">            examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">            datafile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;Pyramid.plt&#39;)</span>
+<span class="sd">            dataset = tp.data.load_tecplot(datafile)</span>
+
+<span class="sd">            plot = tp.active_frame().plot()</span>
+<span class="sd">            plot.show_slices = True</span>
+<span class="sd">            plot.slice(0).contour.show = False</span>
+<span class="sd">            shade = plot.slice(0).shade</span>
+<span class="sd">            shade.show = True</span>
+<span class="sd">            shade.color = Color.Red  # Slice will be colored solid red.</span>
+<span class="sd">            tp.export.save_png(&#39;slice_shade.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        .. figure:: /_static/images/slice_shade.png</span>
+<span class="sd">            :width: 300px</span>
+<span class="sd">            :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">shade</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">shade</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHADE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show shade attributes.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).shade.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Shade color.</span>
+
+<span class="sd">        :type: `Color`</span>
+
+<span class="sd">        `Color.MultiColor` and `Color.RGBColor` coloring are not available.</span>
+<span class="sd">        Use flooded contours for multi-color or RGB flooding</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).shade.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).shade.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Use lighting effect.</span>
+
+<span class="sd">        When set to `True`, the lighting effect may be selected with the</span>
+<span class="sd">        `SliceEffects.lighting_effect` attribute.</span>
+
+<span class="sd">        .. note::</span>
+<span class="sd">            Setting `SliceShade.use_lighting_effect` will also set</span>
+<span class="sd">            the same value for `SliceContour.use_lighting_effect`,</span>
+<span class="sd">            and vice-versa.</span>
+
+<span class="sd">        :type: `Boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).shade.use_lighting_effect = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).effects.lighting_effect = LightingEffect.Paneled</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@use_lighting_effect.setter</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SliceEffects"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceEffects">[docs]</a><span class="k">class</span> <span class="nc">SliceEffects</span><span class="p">(</span><span class="n">SliceGroupStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Slice effects for this slice.</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 16-18</span>
+
+<span class="sd">            from os import path</span>
+<span class="sd">            import tecplot as tp</span>
+
+<span class="sd">            examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">            datafile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;DuctFlow.plt&#39;)</span>
+<span class="sd">            dataset = tp.data.load_tecplot(datafile)</span>
+
+<span class="sd">            plot = tp.active_frame().plot()</span>
+
+<span class="sd">            plot.show_slices = True</span>
+<span class="sd">            slice_0 = plot.slice(0)</span>
+
+<span class="sd">            plot.contour(0).variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+<span class="sd">            slice_0.contour.show = True</span>
+
+<span class="sd">            slice_0.effects.use_translucency = True</span>
+<span class="sd">            slice_0.effects.surface_translucency = 70</span>
+
+<span class="sd">            tp.export.save_png(&#39;slice_effects.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        .. figure:: /_static/images/slice_effects.png</span>
+<span class="sd">            :width: 300px</span>
+<span class="sd">            :figwidth: 300px</span>
+
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">effects</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">effects</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EFFECTS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Lighting effect.</span>
+
+<span class="sd">        :type: `LightingEffect`</span>
+
+<span class="sd">        Slice lighting effects must be enabled by setting</span>
+<span class="sd">        `SliceContour.use_lighting_effect` or</span>
+<span class="sd">        `SliceShade.use_lighting_effect` to `True` when setting this value.</span>
+
+<span class="sd">        There are two types of lighting effects: Paneled and Gouraud:</span>
+
+<span class="sd">            * `Paneled`: Within each cell, the color assigned to each area by</span>
+<span class="sd">                shading or contour flooding is tinted by a shade constant</span>
+<span class="sd">                across the cell. This shade is based on the orientation</span>
+<span class="sd">                of the cell relative to your 3D light source.</span>
+<span class="sd">            * `Gouraud`: This offers smoother, more continuous shading than</span>
+<span class="sd">                Paneled shading, but it also results in slower plotting and</span>
+<span class="sd">                larger print files. `Gouraud` shading is not continuous across</span>
+<span class="sd">                zone boundaries unless face neighbors are specified in the</span>
+<span class="sd">                data. `Gouraud` shading is not available for finite element</span>
+<span class="sd">                volume `Zones &lt;data_access&gt;` when blanking is active. The</span>
+<span class="sd">                zone&#39;s lighting effect reverts to `Paneled` shading in this</span>
+<span class="sd">                case.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).contour.use_lighting_effect = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).effects.lighting_effect = LightingEffect.Paneled</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">LightingEffect</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@lighting_effect.setter</span>
+    <span class="k">def</span> <span class="nf">lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">LightingEffect</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">surface_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Surface translucency of the slice group.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Slice surface translucency must be enabled by setting</span>
+<span class="sd">        `SliceEffects.use_translucency` = `True` when setting this value.</span>
+
+
+<span class="sd">        Valid slice translucency values range</span>
+<span class="sd">        from one (opaque) to 99 (translucent).</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).effects.use_translucency = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).effects.surface_translucency = 20</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SURFACETRANSLUCENCY</span><span class="p">)</span>
+
+    <span class="nd">@surface_translucency.setter</span>
+    <span class="k">def</span> <span class="nf">surface_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SURFACETRANSLUCENCY</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable surface translucency for this slice group.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        The surface translucency value can be changed by setting</span>
+<span class="sd">        `SliceEffects.surface_translucency`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).effects.use_translucency = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).effects.surface_translucency = 20</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USETRANSLUCENCY</span><span class="p">)</span>
+
+    <span class="nd">@use_translucency.setter</span>
+    <span class="k">def</span> <span class="nf">use_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USETRANSLUCENCY</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SliceEdge"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceEdge">[docs]</a><span class="k">class</span> <span class="nc">SliceEdge</span><span class="p">(</span><span class="n">SliceGroupStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Edge attributes of the slice group.</span>
+
+<span class="sd">        When enabled, selected edge lines of all slices in this group will</span>
+<span class="sd">        be shown.</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 14-17</span>
+
+<span class="sd">            from os import path</span>
+<span class="sd">            import tecplot as tp</span>
+
+<span class="sd">            examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">            datafile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;DuctFlow.plt&#39;)</span>
+<span class="sd">            dataset = tp.data.load_tecplot(datafile)</span>
+
+<span class="sd">            plot = tp.active_frame().plot()</span>
+
+<span class="sd">            plot.show_slices = True</span>
+<span class="sd">            slice_0 = plot.slice(0)</span>
+
+<span class="sd">            plot.contour(0).variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+
+<span class="sd">            slice_0.edge.show = True</span>
+<span class="sd">            slice_0.edge.line_thickness = 0.8</span>
+
+<span class="sd">            tp.export.save_png(&#39;slice_edge.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        .. figure:: /_static/images/slice_edge.png</span>
+<span class="sd">            :width: 300px</span>
+<span class="sd">            :figwidth: 300px</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vector</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">vector</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGELAYER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">edge_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Edge type.</span>
+
+<span class="sd">        :type: `EdgeType`</span>
+
+<span class="sd">        There are two types of edges in |Tecplot 360|:</span>
+<span class="sd">        creases and borders.</span>
+
+<span class="sd">        An edge border is the boundary of a `Zone &lt;data_access&gt;`.</span>
+<span class="sd">        An edge crease appears when the inside angle between two</span>
+<span class="sd">        cells is less than a user-defined limit.</span>
+<span class="sd">        The inside angle can range from 0-180 degrees</span>
+<span class="sd">        (where 180 degrees indicates coplanar surfaces).</span>
+<span class="sd">        The default inside angle for determining an edge</span>
+<span class="sd">        crease is 135 degrees.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.edge_type = EdgeType.BordersAndCreases</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">EdgeType</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGETYPE</span><span class="p">)</span>
+
+    <span class="nd">@edge_type.setter</span>
+    <span class="k">def</span> <span class="nf">edge_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">EdgeType</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGETYPE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show edges.</span>
+
+<span class="sd">        This property must be set to `True` to show any of the other edge</span>
+<span class="sd">        properties.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.edge_type = EdgeType.BordersAndCreases</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Edge color.</span>
+
+<span class="sd">        :type: `Color`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Edge line thickness as a percentage of frame width.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.line_thickness = .8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SliceVector"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceVector">[docs]</a><span class="k">class</span> <span class="nc">SliceVector</span><span class="p">(</span><span class="n">SliceGroupStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Vector attributes of the slice group.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 22-25</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;DuctFlow.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+
+<span class="sd">        plot = tp.active_frame().plot()</span>
+
+<span class="sd">        plot.show_slices = True</span>
+<span class="sd">        slice_0 = plot.slice(0)</span>
+
+<span class="sd">        plot.contour(0).variable = dataset.variable(&#39;T(K)&#39;)</span>
+
+<span class="sd">        # Vector variables must be assigned before displaying</span>
+<span class="sd">        vectors = plot.vector</span>
+<span class="sd">        vectors.u_variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+<span class="sd">        vectors.v_variable = dataset.variable(&#39;V(M/S)&#39;)</span>
+<span class="sd">        vectors.w_variable = dataset.variable(&#39;W(M/S)&#39;)</span>
+
+<span class="sd">        slice_vector = plot.slice(0).vector</span>
+<span class="sd">        slice_vector.show = True</span>
+<span class="sd">        slice_vector.vector_type = VectorType.MidAtPoint</span>
+<span class="sd">        slice_vector.color = Color.BluePurple</span>
+
+<span class="sd">        slice_0.effects.use_translucency = True</span>
+<span class="sd">        slice_0.effects.surface_translucency = 30</span>
+
+<span class="sd">        tp.export.save_png(&#39;slice_vector.png&#39;, 600, supersample=3)</span>
+
+
+<span class="sd">    .. figure:: /_static/images/slice_vector.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vector</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">vector</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VECTOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show vectors on slices.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set slice vector color.</span>
+
+<span class="sd">        :type: `Color`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.color = Color.Red</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">is_tangent</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Use tangent vectors for slices.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.is_tangent = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISTANGENT</span><span class="p">)</span>
+
+    <span class="nd">@is_tangent.setter</span>
+    <span class="k">def</span> <span class="nf">is_tangent</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISTANGENT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Vector line thickness as a percentage of the frame height.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Typical values are .02, .1, .4, .8, 1.5</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.line_thickness = .1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">vector_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Type of vector for slices in this slice group.</span>
+
+<span class="sd">        :type: `VectorType`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.vector_type = VectorType.MidAtPoint</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">VectorType</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VECTORTYPE</span><span class="p">)</span>
+
+    <span class="nd">@vector_type.setter</span>
+    <span class="k">def</span> <span class="nf">vector_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">VectorType</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">VECTORTYPE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">arrowhead_style</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Arrowhead style of slice vectors.</span>
+
+<span class="sd">        :type: `ArrowheadStyle`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.arrowhead_style = ArrowheadStyle.Hollow</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">ArrowheadStyle</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ARROWHEADSTYLE</span><span class="p">)</span>
+
+    <span class="nd">@arrowhead_style.setter</span>
+    <span class="k">def</span> <span class="nf">arrowhead_style</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">ArrowheadStyle</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ARROWHEADSTYLE</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SliceContour"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceContour">[docs]</a><span class="k">class</span> <span class="nc">SliceContour</span><span class="p">(</span><span class="n">SliceGroupStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Contour attributes of the slice group.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 19-22</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import SliceSurface, ContourType</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;DuctFlow.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+
+<span class="sd">        plot = tp.active_frame().plot()</span>
+
+<span class="sd">        plot.show_slices = True</span>
+<span class="sd">        slice_0 = plot.slice(0)</span>
+
+<span class="sd">        # Use contour(0) for Flooding and contour(2) for Lines</span>
+<span class="sd">        plot.contour(0).variable = dataset.variable(&#39;P(N/m2)&#39;)</span>
+<span class="sd">        plot.contour(2).variable = dataset.variable(&#39;T(K)&#39;)</span>
+<span class="sd">        plot.contour(2).legend.show = False</span>
+<span class="sd">        plot.contour(2).labels.show = True</span>
+<span class="sd">        slice_0.contour.show = True</span>
+<span class="sd">        slice_0.contour.flood_contour_group = plot.contour(0)</span>
+<span class="sd">        slice_0.contour.line_contour_group = plot.contour(2)</span>
+<span class="sd">        slice_0.contour.contour_type = ContourType.Overlay  # AKA &quot;Both lines and flood&quot;</span>
+
+<span class="sd">        slice_0.show_primary_slice = False</span>
+<span class="sd">        slice_0.show_start_and_end_slices = True</span>
+<span class="sd">        slice_0.show_intermediate_slices = True</span>
+<span class="sd">        slice_0.start_position = (-.21, .05, .025)</span>
+<span class="sd">        slice_0.end_position = (1.342, .95, .475)</span>
+<span class="sd">        slice_0.num_intermediate_slices = 3</span>
+
+<span class="sd">        tp.export.save_png(&#39;slice_contour.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/slice_contour.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent_slice</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">parent_slice</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">CONTOUR</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plot</span> <span class="o">=</span> <span class="n">parent_slice</span><span class="o">.</span><span class="n">plot</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show contours on the slice.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(1).contour.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">contour_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Contour type for the slice contours.</span>
+
+<span class="sd">        :type: `ContourType`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).contour.contour_type = ContourType.AverageCell</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">ContourType</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">CONTOURTYPE</span><span class="p">)</span>
+
+    <span class="nd">@contour_type.setter</span>
+    <span class="k">def</span> <span class="nf">contour_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">ContourType</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">CONTOURTYPE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`Color` of contour lines.</span>
+
+<span class="sd">        Selecting `Color.MultiColor` will color the slice contour lines</span>
+<span class="sd">        based on the `contour group &lt;tecplot.plot.ContourGroup&gt;` variable.</span>
+
+<span class="sd">        :type: `Color`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).contour.line_color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@line_color.setter</span>
+    <span class="k">def</span> <span class="nf">line_color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Contour line thickness as a percentage of frame width.</span>
+
+<span class="sd">        Suggested values are one of: **.02, .1, .4, .8, 1.5**</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).contour.line_thickness = .4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Index` of the `ContourGroup` to use for flooding.</span>
+
+<span class="sd">        :type: `Index` (zero-based index)</span>
+
+<span class="sd">        This property sets and gets, by `Index`, the `ContourGroup` used for</span>
+<span class="sd">        flooding. Changing style on this `ContourGroup` will affect all</span>
+<span class="sd">        fieldmaps on the same `Frame` that use it.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.slice(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.flood_contour_group_index = 1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Index</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">FLOODCOLORING</span><span class="p">)</span>
+
+    <span class="nd">@flood_contour_group_index.setter</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">index</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">FLOODCOLORING</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Contour group to use for flooding.</span>
+
+<span class="sd">        :type: `ContourGroup`</span>
+
+<span class="sd">        Changing style on this `ContourGroup` will affect all</span>
+<span class="sd">        fieldmaps on the same `Frame` that use it.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; group = plot.contour(1)</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.slice(1).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.flood_contour_group = group</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">contour</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">flood_contour_group_index</span><span class="p">)</span>
+
+    <span class="nd">@flood_contour_group.setter</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">flood_contour_group</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">flood_contour_group_index</span> <span class="o">=</span> <span class="n">flood_contour_group</span><span class="o">.</span><span class="n">index</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_contour_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Index` of the `ContourGroup` to use for contour lines.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;` (zero-based index)</span>
+
+<span class="sd">        This property sets and gets, by `Index`, the `ContourGroup` used for</span>
+<span class="sd">        line placement. Although all properties of the `ContourGroup` can be</span>
+<span class="sd">        manipulated through this object, many of them (i.e., color) will not</span>
+<span class="sd">        affect the lines unless the `FieldmapContour.line_color` is set to the</span>
+<span class="sd">        same `ContourGroup`. Note that changing style on this `ContourGroup`</span>
+<span class="sd">        will affect all other fieldmaps on the same `Frame` that use it.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.slice(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_contour_group_index = 2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Index</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINECONTOURGROUP</span><span class="p">)</span>
+
+    <span class="nd">@line_contour_group_index.setter</span>
+    <span class="k">def</span> <span class="nf">line_contour_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">index</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINECONTOURGROUP</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_contour_group</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Contour group to use for contour lines.</span>
+
+<span class="sd">        :type: `ContourGroup`</span>
+
+<span class="sd">        Changing style on this `ContourGroup` will affect all</span>
+<span class="sd">        fieldmaps on the same `Frame` that use it.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; group = plot.contour(1)</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.slice(1).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_contour_group = group</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">contour</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">line_contour_group_index</span><span class="p">)</span>
+
+    <span class="nd">@line_contour_group.setter</span>
+    <span class="k">def</span> <span class="nf">line_contour_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">line_contour_group</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">line_contour_group_index</span> <span class="o">=</span> <span class="n">line_contour_group</span><span class="o">.</span><span class="n">index</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable lighting effect.</span>
+
+<span class="sd">        .. note::</span>
+<span class="sd">            Setting `SliceContour.use_lighting_effect` will also set</span>
+<span class="sd">            the same value for `SliceShade.use_lighting_effect`,</span>
+<span class="sd">            and vice-versa.</span>
+
+<span class="sd">        The lighting effect is set with `SliceEffects.lighting_effect`, and may</span>
+<span class="sd">        be one of `LightingEffect.Gouraud` or `LightingEffect.Paneled`.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.slice(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.use_lighting_effect = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).effects.lighting_effect = LightingEffect.Paneled</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@use_lighting_effect.setter</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SliceGroup"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceGroup">[docs]</a><span class="k">class</span> <span class="nc">SliceGroup</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Change attributes associated with slices.</span>
+
+<span class="sd">    Slices can include lighting effects, contours, meshes, and more.</span>
+<span class="sd">    To customize these and other attributes of slices, use this object.</span>
+
+<span class="sd">    This object controls the style for a specific slice group within a</span>
+<span class="sd">    `Frame`. Slice `contour &lt;SliceGroup.contour&gt;`,</span>
+<span class="sd">    vector, edge, effects, mesh, visibility and position</span>
+<span class="sd">    information are accessed through this class.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 19-40</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;DuctFlow.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+
+<span class="sd">        plot = tp.active_frame().plot()</span>
+<span class="sd">        plot.contour(0).variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+<span class="sd">        plot.show_edge = True</span>
+<span class="sd">        plot.fieldmap(0).edge.edge_type = EdgeType.Creases</span>
+
+<span class="sd">        vectors = plot.vector</span>
+<span class="sd">        vectors.u_variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+<span class="sd">        vectors.v_variable = dataset.variable(&#39;V(M/S)&#39;)</span>
+<span class="sd">        vectors.w_variable = dataset.variable(&#39;W(M/S)&#39;)</span>
+
+<span class="sd">        plot.show_slices = True</span>
+<span class="sd">        slice_0 = plot.slice(0)</span>
+
+<span class="sd">        slice_0.contour.show = True</span>
+<span class="sd">        slice_0.contour.contour_type = ContourType.Overlay  # AKA &quot;Both lines and flood&quot;</span>
+
+<span class="sd">        slice_0.effects.use_translucency = True</span>
+<span class="sd">        slice_0.effects.surface_translucency = 30</span>
+
+<span class="sd">        # Show an arbitrary slice</span>
+<span class="sd">        slice_0.orientation = SliceSurface.Arbitrary</span>
+<span class="sd">        slice_0.arbitrary_normal = (1, .5, 0)</span>
+
+<span class="sd">        slice_0.show_primary_slice = False</span>
+<span class="sd">        slice_0.show_start_and_end_slices = True</span>
+<span class="sd">        slice_0.start_position = (-.21, .05, .025)</span>
+<span class="sd">        slice_0.end_position = (1.342, .95, .475)</span>
+<span class="sd">        slice_0.show_intermediate_slices = True</span>
+<span class="sd">        slice_0.num_intermediate_slices = 3</span>
+
+<span class="sd">        slice_0.edge.show = True</span>
+<span class="sd">        slice_0.edge.line_thickness = 0.4</span>
+
+<span class="sd">        tp.export.save_png(&#39;slice_example.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/slice_example.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+
+<span class="sd">    Up to eight different slice groups can be set.</span>
+<span class="sd">    Each slice group can use different slice planes or</span>
+<span class="sd">    different ranges for the same slice plane.</span>
+
+
+<span class="sd">        &gt;&gt;&gt; slice_3 = plot.slice(3)</span>
+<span class="sd">        &gt;&gt;&gt; slice_3.contour.show = True</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">plot</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">index</span> <span class="o">&lt;</span> <span class="mi">8</span><span class="p">,</span> <span class="s1">&#39;Slice index out of range (must be &lt; 8)&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">Index</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plot</span> <span class="o">=</span> <span class="n">plot</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">SLICEATTRIBUTES</span><span class="p">,</span> <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                         <span class="n">offset1</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">index</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">plot</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">plot</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="fm">__eq__</span><span class="p">(</span><span class="n">other</span><span class="p">)</span>
+
+    <span class="n">_XYZ</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;XYZ&#39;</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;x&#39;</span><span class="p">,</span> <span class="s1">&#39;y&#39;</span><span class="p">,</span> <span class="s1">&#39;z&#39;</span><span class="p">])</span>
+    <span class="n">_XYZ</span><span class="o">.</span><span class="fm">__new__</span><span class="o">.</span><span class="vm">__defaults__</span> <span class="o">=</span> <span class="p">(</span><span class="bp">None</span><span class="p">,</span> <span class="bp">None</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_is_ijk</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">orientation</span> <span class="ow">in</span> <span class="p">(</span>
+            <span class="n">SliceSurface</span><span class="o">.</span><span class="n">IPlanes</span><span class="p">,</span>
+            <span class="n">SliceSurface</span><span class="o">.</span><span class="n">JPlanes</span><span class="p">,</span>
+            <span class="n">SliceSurface</span><span class="o">.</span><span class="n">KPlanes</span><span class="p">)</span>
+
+    <span class="k">class</span> <span class="nc">_SlicePosition</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Internal slice position type.</span>
+
+<span class="sd">            Looks and quacks like a quasi 3-tuple</span>
+<span class="sd">            of `float` (xyz) or `int` (ijk).</span>
+
+<span class="sd">            Allows access by float &#39;x&#39;, &#39;y&#39;, &#39;z&#39; if the parent slice has</span>
+<span class="sd">            XYZ orientation, or int &#39;i&#39;,&#39;j&#39;,&#39;k&#39; if the parent slice has</span>
+<span class="sd">            IJK orientation.</span>
+
+<span class="sd">            Overloads +=, -=, add/sub/neg.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Alternatively we could subclass tuple</span>
+        <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent_slice</span><span class="p">,</span> <span class="n">x_or_i</span><span class="p">,</span> <span class="n">y_or_j</span><span class="p">,</span> <span class="n">z_or_k</span><span class="p">):</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">parent_slice</span><span class="p">,</span> <span class="n">SliceGroup</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x_or_i</span><span class="p">,</span> <span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">Integral</span><span class="p">))</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">y_or_j</span><span class="p">,</span> <span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">Integral</span><span class="p">))</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">z_or_k</span><span class="p">,</span> <span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">Integral</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_parent_slice</span> <span class="o">=</span> <span class="n">parent_slice</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span> <span class="o">=</span> <span class="n">x_or_i</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span> <span class="o">=</span> <span class="n">y_or_j</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span> <span class="o">=</span> <span class="n">z_or_k</span>
+
+        <span class="k">def</span> <span class="nf">_is_ijk</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parent_slice</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">()</span>
+
+        <span class="nd">@property</span>
+        <span class="k">def</span> <span class="nf">x</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">__debug__</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s1">&#39;Cannot access &quot;x&quot; for IJK slice position&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span>
+
+        <span class="nd">@property</span>
+        <span class="k">def</span> <span class="nf">y</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">__debug__</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s1">&#39;Cannot access &quot;y&quot; for IJK slice position&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span>
+
+        <span class="nd">@property</span>
+        <span class="k">def</span> <span class="nf">z</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">__debug__</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s1">&#39;Cannot access &quot;z&quot; for IJK slice position&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span>
+
+        <span class="nd">@property</span>
+        <span class="k">def</span> <span class="nf">i</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">__debug__</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s1">&#39;Cannot access &quot;i&quot; for XYZ slice position&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span>
+
+        <span class="nd">@property</span>
+        <span class="k">def</span> <span class="nf">j</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">__debug__</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s1">&#39;Cannot access &quot;j&quot; for XYZ slice position&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span>
+
+        <span class="nd">@property</span>
+        <span class="k">def</span> <span class="nf">k</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">__debug__</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s1">&#39;Cannot access &quot;k&quot; for XYZ slice position&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span>
+
+        <span class="k">def</span> <span class="fm">__neg__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span> <span class="o">=</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span> <span class="o">=</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span> <span class="o">=</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span>
+            <span class="k">return</span> <span class="bp">self</span>
+
+        <span class="k">def</span> <span class="fm">__iadd__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>  <span class="c1"># operator +=</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="p">(</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">,</span> <span class="n">SliceGroup</span><span class="o">.</span><span class="n">_SlicePosition</span><span class="p">))</span> <span class="ow">and</span> <span class="p">(</span>
+                          <span class="nb">len</span><span class="p">(</span><span class="n">other</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span> <span class="o">+=</span> <span class="n">other</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span> <span class="o">+=</span> <span class="n">other</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span> <span class="o">+=</span> <span class="n">other</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotAttributeError</span><span class="p">(</span><span class="s1">&#39;Expected a 3-tuple of floats or ints&#39;</span><span class="p">)</span>
+
+            <span class="k">return</span> <span class="bp">self</span>
+
+        <span class="k">def</span> <span class="fm">__isub__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>  <span class="c1"># operator -=</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="fm">__iadd__</span><span class="p">((</span><span class="o">-</span><span class="n">other</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="o">-</span><span class="n">other</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="o">-</span><span class="n">other</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
+
+        <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># This lets us to cast to a real tuple</span>
+            <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span>
+            <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span>
+            <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span>
+
+        <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">item</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">item</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">IndexError</span><span class="p">(</span><span class="s1">&#39;Slice position tuple &#39;</span>
+                                 <span class="s1">&#39;index must be between 0 and 2&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="p">)[</span><span class="n">item</span><span class="p">]</span>
+
+        <span class="k">def</span> <span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">return</span> <span class="s1">&#39;Slice Position: ({x}, {y}, {z})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                <span class="n">x</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_x_or_i</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_y_or_j</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_z_or_k</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">==</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">other</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">return</span> <span class="mi">3</span>
+
+    <span class="k">def</span> <span class="nf">_set_slice_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">style</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">,</span> <span class="n">SliceGroup</span><span class="o">.</span><span class="n">_SlicePosition</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span>
+                <span class="s1">&#39;Slice position must be a 3-tuple of floats or ints&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">style</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">I</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span> <span class="n">style</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">J</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">2</span><span class="p">]),</span> <span class="n">style</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">K</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">style</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span> <span class="n">style</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">2</span><span class="p">]),</span> <span class="n">style</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Z</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_slice_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">style</span><span class="p">):</span>
+        <span class="n">is_ijk</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_ijk</span><span class="p">()</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">I</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">J</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">K</span><span class="p">)</span> <span class="k">if</span> <span class="n">is_ijk</span> <span class="k">else</span> <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Z</span><span class="p">)</span>
+        <span class="n">style_type</span> <span class="o">=</span> <span class="n">Index</span> <span class="k">if</span> <span class="n">is_ijk</span> <span class="k">else</span> <span class="nb">float</span>
+
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_SlicePosition</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                                     <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">style_type</span><span class="p">,</span> <span class="n">style</span><span class="p">,</span> <span class="n">pos</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+                                     <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">style_type</span><span class="p">,</span> <span class="n">style</span><span class="p">,</span> <span class="n">pos</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+                                     <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">style_type</span><span class="p">,</span> <span class="n">style</span><span class="p">,</span> <span class="n">pos</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">vector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Vector attributes for this slice group.</span>
+
+<span class="sd">        :type:  `SliceVector`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).vector.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SliceVector</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">edge</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Edge attributes for this slice group.</span>
+
+<span class="sd">        :type: `SliceEdge`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).edge.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SliceEdge</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">effects</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Effects attributes for this slice group.</span>
+
+<span class="sd">            :type: `SliceEffects`</span>
+
+<span class="sd">            Example usage::</span>
+
+<span class="sd">                &gt;&gt;&gt; plot.slice(0).effects.use_translucency = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SliceEffects</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Shade attributes for this slice group.</span>
+
+<span class="sd">        :type: `SliceShade`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).shade.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SliceShade</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">mesh</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mesh attributes for this slice group.</span>
+
+<span class="sd">        :type: `SliceMesh`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).mesh.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SliceMesh</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show slices for this slice group.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWGROUP</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWGROUP</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_primary_slice</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Include the primary slice (first slice placed) in the `Plot`.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).show_primary_slice = True</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWPRIMARYSLICE</span><span class="p">)</span>
+
+    <span class="nd">@show_primary_slice.setter</span>
+    <span class="k">def</span> <span class="nf">show_primary_slice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWPRIMARYSLICE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">contour</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Contour attributes for the slice group.</span>
+
+<span class="sd">        :type: `SliceContour`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).contour.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SliceContour</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">orientation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Select which plane the slice is drawn on (X,Y,Z, I, J, K or arbitrary).</span>
+
+<span class="sd">        :type: `SliceSurface`</span>
+
+<span class="sd">        You may also choose `SliceSurface.Arbitrary` to place the</span>
+<span class="sd">        slice on an arbitrary plane.</span>
+
+<span class="sd">        To orient slices in an arbitrary direction,</span>
+<span class="sd">        choose `SliceSurface.Arbitrary`.</span>
+<span class="sd">        As with other slices, you may specify origin points for a primary</span>
+<span class="sd">        slice and/or for start and end slices. Slices pass through the</span>
+<span class="sd">        indicated origin point(s), so you can easily align the edge of a</span>
+<span class="sd">        slice or group of slices along some other feature of the plot,</span>
+<span class="sd">        such as an axis. If intermediate slices are activated,</span>
+<span class="sd">        they are drawn equally spaced between the slices</span>
+<span class="sd">        defined by the start and end origins.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).orientation = SliceSurface.XPlanes</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">SliceSurface</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SLICESURFACE</span><span class="p">)</span>
+
+    <span class="nd">@orientation.setter</span>
+    <span class="k">def</span> <span class="nf">orientation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">SliceSurface</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SLICESURFACE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">arbitrary_normal</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Normal for arbitrary slices.</span>
+
+<span class="sd">        :type: 3-`tuple` of floats</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).orientation = SliceSurface.Arbitrary</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).arbitrary_normal = (0.1, 0.2, 0.3)</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).arbitrary_normal.x</span>
+<span class="sd">            0.1</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).arbitrary_normal.y</span>
+<span class="sd">            0.2</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).arbitrary_normal.z</span>
+<span class="sd">            0.3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_XYZ</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">),</span>
+                         <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">),</span>
+                         <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Z</span><span class="p">))</span>
+
+    <span class="nd">@arbitrary_normal.setter</span>
+    <span class="k">def</span> <span class="nf">arbitrary_normal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">sv</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span> <span class="n">sv</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">2</span><span class="p">]),</span> <span class="n">sv</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Z</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">origin</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Origin of the slice.</span>
+
+<span class="sd">        :type: 3-`tuple` of `float` if `orientation` is X,Y,Z</span>
+<span class="sd">            or zero-based `int` if `orientation` is I,J,K</span>
+
+<span class="sd">        For arbitrary slice orientation, the origin can be any location.</span>
+<span class="sd">        For axis orientations (`XPlanes`, `YPlanes`, etc.) two of</span>
+<span class="sd">        the three components are not used.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; slice_0 = plot.slice(0)</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.orientation = SliceSurface.IPlanes</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin = (1, 0, 0)</span>
+<span class="sd">            &gt;&gt;&gt; dx = (1, 1, 1)</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin += dx</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin.i</span>
+<span class="sd">            2</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin.j</span>
+<span class="sd">            1</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin.k</span>
+<span class="sd">            1</span>
+
+<span class="sd">            &gt;&gt;&gt; slice_0.orientation = SliceSurface.Arbitrary</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin = (.5, .1, .1)</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin += dx</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin.x</span>
+<span class="sd">            1.5</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin.y</span>
+<span class="sd">            .1</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.origin.z</span>
+<span class="sd">            .1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_slice_position</span><span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">PRIMARYPOSITION</span><span class="p">)</span>
+
+    <span class="nd">@origin.setter</span>
+    <span class="k">def</span> <span class="nf">origin</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_slice_position</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">PRIMARYPOSITION</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_intermediate_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of intermediate slicing planes.</span>
+
+<span class="sd">        You may specify between 1 and 5,000 intermediate slices.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # Show 2 intermediate slices</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).num_intermediate_slices = 2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">NUMINTERMEDIATESLICES</span><span class="p">)</span>
+
+    <span class="nd">@num_intermediate_slices.setter</span>
+    <span class="k">def</span> <span class="nf">num_intermediate_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">NUMINTERMEDIATESLICES</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_intermediate_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show intermediate slices.</span>
+
+<span class="sd">        Intermediate slices are evenly distributed between the start and end</span>
+<span class="sd">        slices.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).show_intermediate_slices = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWINTERMEDIATESLICES</span><span class="p">)</span>
+
+    <span class="nd">@show_intermediate_slices.setter</span>
+    <span class="k">def</span> <span class="nf">show_intermediate_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWINTERMEDIATESLICES</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">obey_source_zone_blanking</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Obey source zone blanking.</span>
+
+<span class="sd">        When set to `True`, slices are subject to any blanking used for</span>
+<span class="sd">        the data. When set to `False`, slices are generated for blanked</span>
+<span class="sd">        and unblanked regions.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).obey_source_zone_blanking = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">OBEYSOURCEZONEBLANKING</span><span class="p">)</span>
+
+    <span class="nd">@obey_source_zone_blanking.setter</span>
+    <span class="k">def</span> <span class="nf">obey_source_zone_blanking</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">OBEYSOURCEZONEBLANKING</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">slice_source</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`Zones &lt;data_access&gt;` to slice through.</span>
+
+<span class="sd">        Choose to slice through volume `Zones &lt;data_access&gt;`, surface `Zones</span>
+<span class="sd">        &lt;data_access&gt;`, or the surfaces of volume `Zones &lt;data_access&gt;`.</span>
+
+<span class="sd">        :type: `SliceSource`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).slice_source = SliceSource.SurfaceZones</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">SliceSource</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SLICESOURCE</span><span class="p">)</span>
+
+    <span class="nd">@slice_source.setter</span>
+    <span class="k">def</span> <span class="nf">slice_source</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">SliceSource</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SLICESOURCE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_start_and_end_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Include start and end slices.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).show_start_and_end_slices = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSTARTENDSLICE</span><span class="p">)</span>
+
+    <span class="nd">@show_start_and_end_slices.setter</span>
+    <span class="k">def</span> <span class="nf">show_start_and_end_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSTARTENDSLICE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">end_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Position of the end slice.</span>
+
+<span class="sd">        `SliceGroup.show_start_and_end_slices` must be `True` to show the end</span>
+<span class="sd">        slice.</span>
+
+<span class="sd">        :type: 3-`tuple` of `float` if `orientation` is X,Y,Z</span>
+<span class="sd">            or zero-based `int` if `orientation` is I,J,K</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).show_start_and_end_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).end_position = (1, 1, 1)</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).end_position.i</span>
+<span class="sd">            1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_slice_position</span><span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">ENDPOSITION</span><span class="p">)</span>
+
+    <span class="nd">@end_position.setter</span>
+    <span class="k">def</span> <span class="nf">end_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_slice_position</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ENDPOSITION</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">start_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Position of the start slice.</span>
+
+<span class="sd">        `SliceGroup.show_start_and_end_slices` must be `True` to show the start</span>
+<span class="sd">        slice.</span>
+
+<span class="sd">        :type: 3-`tuple` of `float` if `orientation` is X,Y,Z</span>
+<span class="sd">            or zero-based `int` if `orientation` is I,J,K</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).show_start_and_end_slices = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).start_position = (1, 1, 1)</span>
+<span class="sd">            &gt;&gt;&gt; plot.slice(0).start_position.i</span>
+<span class="sd">            1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_slice_position</span><span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">STARTPOSITION</span><span class="p">)</span>
+
+    <span class="nd">@start_position.setter</span>
+    <span class="k">def</span> <span class="nf">start_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_slice_position</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">STARTPOSITION</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">surface_generation_method</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Determines how the surface is generated.</span>
+
+<span class="sd">            :type: `SurfaceGenerationMethod`</span>
+
+<span class="sd">            May be one of:</span>
+
+<span class="sd">            * `SurfaceGenerationMethod.Auto`:</span>
+<span class="sd">                Selects one of the surface generation algorithms</span>
+<span class="sd">                best suited for the zones participating in the slice</span>
+<span class="sd">                generation. &quot;All polygons&quot; is used if one or more</span>
+<span class="sd">                of the participating zones is polytope, otherwise</span>
+<span class="sd">                &quot;allow quads&quot; is used.</span>
+<span class="sd">            * `SurfaceGenerationMethod.AllPolygons`:</span>
+<span class="sd">                Similar to the &quot;All triangles&quot; method except that all</span>
+<span class="sd">                interior faces generated as a result of triangulation</span>
+<span class="sd">                that are not part of the original mesh are eliminated.</span>
+<span class="sd">                This preserves the original mesh of the source zones</span>
+<span class="sd">                on the resulting slice.</span>
+<span class="sd">            * `SurfaceGenerationMethod.AllTriangles`:</span>
+<span class="sd">                An advanced algorithm that can handle</span>
+<span class="sd">                complex saddle issues and guarantees that there will</span>
+<span class="sd">                be no holes in the final surface. As the surface is</span>
+<span class="sd">                composed entirely of triangles, it can be delivered</span>
+<span class="sd">                more efficiently to the graphics hardware.</span>
+<span class="sd">            * `SurfaceGenerationMethod.AllowQuads`:</span>
+<span class="sd">                Produces quads or triangles, and the</span>
+<span class="sd">                resulting surface more closely resembles the shape of</span>
+<span class="sd">                the volume cells from the source zone. Since the quads</span>
+<span class="sd">                are not arbitrarily divided into triangles, no biases</span>
+<span class="sd">                are introduced, and the resulting surface may appear</span>
+<span class="sd">                smoother. This method is preferred when the source</span>
+<span class="sd">                zone is FE-Brick or IJK-Ordered and the surface is</span>
+<span class="sd">                aligned with the source cells.</span>
+
+<span class="sd">            Example usage::</span>
+
+<span class="sd">                &gt;&gt;&gt; from tecplot.constant import SurfaceGenerationMethod</span>
+<span class="sd">                &gt;&gt;&gt; plot.slice(0).surface_generation_method = SurfaceGenerationMethod.AllowQuads</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">SurfaceGenerationMethod</span><span class="p">,</span>
+                               <span class="n">sv</span><span class="o">.</span><span class="n">SURFACEGENERATIONMETHOD</span><span class="p">)</span>
+
+    <span class="nd">@surface_generation_method.setter</span>
+    <span class="k">def</span> <span class="nf">surface_generation_method</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;setting surface generation method requires&#39;</span> \
+                      <span class="s1">&#39; Tecplot 360 2017 R2 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">SurfaceGenerationMethod</span><span class="p">(</span><span class="n">value</span><span class="p">),</span>
+                        <span class="n">sv</span><span class="o">.</span><span class="n">SURFACEGENERATIONMETHOD</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SliceGroup.set_arbitrary_from_points"><a class="viewcode-back" href="../../../api/tecplot.plot_style.html#tecplot.plot.SliceGroup.set_arbitrary_from_points">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">set_arbitrary_from_points</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">p1</span><span class="p">,</span> <span class="n">p2</span><span class="p">,</span> <span class="n">p3</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set an arbitrary slice from 3 points.</span>
+
+<span class="sd">        Set the normal and origin of an arbitrary slice using three points.</span>
+<span class="sd">        The origin will be set to the 3rd point.</span>
+
+<span class="sd">        The three points must not be coincident or collinear.</span>
+<span class="sd">        The slice&#39;s origin is set to the third point and its normal</span>
+<span class="sd">        is recalculated such that the cutting plane passes through all three</span>
+<span class="sd">        points.</span>
+
+<span class="sd">        Parameters::</span>
+
+<span class="sd">            p1:  3-`tuple` of floats</span>
+<span class="sd">            p2:  3-`tuple` of floats</span>
+<span class="sd">            p3:  3-`tuple` of floats</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; slice_0 = plot.slice(0)</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.set_arbitrary_from_points((0,0,0), (.1,.2,.3), (.1,.1,.1))</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SliceSetArbitraryUsingThreePoints</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">uniqueid</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">offset1</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="o">*</span><span class="n">it</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span><span class="n">p1</span><span class="p">,</span> <span class="n">p2</span><span class="p">,</span> <span class="n">p3</span><span class="p">)):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">(</span>
+                        <span class="s1">&#39;Error creating arbitrary slice from three points&#39;</span><span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

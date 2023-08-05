@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.query &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.query</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="n">byref</span><span class="p">,</span> <span class="n">c_double</span><span class="p">,</span> <span class="n">c_int32</span><span class="p">,</span> <span class="n">c_int64</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">layout</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">Index</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">lock</span>
+
+
+<div class="viewcode-block" id="probe_at_position"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.query.probe_at_position">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">probe_at_position</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">nearest</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">starting_cell</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                      <span class="n">starting_zone</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Returns field values at a point in space.</span>
+
+<span class="sd">    .. note::</span>
+
+<span class="sd">        The position is taken according to the axis assignments of the `Frame`</span>
+<span class="sd">        which may be any of the associated variables in the `Dataset` and not</span>
+<span class="sd">        necessarily ``(X, Y, Z)``. See: `Cartesian3DFieldAxis.variable`.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        x,y,z (`float`, *z* is optional): position to probe for field values.</span>
+<span class="sd">        nearest (`bool`): Returns the values at the nearest node to the given</span>
+<span class="sd">            position. Probe position must be inside the volume of the data</span>
+<span class="sd">            being queried, otherwise this will return `None`.</span>
+<span class="sd">        starting_cell (3-`tuple` of `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            The ``(i,j,k)``-index of the cell to start looking for the given</span>
+<span class="sd">            position. This must be used with ``starting_zone``.</span>
+<span class="sd">        starting_zone (`Zone &lt;data_access&gt;`, optional): The first zone to start</span>
+<span class="sd">            searching. This is required only when ``starting_cell`` is</span>
+<span class="sd">            specified.</span>
+<span class="sd">        zones (`list` of `Zones &lt;data_access&gt;`, optional): Limits the search to</span>
+<span class="sd">            the given zones. `None` implies searching all zones. (default:</span>
+<span class="sd">            `None`)</span>
+<span class="sd">        dataset (`Dataset`, optional): The `Dataset` to probe. (defaults to</span>
+<span class="sd">            the active `Dataset`.)</span>
+<span class="sd">        frame (`Frame`, optional): The `Frame` which determines the spatial</span>
+<span class="sd">            variable assignment ``(X,Y,Z)``. (defaults to the active `Frame`.)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `namedtuple &lt;collections.namedtuple&gt;`: ``(data, cell, zone)``:</span>
+
+<span class="sd">            ``data`` (`list` of `floats &lt;float&gt;`)</span>
+<span class="sd">                The values of each variable in the dataset at the given</span>
+<span class="sd">                position.</span>
+<span class="sd">            ``cell`` (3-`tuple` of `integers &lt;int&gt;`)</span>
+<span class="sd">                ``(i,j,k)`` of the cell containing the given position.</span>
+<span class="sd">            ``zone`` (`Zone &lt;data_access&gt;`)</span>
+<span class="sd">                Zone containing the given position</span>
+
+<span class="sd">    .. note:: Returns `None` if the position can&#39;t be probed.</span>
+
+<span class="sd">        This method will return `None` if the position is outside the volume</span>
+<span class="sd">        of the data being queried. This means one should capture the results</span>
+<span class="sd">        in a single variable and test it against `None` before proceeding::</span>
+
+<span class="sd">            result = tp.data.query.probe_at_position(1.0, 2.0, 3.0)</span>
+<span class="sd">            if result is None:</span>
+<span class="sd">                print(&#39;probe failed.&#39;)</span>
+<span class="sd">            else:</span>
+<span class="sd">                data, cell, zone = result</span>
+
+<span class="sd">        Additionally, with Tecplot 360 versions 2018 R1 and later, this</span>
+<span class="sd">        function will raise an exception if Tecplot 360 was interrupted via the</span>
+<span class="sd">        GUI during the probe operation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">frame</span> <span class="ow">and</span> <span class="n">dataset</span> <span class="ow">and</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span> <span class="o">!=</span> <span class="n">dataset</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Dataset must be attached to the input Frame: {} != {}&#39;</span><span class="o">.</span>
+                   <span class="n">format</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="p">),</span> <span class="nb">repr</span><span class="p">(</span><span class="n">dataset</span><span class="p">)))</span>
+            <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">starting_cell</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">)</span> <span class="o">^</span> <span class="p">(</span><span class="n">starting_zone</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;starting_cell option requires an associated starting_zone&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">dataset</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">frame</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span>
+        <span class="n">dataset</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span>
+    <span class="k">elif</span> <span class="n">frame</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="n">frame</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">frame</span>
+
+    <span class="k">with</span> <span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">starting_cell</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">start_with_local_cell</span> <span class="o">=</span> <span class="bp">False</span>
+            <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">k</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span>
+            <span class="n">starting_zone_index</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">start_with_local_cell</span> <span class="o">=</span> <span class="bp">True</span>
+            <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">k</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span><span class="o">+</span><span class="mi">1</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">starting_cell</span><span class="p">)</span>
+            <span class="n">starting_zone_index</span> <span class="o">=</span> <span class="n">starting_zone</span><span class="o">.</span><span class="n">index</span>
+
+        <span class="n">allocd</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">zones</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">zones</span> <span class="o">=</span> <span class="n">IndexSet</span><span class="p">(</span><span class="o">*</span><span class="n">zones</span><span class="p">)</span>
+            <span class="n">allocd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span>
+
+        <span class="n">data</span> <span class="o">=</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_variables</span><span class="p">)</span><span class="o">*</span><span class="n">c_double</span><span class="p">)()</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ProbeAtPosition</span><span class="p">(</span>
+                <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">,</span>
+                <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span>
+                <span class="n">IJKPlanes</span><span class="o">.</span><span class="n">Volume</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                <span class="n">starting_zone_index</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span>
+                <span class="n">start_with_local_cell</span><span class="p">,</span>
+                <span class="n">data</span><span class="p">,</span>
+                <span class="n">zones</span><span class="p">,</span>
+                <span class="n">z</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">,</span>
+                <span class="bp">False</span><span class="p">,</span>
+                <span class="n">nearest</span><span class="p">)</span>
+            <span class="n">success</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="n">plane</span><span class="p">,</span> <span class="n">zone_index</span> <span class="o">=</span> <span class="n">result</span>
+        <span class="k">except</span> <span class="n">TecplotSystemError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s1">&#39;Assertion&#39;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
+                <span class="k">raise</span>
+            <span class="n">success</span> <span class="o">=</span> <span class="bp">False</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">InterruptCheck</span><span class="p">():</span>
+                    <span class="k">raise</span> <span class="n">TecplotInterruptError</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                <span class="k">pass</span>  <span class="c1"># InterruptCheck added to TecUtilChecked in SDK 2018.1</span>
+            <span class="k">return</span> <span class="bp">None</span>
+
+        <span class="n">cell</span> <span class="o">=</span> <span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">i</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">Index</span><span class="p">(</span><span class="n">j</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">Index</span><span class="p">(</span><span class="n">k</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">zone_index</span> <span class="o">=</span> <span class="n">Index</span><span class="p">(</span><span class="n">zone_index</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">allocd</span><span class="p">:</span>
+            <span class="n">a</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+
+        <span class="n">ProbeResult</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;ProbeResult&#39;</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="s1">&#39;cell&#39;</span><span class="p">,</span> <span class="s1">&#39;zone&#39;</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">ProbeResult</span><span class="p">(</span><span class="n">data</span><span class="p">[:],</span> <span class="n">cell</span><span class="p">,</span> <span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">zone_index</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="probe_on_surface"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.query.probe_on_surface">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">probe_on_surface</span><span class="p">(</span><span class="n">positions</span><span class="o">=</span><span class="p">((</span><span class="mi">0</span><span class="p">,),(</span><span class="mi">0</span><span class="p">,),(</span><span class="mi">0</span><span class="p">,)),</span> <span class="n">zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">probe_nearest</span><span class="o">=</span><span class="n">ProbeNearest</span><span class="o">.</span><span class="n">Position</span><span class="p">,</span> <span class="n">obey_blanking</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                     <span class="n">num_nearest_nodes</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Returns field values at points on a surface closest the points given.</span>
+
+<span class="sd">    .. note::</span>
+
+<span class="sd">        The positions are processed according to the axis assignments of the</span>
+<span class="sd">        `Frame` which may be any of the associated variables in the `Dataset`</span>
+<span class="sd">        and not necessarily (but usually) ``(X, Y, Z)``. See:</span>
+<span class="sd">        `Cartesian3DFieldAxis.variable`.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        positions (2D `float` array): Array of points to probe dimensioned by</span>
+<span class="sd">            ``(3, N)`` where the first dimension corresponds to ``(x, y, z)``.</span>
+<span class="sd">            A 1D `float` array is accepted for single point probes, however</span>
+<span class="sd">            this should be avoided when probing several positions as the</span>
+<span class="sd">            internal algorithm is optimized for probing many positions at once.</span>
+<span class="sd">        zones (`list` of `Zones &lt;data_access&gt;`, optional): Limits the search to</span>
+<span class="sd">            the given zones. `None` implies searching all active relevant</span>
+<span class="sd">            surface zones including surfaces of ordered volume zones. To search</span>
+<span class="sd">            FE or polygonal volume boundaries, include the volume zones in this</span>
+<span class="sd">            list. (default: `None`)</span>
+<span class="sd">        variables (`list` of `Variables &lt;Variable&gt;`, optional): The variables</span>
+<span class="sd">            within the dataset to probe. `None` implies all variables.</span>
+<span class="sd">            (default: `None`)</span>
+<span class="sd">        probe_nearest (`ProbeNearest`, optional): Probe at the nodal location</span>
+<span class="sd">            (`ProbeNearest.Node`) or interpolate to nearest location on the</span>
+<span class="sd">            surface (`ProbeNearest.Position`, default). The return parameter</span>
+<span class="sd">            **cells_or_nodes** will be cells if set to `ProbeNearest.Position`</span>
+<span class="sd">            (default), or nodes if set to `ProbeNearest.Node`.</span>
+<span class="sd">        obey_blanking (`bool`, optional): Do not search blanked cells according</span>
+<span class="sd">            the frame&#39;s style settings. (default: `True`)</span>
+<span class="sd">        num_nearest_nodes (`integer &lt;int&gt;`, optional): Only consider surface</span>
+<span class="sd">            cells that contain one of the closest ``N`` nodes to the probed</span>
+<span class="sd">            position. For highly varying surfaces, the nearest cell may or may</span>
+<span class="sd">            not contain the nearest nodes to the probe position and so this</span>
+<span class="sd">            value should be increased accordingly, however doing so increases</span>
+<span class="sd">            the search-space linearly. (default: 20)</span>
+<span class="sd">        tolerance (`float`, optional): The percentage of the longest cartesian</span>
+<span class="sd">            ``(x, y, z)`` dimension subtended by the polygons of the surface.</span>
+<span class="sd">            This is used in several parts of the algorithm to find the nearest</span>
+<span class="sd">            position on the surface zones and should be increased when probing</span>
+<span class="sd">            imprecise nodal position data. (default: 1e-5)</span>
+<span class="sd">        dataset (`Dataset`, optional): The `Dataset` to probe. (defaults to</span>
+<span class="sd">            the active `Dataset`.)</span>
+<span class="sd">        frame (`Frame`, optional): The `Frame` which determines the spatial</span>
+<span class="sd">            variable assignment ``(X,Y,Z)``. (defaults to the active `Frame`.)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `namedtuple &lt;collections.namedtuple&gt;`: ``(data, cells_or_nodes, planes,</span>
+<span class="sd">        zone)``:</span>
+
+<span class="sd">            ``data`` (`list` of `floats &lt;float&gt;`)</span>
+<span class="sd">                Flattened `float` array which can be reshaped to ``(V, N)``</span>
+<span class="sd">                where ``V`` is the number of variables returned (either the</span>
+<span class="sd">                number of variables in the dataset or the length of</span>
+<span class="sd">                **variables** input parameter) and ``N`` is the number of</span>
+<span class="sd">                points probed.</span>
+<span class="sd">            ``cells_or_nodes`` (`list` of `integers &lt;int&gt;`)</span>
+<span class="sd">                The index to the cells (or nodes if `ProbeNearest.Node` was</span>
+<span class="sd">                passed in to **probe_nearest**) containing the returned</span>
+<span class="sd">                positions.</span>
+<span class="sd">            ``planes`` (`list` of `IJKPlanes`)</span>
+<span class="sd">                For ordered zones, these are the plane-orientations of the</span>
+<span class="sd">                cells for each probed position.</span>
+<span class="sd">            ``zones`` (`list` of `Zones &lt;data_access&gt;`)</span>
+<span class="sd">                Zones containing the given positions.</span>
+
+<span class="sd">    .. versionadded:: 2018.1</span>
+<span class="sd">        Probe on surface requires Tecplot 360 2018 R1 or later.</span>
+
+<span class="sd">    .. note:: The frame&#39;s plot type must be set to `PlotType.Cartesian3D`</span>
+
+<span class="sd">        Probe on surface requires spatial variables to be set according to the</span>
+<span class="sd">        frame&#39;s style by setting the plot type to `PlotType.Cartesian3D`.</span>
+<span class="sd">        Example::</span>
+
+<span class="sd">            tp.active_frame().plot_type = tp.constant.PlotType.Cartesian3D</span>
+
+<span class="sd">        For probing on 2D data, use `probe_at_position()`.</span>
+
+<span class="sd">    .. note:: Irregular or jaggged surfaces may behave poorly.</span>
+
+<span class="sd">        For performance reasons, this algorithm has the potential to miss the</span>
+<span class="sd">        closest position on highly varying surfaces. This can be addressed by</span>
+<span class="sd">        first increasing **num_nearest_nodes** to search more of the zones and</span>
+<span class="sd">        then by increasing the **tolerance** to allow for imprecise position</span>
+<span class="sd">        data.</span>
+
+<span class="sd">    Example usage::</span>
+
+<span class="sd">        &gt;&gt;&gt; from os import path</span>
+<span class="sd">        &gt;&gt;&gt; import numpy as np</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">        &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; examples = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        &gt;&gt;&gt; datafile = path.join(examples, &#39;SimpleData&#39;, &#39;F18.plt&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; ds = tp.data.load_tecplot(datafile)</span>
+<span class="sd">        &gt;&gt;&gt; fr = tp.active_frame()</span>
+<span class="sd">        &gt;&gt;&gt; fr.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; # probe a single point</span>
+<span class="sd">        &gt;&gt;&gt; res = tp.data.query.probe_on_surface((13.5, 4.0, 0.6 ))</span>
+<span class="sd">        &gt;&gt;&gt; print(res.data)</span>
+<span class="sd">        (13.499723788684996, 3.9922783797612795, 0.49241572276992346,</span>
+<span class="sd">        0.0018958827755862578, 0.07313805429221854, 0.997276718375976,</span>
+<span class="sd">        0.06335166319722907)</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; # probe multiple points</span>
+<span class="sd">        &gt;&gt;&gt; points = np.array([[13.5,  4.0, 0.6],  # just above starboard wing</span>
+<span class="sd">        &gt;&gt;&gt;                    [13.5, -4.0, 0.6]]) # just above port wing</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; res = tp.data.query.probe_on_surface(points.transpose())</span>
+<span class="sd">        &gt;&gt;&gt; values = np.array(res.data).reshape((-1, len(points))).transpose()</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; # print probed position and the result of the probe</span>
+<span class="sd">        &gt;&gt;&gt; for pt, v in zip(points, values):</span>
+<span class="sd">        &gt;&gt;&gt;     print(pt, v)</span>
+<span class="sd">        [ 13.5   4.    0.6] [  1.34997238e+01   3.99227838e+00   4.92415723e-01</span>
+<span class="sd">           1.89588278e-03   7.31380543e-02   9.97276718e-01   6.33516632e-02]</span>
+<span class="sd">        [ 13.5  -4.    0.6] [  1.34997238e+01  -3.99227838e+00   4.92415723e-01</span>
+<span class="sd">           1.89588278e-03   7.31380543e-02   9.97276718e-01   6.33516632e-02]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">frame</span> <span class="ow">and</span> <span class="n">dataset</span> <span class="ow">and</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span> <span class="o">!=</span> <span class="n">dataset</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Dataset must be attached to the input Frame: {} != {}&#39;</span><span class="o">.</span>
+                   <span class="n">format</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="p">),</span> <span class="nb">repr</span><span class="p">(</span><span class="n">dataset</span><span class="p">)))</span>
+            <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">dataset</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">frame</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span>
+        <span class="n">dataset</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span>
+    <span class="k">elif</span> <span class="n">frame</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="n">frame</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">frame</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">positions</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">):</span>
+        <span class="n">positions</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">tuple</span><span class="p">([</span><span class="n">p</span><span class="p">])</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">positions</span><span class="p">)</span>
+
+    <span class="n">nvariables</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_variables</span> <span class="k">if</span> <span class="n">variables</span> <span class="ow">is</span> <span class="bp">None</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">variables</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">positions</span><span class="p">)</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">n</span> <span class="o">*</span> <span class="n">nvariables</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_double</span> <span class="o">*</span> <span class="n">n</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">positions</span><span class="p">[</span><span class="mi">0</span><span class="p">]])</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_double</span> <span class="o">*</span> <span class="n">n</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">positions</span><span class="p">[</span><span class="mi">1</span><span class="p">]])</span>
+        <span class="n">z</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_double</span> <span class="o">*</span> <span class="n">n</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">positions</span><span class="p">[</span><span class="mi">2</span><span class="p">]])</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_double</span> <span class="o">*</span> <span class="n">m</span><span class="p">)()</span>
+        <span class="n">cells_or_nodes</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int64</span> <span class="o">*</span> <span class="n">n</span><span class="p">)()</span>
+        <span class="n">planes</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="n">n</span><span class="p">)()</span>
+        <span class="n">zone_indices</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="n">n</span><span class="p">)()</span>
+
+        <span class="n">zone_set</span> <span class="o">=</span> <span class="bp">None</span> <span class="k">if</span> <span class="n">zones</span> <span class="ow">is</span> <span class="bp">None</span> <span class="k">else</span> <span class="n">IndexSet</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span>
+        <span class="n">var_set</span> <span class="o">=</span> <span class="bp">None</span> <span class="k">if</span> <span class="n">variables</span> <span class="ow">is</span> <span class="bp">None</span> <span class="k">else</span> <span class="n">IndexSet</span><span class="p">(</span><span class="n">variables</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ProbeOnSurface</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">zone_set</span><span class="p">,</span> <span class="n">var_set</span><span class="p">,</span>
+                                           <span class="n">ProbeNearest</span><span class="p">(</span><span class="n">probe_nearest</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                                           <span class="n">obey_blanking</span><span class="p">,</span> <span class="n">num_nearest_nodes</span><span class="p">,</span>
+                                           <span class="n">tolerance</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">cells_or_nodes</span><span class="p">,</span>
+                                           <span class="n">planes</span><span class="p">,</span> <span class="n">zone_indices</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">zone_set</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">zone_set</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">var_set</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">var_set</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+
+        <span class="n">cells_or_nodes</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">cells_or_nodes</span><span class="p">)</span>
+        <span class="n">planes</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">IJKPlanes</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">planes</span><span class="p">)</span>
+        <span class="n">zones</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">zone_indices</span><span class="p">)</span>
+
+        <span class="n">SurfaceProbeResult</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;SurfaceProbeResult&#39;</span><span class="p">,</span>
+            <span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="s1">&#39;cells_or_nodes&#39;</span><span class="p">,</span> <span class="s1">&#39;planes&#39;</span><span class="p">,</span> <span class="s1">&#39;zones&#39;</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">SurfaceProbeResult</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="p">),</span> <span class="n">cells_or_nodes</span><span class="p">,</span> <span class="n">planes</span><span class="p">,</span> <span class="n">zones</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

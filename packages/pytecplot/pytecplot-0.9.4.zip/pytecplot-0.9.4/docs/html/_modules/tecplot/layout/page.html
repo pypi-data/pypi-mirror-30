@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.layout.page &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.layout.page</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="kn">import</span> <span class="n">contextmanager</span>
+<span class="kn">from</span> <span class="nn">fnmatch</span> <span class="kn">import</span> <span class="n">fnmatch</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">macro</span><span class="p">,</span> <span class="n">session</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">Index</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span><span class="p">,</span> <span class="n">sv</span>
+<span class="kn">from</span> <span class="nn">.frame</span> <span class="kn">import</span> <span class="n">Frame</span>
+
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Page"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page">[docs]</a><span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Page</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;`Page` object within a layout, holding onto one or more `Frames &lt;Frame&gt;`.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        uid (`integer &lt;int&gt;`, optional): This must be a *valid* unique ID</span>
+<span class="sd">            number pointing internally to a `Page` object or `None`. A new</span>
+<span class="sd">            `Page` is created if set to `None`. (default: `None`)</span>
+
+<span class="sd">    Warning:</span>
+<span class="sd">        Though it is possible to create a `Page` object using the</span>
+<span class="sd">        constructor, it is usually sufficient to obtain a page through</span>
+<span class="sd">        `tecplot.add_page`,  `tecplot.active_page`, `tecplot.page` or</span>
+<span class="sd">        `tecplot.pages`.</span>
+
+<span class="sd">    A `Page` can be thought of like a canvas onto which one or more</span>
+<span class="sd">    `Frames &lt;Frame&gt;` can be laid out. The engine guarantees there will</span>
+<span class="sd">    always be at least one `Page` in the layout which can be accessed</span>
+<span class="sd">    via `tecplot.active_page`::</span>
+
+<span class="sd">        &gt;&gt;&gt; import tecplot</span>
+<span class="sd">        &gt;&gt;&gt; page = tecplot.active_page()</span>
+<span class="sd">        &gt;&gt;&gt; page</span>
+<span class="sd">        Page(uid=1)</span>
+<span class="sd">        &gt;&gt;&gt; for frame in page.frames():</span>
+<span class="sd">        ...   print(frame)</span>
+<span class="sd">        Frame 001</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uid</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">=</span> <span class="n">uid</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">framelist</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="sd">&quot;&quot;&quot;The unique ID number of this Page, internal to the |Tecplot Engine|.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sv</span> <span class="o">=</span> <span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">PAGE</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Brief string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Brief representation of this `Page`.</span>
+
+<span class="sd">        Example::</span>
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page = tecplot.active_page()</span>
+<span class="sd">            &gt;&gt;&gt; print(page)</span>
+<span class="sd">            Page: &quot;Page 001&quot;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;Page: &quot;{name}&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Executable string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Internal representation of this `Page`.</span>
+
+<span class="sd">        The string returned can be executed to generate an identical</span>
+<span class="sd">        copy of this `Page` object::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page = tecplot.active_page()</span>
+<span class="sd">            &gt;&gt;&gt; page_copy=None</span>
+<span class="sd">            &gt;&gt;&gt; print(repr(page))</span>
+<span class="sd">            Page(uid=1)</span>
+<span class="sd">            &gt;&gt;&gt; exec(&#39;page_copy = &#39;+repr(page))</span>
+<span class="sd">            &gt;&gt;&gt; page_copy</span>
+<span class="sd">            Page(uid=11, page=Page(uid=1))</span>
+
+<span class="sd">            &gt;&gt;&gt; # page_copy is not technically a copy.</span>
+<span class="sd">            &gt;&gt;&gt; # it is the same object as the original page:</span>
+<span class="sd">            &gt;&gt;&gt; page == page_copy</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;Page(uid={uid})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">uid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks for `Page` equality in the |Tecplot Engine|.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `bool`: `True` if the unique ID numbers are the same for both `Pages &lt;Page&gt;`.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page1 = tecplot.active_page()</span>
+<span class="sd">            &gt;&gt;&gt; page2 = tecplot.add_page()</span>
+<span class="sd">            &gt;&gt;&gt; page1 == page2</span>
+<span class="sd">            False</span>
+<span class="sd">            &gt;&gt;&gt; tecplot.active_page() == page2</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">uid</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="fm">__contains__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">False</span>
+            <span class="k">if</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetCount</span><span class="p">():</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopStart</span><span class="p">()</span>
+                <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">frame</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetUniqueID</span><span class="p">():</span>
+                        <span class="n">result</span> <span class="o">=</span> <span class="bp">True</span>
+                        <span class="k">break</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopNext</span><span class="p">():</span>
+                        <span class="k">break</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopEnd</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">framelist</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">())</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">__next__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">framelist</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">KeyError</span><span class="p">,</span> <span class="ne">IndexError</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">StopIteration</span>
+
+    <span class="k">def</span> <span class="nf">next</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># if sys.version_info &lt; (3,)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__next__</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">aux_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Auxiliary data for this page.</span>
+
+<span class="sd">        Returns: `AuxData`</span>
+
+<span class="sd">        This is the auxiliary data attached to the page. Such data is written</span>
+<span class="sd">        to the layout file by default and can be retrieved later. Example</span>
+<span class="sd">        usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; aux = tp.active_page().aux_data</span>
+<span class="sd">            &gt;&gt;&gt; aux[&#39;Result&#39;] = &#39;3.14159&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(aux[&#39;Result&#39;])</span>
+<span class="sd">            3.14159</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">AuxData</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">AuxDataObjectType</span><span class="o">.</span><span class="n">Page</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the position of the Page</span>
+
+<span class="sd">        :type: `Index`</span>
+
+<span class="sd">        The page positions are 0 based positions relative to the current page,</span>
+<span class="sd">        where the current page has a position value of 0, the next page 1,</span>
+<span class="sd">        the page after that 2, and so on.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Index</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetPosByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns or sets the name.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        This is the name used when searching for `Page` objects in</span>
+<span class="sd">        `tecplot.pages` and `tecplot.page`. It does not have to be unique.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page = tecplot.active_page()</span>
+<span class="sd">            &gt;&gt;&gt; page.name = &#39;My Data&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(&#39;this page:&#39;, page.name)</span>
+<span class="sd">            this page: My Data</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetName</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="nd">@name.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageSetName</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">paper</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Paper` defined in this `Page`.</span>
+
+<span class="sd">        :type: `Paper`</span>
+
+<span class="sd">        Every `Page` has the concept of a workspace which includes</span>
+<span class="sd">        all `Frames &lt;Frame&gt;` as well as a sub-area of the workspace</span>
+<span class="sd">        called the `Paper`. The limits of the `Paper` with respect to</span>
+<span class="sd">        the placement of `Frames &lt;Frame&gt;` is used when exporting</span>
+<span class="sd">        certain image formats.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Paper</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">active</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks if this `Page` is active.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `bool`: `True` if active.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetUniqueID</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Page.activate"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.activate">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">activate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Activates the `Page`.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotRuntimeError`: Page does not exist.</span>
+<span class="sd">            `TecplotSystemError`: Could not activate the page.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">active</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">exists</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotRuntimeError</span><span class="p">(</span><span class="s1">&#39;page does not exists&#39;</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageSetCurrentByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">(</span><span class="s1">&#39;could not activate page&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Page.activated"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.activated">[docs]</a>    <span class="nd">@contextmanager</span>
+    <span class="k">def</span> <span class="nf">activated</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">current_page</span> <span class="o">=</span> <span class="n">Page</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetUniqueID</span><span class="p">())</span>
+        <span class="k">if</span> <span class="bp">self</span> <span class="o">==</span> <span class="n">current_page</span><span class="p">:</span>
+            <span class="k">yield</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">yield</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="n">current_page</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Page.active_frame"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.active_frame">[docs]</a>    <span class="k">def</span> <span class="nf">active_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the active `Frame`.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Frame`: The active `Frame`.</span>
+
+<span class="sd">        This implicitly activates this `Page` and returns the active</span>
+<span class="sd">        `Frame` attached to it.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetCount</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">Frame</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetActiveID</span><span class="p">(),</span> <span class="bp">self</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Page.add_frame"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.add_frame">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">add_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Creates a new `Frame` in this `Page`.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Frame`: The newly created and activated `Frame`.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotRuntimeError`: Could not find active frame.</span>
+<span class="sd">            `TecplotSystemError`: Could not create a new frame.</span>
+
+<span class="sd">        This implicitly activates the `Page` and creates and activates</span>
+<span class="sd">        a new `Frame`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameCreateNew</span><span class="p">(</span><span class="bp">False</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">(</span><span class="s1">&#39;could not create new frame&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">uid</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetActiveID</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">uid</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">Frame</span><span class="p">(</span><span class="n">uid</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotRuntimeError</span><span class="p">(</span><span class="s1">&#39;could not get id of newly created active frame&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Page.delete_frame"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.delete_frame">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">delete_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Removes the frame from this `Page`.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotRuntimeError`: If `Frame` is not in this `Page`.</span>
+<span class="sd">            `TecplotSystemError`: Could not delete the frame.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">frame</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotRuntimeError</span><span class="p">(</span><span class="s1">&#39;frame is not in this page&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameDeleteActive</span><span class="p">():</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Page.frame"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.frame">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">frame</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the `Frame` by name.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`string &lt;str&gt;`): `glob-style &lt;fnmatch.fnmatch&gt;` pattern.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Frame`: The first `Frame` identified by *pattern*.</span>
+
+<span class="sd">        .. note::</span>
+<span class="sd">            A `Page` can contain `Frames &lt;Frame&gt;` with identical names. When</span>
+<span class="sd">            the parameter *pattern* is a string, the first match found is</span>
+<span class="sd">            returned. This is not guaranteed to be deterministic and care</span>
+<span class="sd">            should be taken to have only `Frames &lt;Frame&gt;` with unique names</span>
+<span class="sd">            when this feature is used.</span>
+
+<span class="sd">        Example:</span>
+
+<span class="sd">            .. code-block:: python</span>
+<span class="sd">                :emphasize-lines: 4</span>
+
+<span class="sd">                &gt;&gt;&gt; import tecplot</span>
+<span class="sd">                &gt;&gt;&gt; page = tecplot.active_page()</span>
+<span class="sd">                &gt;&gt;&gt; frameA = page.add_frame(&#39;A&#39;)</span>
+<span class="sd">                &gt;&gt;&gt; frameB = page.add_frame(&#39;B&#39;)</span>
+<span class="sd">                &gt;&gt;&gt; frameA == page.frame(&#39;A&#39;)</span>
+<span class="sd">                True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="bp">None</span>
+            <span class="k">if</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetCount</span><span class="p">():</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopStart</span><span class="p">()</span>
+                <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">fnmatch</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetName</span><span class="p">()[</span><span class="mi">1</span><span class="p">],</span> <span class="n">pattern</span><span class="p">):</span>
+                        <span class="n">frame</span> <span class="o">=</span> <span class="n">Frame</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetUniqueID</span><span class="p">(),</span> <span class="bp">self</span><span class="p">)</span>
+                        <span class="k">break</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopNext</span><span class="p">():</span>
+                        <span class="k">break</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopEnd</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">frame</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotPatternMatchError</span><span class="p">(</span>
+                    <span class="n">pattern</span><span class="p">,</span>
+                    <span class="s1">&#39;no frame found with name: &quot;{}&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span>
+                    <span class="s1">&#39;glob&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">frame</span></div>
+
+<div class="viewcode-block" id="Page.frames"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.frames">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">frames</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a `list` of `Frames &lt;Frame&gt;` matching the specified pattern.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`string &lt;str&gt;`, optional): `Glob-style pattern</span>
+<span class="sd">                &lt;fnmatch.fnmatch&gt;` used to match the names of the yielded</span>
+<span class="sd">                `Frame` objects. All frames are returned if no pattern is</span>
+<span class="sd">                specified. (default: `None`)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `list`: `Frames &lt;Frame&gt;` identified by *pattern*.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page = tecplot.active_page()</span>
+
+<span class="sd">            &gt;&gt;&gt; # iterate over all frames and print their names</span>
+<span class="sd">            &gt;&gt;&gt; for frame in page.frames():</span>
+<span class="sd">            &gt;&gt;&gt;     print(frame.name)</span>
+<span class="sd">            Frame 001</span>
+<span class="sd">            Frame 002</span>
+<span class="sd">            &gt;&gt;&gt; # store a persistent list of frames</span>
+<span class="sd">            &gt;&gt;&gt; frames = page.frames()</span>
+<span class="sd">            &gt;&gt;&gt; print([f.name for f in frames])</span>
+<span class="sd">            [&#39;Frame 001&#39;, &#39;Frame 002&#39;]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">framelist</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">if</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetCount</span><span class="p">():</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopStart</span><span class="p">()</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+                        <span class="n">success</span><span class="p">,</span> <span class="n">name</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetName</span><span class="p">()</span>
+                        <span class="k">if</span> <span class="n">success</span><span class="p">:</span>
+                            <span class="k">if</span> <span class="n">pattern</span> <span class="ow">is</span> <span class="bp">None</span> <span class="ow">or</span> <span class="n">fnmatch</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+                                <span class="n">framelist</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Frame</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetUniqueID</span><span class="p">(),</span> <span class="bp">self</span><span class="p">))</span>
+                        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopNext</span><span class="p">():</span>
+                            <span class="k">break</span>
+                <span class="k">finally</span><span class="p">:</span>
+                    <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameLightweightLoopEnd</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">framelist</span> <span class="ow">and</span> <span class="n">pattern</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotPatternMatchError</span><span class="p">(</span>
+                    <span class="n">pattern</span><span class="p">,</span>
+                    <span class="s1">&#39;no frames found with name: &quot;{}&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span>
+                    <span class="s1">&#39;glob&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">framelist</span></div>
+
+    <span class="nd">@property</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">exists</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks if the `Page` exists in the current layout.</span>
+
+<span class="sd">        This will return `False` after the `Page` has been deleted::</span>
+<span class="sd">            &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">            &gt;&gt;&gt; page = tp.add_page()</span>
+<span class="sd">            &gt;&gt;&gt; page.exists</span>
+<span class="sd">            True</span>
+<span class="sd">            &gt;&gt;&gt; tp.delete_page(page)</span>
+<span class="sd">            &gt;&gt;&gt; page.exists</span>
+<span class="sd">            False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">current_page</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetUniqueID</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetCount</span><span class="p">()):</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageSetCurrentToNext</span><span class="p">()</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetUniqueID</span><span class="p">():</span>
+                    <span class="k">return</span> <span class="bp">True</span>
+            <span class="k">return</span> <span class="bp">False</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">current_page</span> <span class="o">!=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetUniqueID</span><span class="p">():</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageSetCurrentByUniqueID</span><span class="p">(</span><span class="n">current_page</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Page.tile_frames"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Page.tile_frames">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">tile_frames</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">TileMode</span><span class="o">.</span><span class="n">Grid</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tile frames based on a certain mode.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            mode (`TileMode`, optional): Direction and layout mode for tiling</span>
+<span class="sd">                frames. Possible values: `TileMode.Grid` (default),</span>
+<span class="sd">                `TileMode.Columns`, `TileMode.Rows`, `TileMode.Wrap`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import TileMode</span>
+<span class="sd">            &gt;&gt;&gt; page.tile_frame(TileMode.Wrap)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">macro</span><span class="o">.</span><span class="n">execute_extended_command</span><span class="p">(</span><span class="s1">&#39;Multi Frame Manager&#39;</span><span class="p">,</span> <span class="n">mode</span><span class="o">.</span><span class="n">value</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="Paper"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Paper">[docs]</a><span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Paper</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The `Paper` boundary defined on a workspace.</span>
+
+<span class="sd">    This is the area used for certain image output formats. It</span>
+<span class="sd">    is defined for a specific `Page`. `Frames &lt;Frame&gt;` can be</span>
+<span class="sd">    laid out in reference to this sub-area of the workspace.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">page</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">page</span> <span class="o">=</span> <span class="n">page</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sv</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">_sv</span> <span class="o">+</span> <span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">PAPER</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">dimensions</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Width and height.</span>
+
+<span class="sd">        the dimensions, *(width, height)* in inches, of the</span>
+<span class="sd">        currently defined paper in the Tecplot workspace.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">page</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PaperGetDimensions</span><span class="p">()</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.dataset &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.dataset</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">super</span>
+
+<span class="kn">import</span> <span class="nn">ctypes</span>
+<span class="kn">import</span> <span class="nn">itertools</span> <span class="kn">as</span> <span class="nn">it</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">re</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">namedtuple</span><span class="p">,</span> <span class="n">Iterable</span>
+<span class="kn">from</span> <span class="nn">fnmatch</span> <span class="kn">import</span> <span class="n">fnmatch</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="nb">reduce</span>
+<span class="kn">from</span> <span class="nn">keyword</span> <span class="kn">import</span> <span class="n">iskeyword</span>
+<span class="kn">from</span> <span class="nn">six</span> <span class="kn">import</span> <span class="n">string_types</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span><span class="p">,</span> <span class="n">TextWrapper</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">_tecutil_connector</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">layout</span><span class="p">,</span> <span class="n">session</span><span class="p">,</span> <span class="n">version</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="p">(</span><span class="n">ArgList</span><span class="p">,</span> <span class="n">Index</span><span class="p">,</span> <span class="n">IndexRange</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">ListWrapper</span><span class="p">,</span>
+                       <span class="n">StringList</span><span class="p">,</span> <span class="n">flatten_args</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span><span class="p">,</span> <span class="n">sv</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">.variable</span> <span class="kn">import</span> <span class="n">Variable</span>
+<span class="kn">from</span> <span class="nn">.zone</span> <span class="kn">import</span> <span class="n">ClassicFEZone</span><span class="p">,</span> <span class="n">OrderedZone</span><span class="p">,</span> <span class="n">PolyFEZone</span><span class="p">,</span> <span class="n">Zone</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Dataset"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset">[docs]</a><span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Dataset</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Table of `Arrays &lt;Array&gt;` identified by `Zone &lt;data_access&gt;` and `Variable`.</span>
+
+<span class="sd">    This is the primary data container within the Tecplot Engine. A `Dataset`</span>
+<span class="sd">    can be shared among several `Frames &lt;Frame&gt;`, though any particular</span>
+<span class="sd">    `Dataset` object will have a handle to at least one of them. Any</span>
+<span class="sd">    modification of a shared `Dataset` will be reflected in all `Frames</span>
+<span class="sd">    &lt;Frame&gt;` that use it.</span>
+
+<span class="sd">    Though a `Dataset` is usually attached to a `Frame` and the plot style</span>
+<span class="sd">    associated with that, it can be thought of as independent from any style or</span>
+<span class="sd">    plotting representation. Each `Dataset` consists of a list of `Variables</span>
+<span class="sd">    &lt;Variable&gt;` which are used by one or more of a list of `Zones</span>
+<span class="sd">    &lt;data_access&gt;`. The `Variable` determines the data type, while the `Zone</span>
+<span class="sd">    &lt;data_access&gt;` determines the layout such as shape and ordered vs</span>
+<span class="sd">    unordered.</span>
+
+<span class="sd">    The actual data are found at the intersection of a `Zone &lt;data_access&gt;` and</span>
+<span class="sd">    `Variable` and the resulting object is an `Array`. The data array can be</span>
+<span class="sd">    obtained using either path::</span>
+
+<span class="sd">        &gt;&gt;&gt; # These two lines obtain the same object &quot;x&quot;</span>
+<span class="sd">        &gt;&gt;&gt; x = dataset.zone(&#39;My Zone&#39;).values(&#39;X&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; x = dataset.variable(&#39;X&#39;).values(&#39;My Zone&#39;)</span>
+
+<span class="sd">    A `Dataset` is the object returned by most data-loading operations in</span>
+<span class="sd">    |PyTecplot|::</span>
+
+<span class="sd">        &gt;&gt;&gt; dataset = tecplot.data.load_tecplot(&#39;my_data.plt&#39;)</span>
+
+<span class="sd">    Under `Dataset`, there are a number methods to create and delete `Zones</span>
+<span class="sd">    &lt;data_access&gt;` and `variables &lt;Variable&gt;`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uid</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">=</span> <span class="n">uid</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span> <span class="o">=</span> <span class="n">frame</span>
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Executable string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Internal representation of this `Dataset`.</span>
+
+<span class="sd">        The string returned can be executed to generate a</span>
+<span class="sd">        clone of this `Dataset` object::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset = frame.dataset</span>
+<span class="sd">            &gt;&gt;&gt; print(repr(dataset))</span>
+<span class="sd">            Dataset(uid=21, frame=Frame(uid=11, page=Page(uid=1)))</span>
+<span class="sd">            &gt;&gt;&gt; exec(&#39;dataset_clone = &#39;+repr(dataset))</span>
+<span class="sd">            &gt;&gt;&gt; dataset_clone</span>
+<span class="sd">            Dataset(uid=21, frame=Frame(uid=11, page=Page(uid=1)))</span>
+<span class="sd">            &gt;&gt;&gt; dataset == dataset_clone</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;Dataset(uid={uid}, frame={frame})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="n">uid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="nb">repr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Brief string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Brief representation of this `Dataset`, showing</span>
+<span class="sd">            `Zones &lt;data_access&gt;` and `Variables &lt;Variable&gt;`.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset = frame.dataset</span>
+<span class="sd">            &gt;&gt;&gt; print(dataset)</span>
+<span class="sd">            Dataset: &#39;My Dataset&#39;</span>
+<span class="sd">              Zones: &#39;Rectangular zone&#39;</span>
+<span class="sd">              Variables: &#39;x&#39;, &#39;y&#39;, &#39;z&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">fmt</span> <span class="o">=</span> <span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">            Dataset: &#39;{}&#39;</span>
+<span class="s1">              Zones: {}</span>
+<span class="s1">              Variables: {}&#39;&#39;&#39;</span><span class="p">)</span>
+        <span class="n">maxwidth</span> <span class="o">=</span> <span class="mi">79</span>
+        <span class="n">wrapper</span> <span class="o">=</span> <span class="n">ListWrapper</span><span class="p">(</span><span class="n">initial_width</span><span class="o">=</span><span class="n">maxwidth</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="s1">&#39;  Zones: &#39;</span><span class="p">),</span>
+                              <span class="n">subsequent_indent</span><span class="o">=</span><span class="s1">&#39;    &#39;</span><span class="p">,</span>
+                              <span class="n">subsequent_width</span><span class="o">=</span><span class="n">maxwidth</span><span class="p">)</span>
+        <span class="n">zones</span> <span class="o">=</span> <span class="n">wrapper</span><span class="o">.</span><span class="n">fill</span><span class="p">(</span><span class="n">z</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">zones</span><span class="p">())</span>
+        <span class="n">wrapper</span><span class="o">.</span><span class="n">initial_width</span> <span class="o">=</span> <span class="n">maxwidth</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="s1">&#39;  Variables: &#39;</span><span class="p">)</span>
+        <span class="n">variables</span> <span class="o">=</span> <span class="n">wrapper</span><span class="o">.</span><span class="n">fill</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">v</span>  <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">variables</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">fmt</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">title</span><span class="p">,</span> <span class="n">zones</span><span class="p">,</span> <span class="n">variables</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks for equality in the |Tecplot Engine|.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `bool`: `True` if the unique ID numbers are the same for both</span>
+<span class="sd">            `Datasets &lt;Dataset&gt;`.</span>
+
+<span class="sd">        This can be useful for determining if two `Frames &lt;Frame&gt;`</span>
+<span class="sd">        are holding on to the same `Dataset`::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame1.dataset == frame2.dataset</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">uid</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="fm">__eq__</span><span class="p">(</span><span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__contains__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">obj</span><span class="o">.</span><span class="n">dataset</span> <span class="o">==</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">Variable</span><span class="p">)</span> <span class="ow">and</span> <span class="n">obj</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">obj</span><span class="o">.</span><span class="n">index</span><span class="p">):</span>
+                <span class="k">return</span> <span class="bp">True</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">Zone</span><span class="p">)</span> <span class="ow">and</span> <span class="n">obj</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">obj</span><span class="o">.</span><span class="n">index</span><span class="p">):</span>
+                <span class="k">return</span> <span class="bp">True</span>
+        <span class="k">return</span> <span class="bp">False</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">aux_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Auxiliary data for this dataset.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `AuxData`</span>
+
+<span class="sd">        This is the auxiliary data attached to the dataset. Such data is</span>
+<span class="sd">        written to the layout file by default and can be retrieved later.</span>
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame = tp.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; aux = frame.dataset.aux_data</span>
+<span class="sd">            &gt;&gt;&gt; aux[&#39;Result&#39;] = &#39;3.14159&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(aux[&#39;Result&#39;])</span>
+<span class="sd">            3.14159</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">AuxData</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="p">,</span> <span class="n">AuxDataObjectType</span><span class="o">.</span><span class="n">Dataset</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">title</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Title of this `Dataset`.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset.title = &#39;My Data&#39;</span>
+
+<span class="sd">        .. versionchanged:: 2017.3 of Tecplot 360</span>
+<span class="sd">            The dataset title property requires Tecplot 360 2017 R3 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">sdk_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_required</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">sdk_required</span><span class="p">)</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetGetInfoByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">title</span>
+
+    <span class="nd">@title.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">title</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">title</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">sdk_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_required</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">sdk_required</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetSetTitleByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="n">title</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of `Zones &lt;data_access&gt;` in this `Dataset`.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This count includes disabled zones which were skipped when loading the</span>
+<span class="sd">        data. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for i in range(dataset.num_zones):</span>
+<span class="sd">            ...     zone = dataset.zone(i)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetGetNumZonesByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Dataset.zone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.zone">[docs]</a>    <span class="k">def</span> <span class="nf">zone</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns `Zone &lt;data_access&gt;` by index or string pattern.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`integer &lt;int&gt;` or `string &lt;str&gt;`):  Zero-based index or</span>
+<span class="sd">                `glob-style pattern &lt;fnmatch.fnmatch&gt;` in which case, the</span>
+<span class="sd">                first match is returned.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `OrderedZone`, `ClassicFEZone` or `PolyFEZone` depending on the</span>
+<span class="sd">            zone type.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotIndexError`</span>
+
+<span class="sd">        The `Zone.name &lt;OrderedZone.name&gt;` attribute is used to match the</span>
+<span class="sd">        *pattern* to the desired `Zone &lt;data_access&gt;` though this is not</span>
+<span class="sd">        necessarily unique::</span>
+
+<span class="sd">            &gt;&gt;&gt; ds = frame.dataset</span>
+<span class="sd">            &gt;&gt;&gt; print(ds)</span>
+<span class="sd">            Dataset:</span>
+<span class="sd">              Zones: [&#39;Rectangular zone&#39;]</span>
+<span class="sd">              Variables: [&#39;x&#39;, &#39;y&#39;, &#39;z&#39;]</span>
+<span class="sd">            &gt;&gt;&gt; rectzone = ds.zone(&#39;Rectangular zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; rectzone == ds.zone(0)</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">Ordered</span><span class="p">:</span> <span class="n">OrderedZone</span><span class="p">,</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">FELineSeg</span><span class="p">:</span> <span class="n">ClassicFEZone</span><span class="p">,</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">FETriangle</span><span class="p">:</span> <span class="n">ClassicFEZone</span><span class="p">,</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEQuad</span><span class="p">:</span> <span class="n">ClassicFEZone</span><span class="p">,</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">FETetra</span><span class="p">:</span> <span class="n">ClassicFEZone</span><span class="p">,</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEBrick</span><span class="p">:</span> <span class="n">ClassicFEZone</span><span class="p">,</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolygon</span><span class="p">:</span> <span class="n">PolyFEZone</span><span class="p">,</span>
+            <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolyhedron</span><span class="p">:</span> <span class="n">PolyFEZone</span><span class="p">}</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zones</span><span class="p">(</span><span class="n">pattern</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotPatternMatchError</span><span class="p">(</span>
+                    <span class="n">pattern</span><span class="p">,</span>
+                    <span class="s1">&#39;no zone found with name: &quot;{}&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span>
+                    <span class="s1">&#39;glob&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">pattern</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">pattern</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_zones</span>
+            <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">pattern</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_zones</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">MESSAGES</span><span class="o">.</span><span class="n">PERFORMANCE_IMPROVEMENTS</span><span class="p">)</span>
+                    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+                        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneIsEnabled</span><span class="p">(</span><span class="n">pattern</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;zone {} is not enabled&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+                            <span class="k">raise</span> <span class="n">TecplotIndexError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneIsEnabledByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="n">pattern</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                        <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;zone {} is not enabled&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+                        <span class="k">raise</span> <span class="n">TecplotIndexError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+                <span class="n">uid</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetUniqueIDByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                    <span class="n">pattern</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="n">ztype</span> <span class="o">=</span> <span class="n">Zone</span><span class="p">(</span><span class="n">uid</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">zone_type</span>
+                <span class="k">return</span> <span class="n">_dispatch</span><span class="p">[</span><span class="n">ztype</span><span class="p">](</span><span class="n">uid</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="n">TecplotIndexError</span></div>
+
+<div class="viewcode-block" id="Dataset.zones"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.zones">[docs]</a>    <span class="k">def</span> <span class="nf">zones</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Yields all `Zones &lt;data_access&gt;` matching a *pattern*.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`string &lt;str&gt;` pattern, optional): `glob-style pattern</span>
+<span class="sd">                &lt;fnmatch.fnmatch&gt;` used to match zone names or `None` which</span>
+<span class="sd">                will return all zones. (default: `None`)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `OrderedZone`, `ClassicFEZone` or `PolyFEZone` depending on the</span>
+<span class="sd">            zone type.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for zone in dataset.zones(&#39;A*&#39;):</span>
+<span class="sd">            ...     x_array = zone.variable(&#39;X&#39;)</span>
+
+<span class="sd">        Use list comprehension to construct a list of all zones with &#39;Wing&#39;</span>
+<span class="sd">        in the zone name::</span>
+
+<span class="sd">            &gt;&gt;&gt; wing_zones = [Z for Z in dataset.zones() if &#39;Wing&#39; in Z.name]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">pattern</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_zones</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                <span class="k">except</span> <span class="n">TecplotIndexError</span><span class="p">:</span>
+                    <span class="c1"># zone not enabled</span>
+                    <span class="k">continue</span>
+        <span class="k">elif</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">MESSAGES</span><span class="o">.</span><span class="n">PERFORMANCE_IMPROVEMENTS</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_zones</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">zone</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">fnmatch</span><span class="p">(</span><span class="n">zone</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+                        <span class="k">yield</span> <span class="n">zone</span>
+                <span class="k">except</span> <span class="n">TecplotIndexError</span><span class="p">:</span>
+                    <span class="c1"># zone not enabled</span>
+                    <span class="k">continue</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">success</span><span class="p">,</span> <span class="n">ptr</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetEnabledByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="n">indices</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">)</span>
+
+            <span class="n">success</span><span class="p">,</span> <span class="n">ptr</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetEnabledNamesByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+                <span class="n">indices</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="n">names</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">StringList</span><span class="p">)</span>
+
+            <span class="k">try</span><span class="p">:</span>
+
+                <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">indices</span><span class="p">,</span> <span class="n">names</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">fnmatch</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+                        <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="n">indices</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+                <span class="n">names</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of `Variables &lt;Variable&gt;` in this `Dataset`.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This count includes disabled variables which were skipped when the data</span>
+<span class="sd">        was loaded. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for i in range(dataset.num_variables):</span>
+<span class="sd">            ...     variable = dataset.variable(i)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetGetNumVarsByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Dataset.variable"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.variable">[docs]</a>    <span class="k">def</span> <span class="nf">variable</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the `Variable` by index or string pattern.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`integer &lt;int&gt;` or `string &lt;str&gt;`):  Zero-based index or</span>
+<span class="sd">                `glob-style pattern &lt;fnmatch.fnmatch&gt;` in which case, the</span>
+<span class="sd">                first match is returned.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotIndexError`</span>
+
+<span class="sd">        The `Variable.name` attribute is used to match the *pattern* to the</span>
+<span class="sd">        desired `Variable` though this is not necessarily unique::</span>
+
+<span class="sd">            &gt;&gt;&gt; ds = frame.dataset</span>
+<span class="sd">            &gt;&gt;&gt; print(ds)</span>
+<span class="sd">            Dataset:</span>
+<span class="sd">              Zones: [&#39;Rectangular zone&#39;]</span>
+<span class="sd">              Variables: [&#39;x&#39;, &#39;y&#39;, &#39;z&#39;]</span>
+<span class="sd">            &gt;&gt;&gt; x = ds.variable(&#39;x&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; x == ds.variable(0)</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">variables</span><span class="p">(</span><span class="n">pattern</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotPatternMatchError</span><span class="p">(</span>
+                    <span class="n">pattern</span><span class="p">,</span>
+                    <span class="s1">&#39;no variable found with name: &quot;{}&quot;.&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span>
+                    <span class="s1">&#39;glob&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">pattern</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">pattern</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_variables</span>
+            <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">pattern</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_variables</span><span class="p">:</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">VarIsEnabledByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="n">pattern</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                    <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;variable {} is not enabled&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+                    <span class="k">raise</span> <span class="n">TecplotIndexError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">Variable</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">VarGetUniqueIDByDataSetID</span><span class="p">(</span>
+                                <span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="n">pattern</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span> <span class="bp">self</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="n">TecplotIndexError</span></div>
+
+<div class="viewcode-block" id="Dataset.variables"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.variables">[docs]</a>    <span class="k">def</span> <span class="nf">variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Yields all `Variables &lt;Variable&gt;` matching a *pattern*.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`string &lt;str&gt;` pattern, optional): `glob-style pattern</span>
+<span class="sd">                &lt;fnmatch.fnmatch&gt;` used to match variable names or `None` which</span>
+<span class="sd">                will return all variables. (default: `None`)</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for variable in dataset.variables(&#39;A*&#39;):</span>
+<span class="sd">            ...     array = variable.values(&#39;My Zone&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">pattern</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_variables</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                <span class="k">except</span> <span class="n">TecplotIndexError</span><span class="p">:</span>
+                    <span class="c1"># variable not enabled</span>
+                    <span class="k">continue</span>
+        <span class="k">elif</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">MESSAGES</span><span class="o">.</span><span class="n">PERFORMANCE_IMPROVEMENTS</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_variables</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">variable</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">fnmatch</span><span class="p">(</span><span class="n">variable</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+                        <span class="k">yield</span> <span class="n">variable</span>
+                <span class="k">except</span> <span class="n">TecplotIndexError</span><span class="p">:</span>
+                    <span class="c1"># variable not enabled</span>
+                    <span class="k">continue</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">success</span><span class="p">,</span> <span class="n">ptr</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">VarGetEnabledByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="n">indices</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">)</span>
+
+            <span class="n">success</span><span class="p">,</span> <span class="n">ptr</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">VarGetEnabledNamesByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+                <span class="n">indices</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="n">names</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">StringList</span><span class="p">)</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">indices</span><span class="p">,</span> <span class="n">names</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">fnmatch</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+                        <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="n">indices</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+                <span class="n">names</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">VariablesNamedTuple</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;A `collections.namedtuple` object using variable names.</span>
+
+<span class="sd">        The variable names are transformed to be unique, valid identifiers</span>
+<span class="sd">        suitable for use as the key-list for a `collections.namedtuple`.</span>
+<span class="sd">        This means that all invalid characters such as spaces and dashes</span>
+<span class="sd">        are converted to underscores, Python keywords are appended by an</span>
+<span class="sd">        underscore, leading numbers or empty names are prepended with a &quot;v&quot;</span>
+<span class="sd">        and duplicate variable names are indexed starting with zero, padded</span>
+<span class="sd">        left with zeros variable names duplicated more than nine times. The</span>
+<span class="sd">        following table gives some specific examples:</span>
+
+<span class="sd">            ==================== ===========================</span>
+<span class="sd">            Variable names       Resulting namedtuple fields</span>
+<span class="sd">            ==================== ===========================</span>
+<span class="sd">            ``&#39;x&#39;, &#39;y&#39;``         ``&#39;x&#39;, &#39;y&#39;``</span>
+<span class="sd">            ``&#39;x&#39;, &#39;x&#39;``         ``&#39;x0&#39;, &#39;x1&#39;``</span>
+<span class="sd">            ``&#39;X&#39;, &#39;Y=f(X)&#39;``    ``&#39;X&#39;, &#39;Y_f_X_&#39;``</span>
+<span class="sd">            ``&#39;x 2&#39;, &#39;_&#39;, &#39;_&#39;``  ``&#39;x_2&#39;, &#39;v0&#39;, &#39;v1&#39;``</span>
+<span class="sd">            ``&#39;def&#39;, &#39;if&#39;``      ``&#39;def_&#39;, &#39;if_&#39;``</span>
+<span class="sd">            ``&#39;1&#39;, &#39;2&#39;, &#39;3&#39;``    ``&#39;v1&#39;, &#39;v2&#39;, &#39;v3&#39;``</span>
+<span class="sd">            ==================== ===========================</span>
+
+<span class="sd">        This example shows how one can use this n-tuple type with the</span>
+<span class="sd">        result from a call to `tecplot.data.query.probe_at_position`::</span>
+
+<span class="sd">            &gt;&gt;&gt; from os import path</span>
+<span class="sd">            &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">            &gt;&gt;&gt; examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">            &gt;&gt;&gt; datafile = path.join(examples_dir,&#39;SimpleData&#39;,&#39;DownDraft.plt&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; dataset = tp.data.load_tecplot(datafile)</span>
+<span class="sd">            &gt;&gt;&gt; result = tp.data.query.probe_at_position(0,0.1,0.3)</span>
+<span class="sd">            &gt;&gt;&gt; data = dataset.VariablesNamedTuple(*result.data)</span>
+<span class="sd">            &gt;&gt;&gt; msg = &#39;(RHO, E) = ({:.2f}, {:.2f})&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(msg.format(data.RHO, data.E))</span>
+<span class="sd">            (RHO, E) = (1.17, 252930.37)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># First we clean up variable names</span>
+        <span class="c1"># and keep a count of each name used</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">count</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">variables</span><span class="p">():</span>
+            <span class="c1"># sub invalid characters with underscores</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\W|^(?=\d)&#39;</span><span class="p">,</span> <span class="sa">r</span><span class="s1">&#39;_&#39;</span><span class="p">,</span> <span class="n">v</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+            <span class="c1"># remove leading underscores</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;^_+&#39;</span><span class="p">,</span> <span class="sa">r</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+            <span class="c1"># prepend leading number with &#39;v&#39;</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;^(\d)&#39;</span><span class="p">,</span> <span class="sa">r</span><span class="s1">&#39;v\1&#39;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+            <span class="c1"># append keywords with underscore</span>
+            <span class="k">if</span> <span class="n">iskeyword</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">name</span> <span class="o">+</span> <span class="s1">&#39;_&#39;</span>
+            <span class="c1"># force non-empty variable names using &#39;v&#39;</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="s1">&#39;v&#39;</span>
+            <span class="c1"># add name to list</span>
+            <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="c1"># keep track of names to identify duplicates</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">count</span><span class="p">:</span>
+                <span class="n">count</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">count</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="c1"># append index, with padded zeros</span>
+        <span class="n">numbered</span> <span class="o">=</span> <span class="n">count</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span><span class="n">name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">names</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">count</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">names</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;{0}{1:0{2}d}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">name</span><span class="p">,</span>
+                    <span class="n">count</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">-</span> <span class="n">numbered</span><span class="p">[</span><span class="n">name</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">count</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)))</span>
+                <span class="n">numbered</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">-=</span> <span class="mi">1</span>
+
+        <span class="k">return</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;DatasetVariables&#39;</span><span class="p">,</span> <span class="n">names</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Dataset.copy_zones"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.copy_zones">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">copy_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">zones</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Copies `Zones &lt;data_access&gt;` within this `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            *zones (`Zone &lt;data_access&gt;`, optional): Specific `Zones</span>
+<span class="sd">                &lt;data_access&gt;` to copy. All zones will be copied if none are</span>
+<span class="sd">                supplied.</span>
+<span class="sd">            shared_variables (`bool` or `list` of `Variables &lt;Variable&gt;`):</span>
+<span class="sd">                Variables to be shared between original and generated zones.</span>
+<span class="sd">                (default: `False`)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `list` of the newly created `Zones &lt;data_access&gt;`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; new_zones = dataset.copy_zones()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">share_variables</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;share_variables&#39;</span><span class="p">,</span> <span class="bp">False</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">share_variables</span><span class="p">:</span>
+            <span class="n">branch_variables</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">variables</span><span class="p">())</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">share_variables</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">var</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">share_variables</span><span class="p">):</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">var</span><span class="p">,</span><span class="n">Variable</span><span class="p">):</span>
+                    <span class="n">share_variables</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span><span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">var</span><span class="p">)</span>
+
+            <span class="n">branch_variables</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">variables</span><span class="p">()</span>
+                                <span class="k">if</span> <span class="n">v</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">share_variables</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">branch_variables</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">num_zones</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_zones</span>
+        <span class="k">with</span> <span class="n">IndexSet</span><span class="p">(</span><span class="o">*</span><span class="n">zones</span><span class="p">)</span> <span class="k">as</span> <span class="n">zoneset</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">ArgList</span><span class="p">(</span><span class="n">SOURCEZONES</span><span class="o">=</span><span class="n">zoneset</span><span class="p">)</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Zone copy:</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">arglist</span><span class="p">))</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneCopyX</span><span class="p">(</span><span class="n">arglist</span><span class="p">)</span>
+
+        <span class="n">new_zones</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_zones</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_zones</span><span class="p">)]</span>
+
+        <span class="k">for</span> <span class="n">zone</span> <span class="ow">in</span> <span class="n">new_zones</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">branch_variables</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">branch_variables</span><span class="p">(</span><span class="n">zone</span><span class="p">,</span> <span class="n">var</span><span class="p">,</span> <span class="bp">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">new_zones</span></div>
+
+<div class="viewcode-block" id="Dataset.add_variable"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.add_variable">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">add_variable</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">dtypes</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">locations</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a single `Variable` to the active `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            name (`string &lt;str&gt;`): The name of the new `Variable`. This does not</span>
+<span class="sd">                have to be unique.</span>
+<span class="sd">            dtypes (`FieldDataType` or `list` of `FieldDataType`, optional):</span>
+<span class="sd">                Data types of this `Variable` for each `Zone &lt;data_access&gt;` in</span>
+<span class="sd">                the currently active `Dataset`. Options are:</span>
+<span class="sd">                `FieldDataType.Float`, `Double &lt;FieldDataType.Double&gt;`,</span>
+<span class="sd">                `Int32`, `Int16`, `Byte` and `Bit`. If a single value, this</span>
+<span class="sd">                will be duplicated for all `Zones &lt;data_access&gt;`. (default:</span>
+<span class="sd">                `None`)</span>
+<span class="sd">            locations (`ValueLocation` or `list` of `ValueLocation`, optional):</span>
+<span class="sd">                Point locations of this `Variable` for each</span>
+<span class="sd">                `Zone &lt;data_access&gt;` in the currently active `Dataset`. Options</span>
+<span class="sd">                are: `Nodal` and `CellCentered`. If a single value, this will</span>
+<span class="sd">                be duplicated for all `Zones &lt;data_access&gt;`. (default: `None`)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Variable`</span>
+
+<span class="sd">        The added `Variable` will be available for use in each `Zone</span>
+<span class="sd">        &lt;data_access&gt;` of the dataset. This method should be used in</span>
+<span class="sd">        conjunction with other data creation methods such as</span>
+<span class="sd">        `Dataset.add_zone`:</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 7-8</span>
+
+<span class="sd">            import math</span>
+<span class="sd">            import tecplot as tp</span>
+<span class="sd">            from tecplot.constant import PlotType</span>
+
+<span class="sd">            # Setup Tecplot dataset</span>
+<span class="sd">            dataset = tp.active_frame().create_dataset(&#39;Data&#39;)</span>
+<span class="sd">            dataset.add_variable(&#39;x&#39;)</span>
+<span class="sd">            dataset.add_variable(&#39;s&#39;)</span>
+<span class="sd">            zone = dataset.add_ordered_zone(&#39;Zone&#39;, 100)</span>
+
+<span class="sd">            # Fill the dataset</span>
+<span class="sd">            x = [0.1 * i for i in range(100)]</span>
+<span class="sd">            zone.values(&#39;x&#39;)[:] = x</span>
+<span class="sd">            zone.values(&#39;s&#39;)[:] = [math.sin(i) for i in x]</span>
+
+<span class="sd">            # Set plot type to XYLine</span>
+<span class="sd">            tp.active_frame().plot(PlotType.XYLine).activate()</span>
+
+<span class="sd">            tp.export.save_png(&#39;add_variables.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        ..  figure:: /_static/images/add_variables.png</span>
+<span class="sd">            :width: 300px</span>
+<span class="sd">            :figwidth: 300px</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">128</span><span class="p">,</span> <span class="s1">&#39;Variable names are limited to 128 characters&#39;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">dataset</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span>
+            <span class="n">new_variable_index</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_variables</span>
+            <span class="k">with</span> <span class="n">ArgList</span><span class="p">(</span><span class="n">NAME</span><span class="o">=</span><span class="n">name</span><span class="p">)</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">dtypes</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">dtypes</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">):</span>
+                        <span class="n">dtypes</span> <span class="o">=</span> <span class="p">[</span><span class="n">dtypes</span><span class="p">]</span> <span class="o">*</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="s1">&#39;VARDATATYPE&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">dtypes</span>
+                <span class="k">if</span> <span class="n">locations</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">locations</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">):</span>
+                        <span class="n">locations</span> <span class="o">=</span> <span class="p">[</span><span class="n">locations</span><span class="p">]</span> <span class="o">*</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="s1">&#39;VALUELOCATION&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">locations</span>
+
+                <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+                    <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;new variable: &#39;</span> <span class="o">+</span> <span class="n">name</span>
+                    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">arglist</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                        <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">  {} = {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetAddVarX</span><span class="p">(</span><span class="n">arglist</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">dataset</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">new_variable_index</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Dataset.add_zone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.add_zone">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">add_zone</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone_type</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="n">dtypes</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">locations</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">face_neighbor_mode</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">parent_zone</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">solution_time</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">strand_id</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a single `Zone &lt;data_access&gt;` to this `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            zone_type (`ZoneType`): The type of `Zone &lt;data_access&gt;` to be</span>
+<span class="sd">                created. Possible values are: `Ordered`, `FETriangle`,</span>
+<span class="sd">                `FEQuad`, `FETetra`, `FEBrick`, `FELineSeg`, `FEPolyhedron` and</span>
+<span class="sd">                `FEPolygon`.</span>
+<span class="sd">            name (`string &lt;str&gt;`): Name of the new `Zone &lt;data_access&gt;`. This</span>
+<span class="sd">                does not have to be unique.</span>
+<span class="sd">            shape (`integer &lt;int&gt;` or `list` of `integers &lt;int&gt;`): Specifies</span>
+<span class="sd">                the length and dimension (up to three) of the new `Zone</span>
+<span class="sd">                &lt;data_access&gt;`. A 1D `Zone &lt;data_access&gt;` is assumed if a</span>
+<span class="sd">                single `int` is given. This is **(i, j, k)** for ordered `Zones</span>
+<span class="sd">                &lt;data_access&gt;`, **(num_points, num_elements)** for</span>
+<span class="sd">                finite-element `Zones &lt;data_access&gt;` and **(num_points,</span>
+<span class="sd">                num_elements, num_faces)** for polytope `Zones &lt;data_access&gt;`</span>
+<span class="sd">                where the number of faces is known.</span>
+<span class="sd">            dtypes (`FieldDataType`, `list` of `FieldDataType`, optional): Data</span>
+<span class="sd">                types of this `Zone &lt;data_access&gt;` for each `Variable` in the</span>
+<span class="sd">                currently active `Dataset`. Options are: `Float</span>
+<span class="sd">                &lt;FieldDataType.Float&gt;`, `Double &lt;FieldDataType.Double&gt;`,</span>
+<span class="sd">                `Int32`, `Int16`, `Byte` and `Bit`. If a single value, this</span>
+<span class="sd">                will be duplicated for all `Variables &lt;Variable&gt;`. If `None`</span>
+<span class="sd">                then the type of the first `Variable`, defaulting to</span>
+<span class="sd">                `FieldDataType.Float`, is used for all. (default: `None`)</span>
+<span class="sd">            locations (`ValueLocation`, `list` of `ValueLocation`, optional):</span>
+<span class="sd">                Point locations of this `Zone &lt;data_access&gt;` for each</span>
+<span class="sd">                `Variable` in the currently active `Dataset`. Options are:</span>
+<span class="sd">                `Nodal` and `CellCentered`. If a single value, this will be</span>
+<span class="sd">                duplicated for all `Variables &lt;Variable&gt;`.  If `None` then the</span>
+<span class="sd">                type of the first `Variable`, defaulting to `Nodal`, is used</span>
+<span class="sd">                for all. (default: `None`)</span>
+<span class="sd">            face_neighbor_mode (`FaceNeighborMode`, optional): Specifies the</span>
+<span class="sd">                face-neighbor mode for this zone.  Options are:</span>
+<span class="sd">                `FaceNeighborMode.LocalOneToOne` (default),</span>
+<span class="sd">                `FaceNeighborMode.LocalOneToMany`,</span>
+<span class="sd">                `FaceNeighborMode.GlobalOneToOne` or</span>
+<span class="sd">                `FaceNeighborMode.GlobalOneToMany`.</span>
+<span class="sd">            parent_zone (`Zone &lt;data_access&gt;`, optional): A parent `Zone</span>
+<span class="sd">                &lt;data_access&gt;` to be used when generating surface-restricted</span>
+<span class="sd">                streamtraces.</span>
+<span class="sd">            solution_time (`float`, optional): Solution time for this zone.</span>
+<span class="sd">                (default: 0)</span>
+<span class="sd">            strand_id (`integer &lt;int&gt;`, optional): Associate this new `Zone</span>
+<span class="sd">                &lt;data_access&gt;` with a particular strand.</span>
+<span class="sd">            index (`integer &lt;int&gt;`, optional): Number of the zone to add or</span>
+<span class="sd">                replace. If omitted or set to `None`, the new zone will be</span>
+<span class="sd">                appended to the dataset. This value can be set to the number of</span>
+<span class="sd">                a zone that already exists thereby replacing the existing zone.</span>
+<span class="sd">                (default: `None`)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Zone &lt;data_access&gt;`</span>
+
+<span class="sd">        The added `Zone &lt;data_access&gt;` will be able to use all `Variables</span>
+<span class="sd">        &lt;Variable&gt;` defined in the  dataset. This method should be used in</span>
+<span class="sd">        conjunction with other data creation methods such as</span>
+<span class="sd">        `Frame.create_dataset`. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import ZoneType</span>
+<span class="sd">            &gt;&gt;&gt; zone = dataset.add_zone(ZoneType.Ordered, &#39;Zone&#39;, (10, 10, 10))</span>
+
+<span class="sd">        .. note::</span>
+
+<span class="sd">            The relationship and meaning of this method&#39;s parameters change</span>
+<span class="sd">            depending on the type of zone being created. Therefore, it is</span>
+<span class="sd">            recommended to use the more specific zone creation methods:</span>
+
+<span class="sd">                * `Dataset.add_ordered_zone`</span>
+<span class="sd">                * `Dataset.add_fe_zone`</span>
+<span class="sd">                * `Dataset.add_poly_zone`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_variables</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">errmsg</span> <span class="o">=</span> <span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                Can not create a zone on a dataset with no variables.</span>
+<span class="s1">                    Add at least one variable to this dataset before</span>
+<span class="s1">                    creating any zones.&#39;&#39;&#39;</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">errmsg</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">dataset</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span>
+            <span class="n">new_zone_index</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span> <span class="k">if</span> <span class="n">index</span> <span class="ow">is</span> <span class="bp">None</span> <span class="k">else</span> <span class="n">index</span>
+            <span class="k">with</span> <span class="n">ArgList</span><span class="p">(</span><span class="n">ZONETYPE</span><span class="o">=</span><span class="n">zone_type</span><span class="p">,</span> <span class="n">NAME</span><span class="o">=</span><span class="n">name</span><span class="p">)</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+                <span class="c1"># convert shape to (imax, jmax, kmax)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">):</span>
+                    <span class="n">shape</span> <span class="o">=</span> <span class="p">[</span><span class="n">shape</span><span class="p">]</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">([</span><span class="n">sv</span><span class="o">.</span><span class="n">IMAX</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">JMAX</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">KMAX</span><span class="p">],</span> <span class="n">shape</span><span class="p">):</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+
+                <span class="c1"># expand data types and locations to length of num_variables</span>
+                <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">([</span><span class="n">sv</span><span class="o">.</span><span class="n">VARDATATYPE</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VALUELOCATION</span><span class="p">],</span>
+                                    <span class="p">[</span><span class="n">dtypes</span><span class="p">,</span> <span class="n">locations</span><span class="p">]):</span>
+                    <span class="k">if</span> <span class="n">val</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">):</span>
+                            <span class="n">val</span> <span class="o">=</span> <span class="p">[</span><span class="n">val</span><span class="p">]</span> <span class="o">*</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_variables</span>
+                        <span class="n">arglist</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+
+                <span class="k">if</span> <span class="n">solution_time</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">SOLUTIONTIME</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">solution_time</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">strand_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">STRANDID</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">strand_id</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">parent_zone</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">PARENTZONE</span><span class="p">]</span> <span class="o">=</span> <span class="n">parent_zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span>
+
+                <span class="k">if</span> <span class="n">face_neighbor_mode</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">FACENEIGHBORMODE</span><span class="p">]</span> <span class="o">=</span> <span class="n">FaceNeighborMode</span><span class="p">(</span>
+                        <span class="n">face_neighbor_mode</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">index</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ZONE</span><span class="p">]</span> <span class="o">=</span> <span class="n">index</span> <span class="o">+</span> <span class="mi">1</span>
+
+                <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+                    <span class="n">shp</span> <span class="o">=</span> <span class="s1">&#39;({})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">shape</span><span class="p">))</span>
+                    <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;new dataset shape: &#39;</span> <span class="o">+</span> <span class="n">shp</span>
+                    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">arglist</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                        <span class="n">msg</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">  {} = {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetAddZoneX</span><span class="p">(</span><span class="n">arglist</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+            <span class="n">new_zone</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">new_zone_index</span><span class="p">)</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">state_changed</span><span class="p">(</span><span class="n">StateChange</span><span class="o">.</span><span class="n">ZonesAdded</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="bp">self</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">new_zone</span></div>
+
+<div class="viewcode-block" id="Dataset.add_ordered_zone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.add_ordered_zone">[docs]</a>    <span class="k">def</span> <span class="nf">add_ordered_zone</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a single ordered `Zone &lt;data_access&gt;` to this `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            name (`string &lt;str&gt;`): Name of the new `Zone &lt;data_access&gt;`. This</span>
+<span class="sd">                does not have to be unique.</span>
+<span class="sd">            shape (`integer &lt;int&gt;` or `list` of `integers &lt;int&gt;`): Specifies</span>
+<span class="sd">                the length and dimension **(i, j, k)** of the new</span>
+<span class="sd">                `Zone &lt;data_access&gt;`. A 1D `Zone &lt;data_access&gt;` is assumed if a</span>
+<span class="sd">                single `int` is given.</span>
+<span class="sd">            **kwargs: These arguments are passed to `Dataset.add_zone`.</span>
+
+<span class="sd">        .. seealso:: `Dataset.add_zone`</span>
+
+<span class="sd">            Keyword arguments are passed to the parent zone creation method</span>
+<span class="sd">            `Dataset.add_zone`.</span>
+
+<span class="sd">        This example creates a 10x10x10 ordered zone of double-precision</span>
+<span class="sd">        floating-point numbers::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import FieldDataType</span>
+<span class="sd">            &gt;&gt;&gt; my_zone = dataset.add_zone(&#39;My Zone&#39;, (10, 10, 10),</span>
+<span class="sd">            ...                            dtype=FieldDataType.Double)</span>
+
+<span class="sd">        Here is a full example:</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 12,17,22</span>
+
+<span class="sd">            import numpy as np</span>
+<span class="sd">            import tecplot as tp</span>
+<span class="sd">            from tecplot.constant import PlotType, Color</span>
+
+<span class="sd">            # Generate data</span>
+<span class="sd">            x = np.linspace(-4, 4, 100)</span>
+
+<span class="sd">            # Setup Tecplot dataset</span>
+<span class="sd">            dataset = tp.active_frame().create_dataset(&#39;Data&#39;, [&#39;x&#39;, &#39;y&#39;])</span>
+
+<span class="sd">            # Create a zone</span>
+<span class="sd">            zone = dataset.add_ordered_zone(&#39;sin(x)&#39;, len(x))</span>
+<span class="sd">            zone.values(&#39;x&#39;)[:] = x</span>
+<span class="sd">            zone.values(&#39;y&#39;)[:] = np.sin(x)</span>
+
+<span class="sd">            # Create another zone</span>
+<span class="sd">            zone = dataset.add_ordered_zone(&#39;cos(x)&#39;, len(x))</span>
+<span class="sd">            zone.values(&#39;x&#39;)[:] = x</span>
+<span class="sd">            zone.values(&#39;y&#39;)[:] = np.cos(x)</span>
+
+<span class="sd">            # And one more zone</span>
+<span class="sd">            zone = dataset.add_ordered_zone(&#39;tan(x)&#39;, len(x))</span>
+<span class="sd">            zone.values(&#39;x&#39;)[:] = x</span>
+<span class="sd">            zone.values(&#39;y&#39;)[:] = np.tan(x)</span>
+
+<span class="sd">            # Set plot type to XYLine</span>
+<span class="sd">            plot = tp.active_frame().plot(PlotType.XYLine)</span>
+<span class="sd">            plot.activate()</span>
+
+<span class="sd">            # Show all linemaps and make the lines a bit thicker</span>
+<span class="sd">            for lmap in plot.linemaps():</span>
+<span class="sd">                lmap.show = True</span>
+<span class="sd">                lmap.line.line_thickness = 0.6</span>
+
+<span class="sd">            plot.legend.show = True</span>
+
+<span class="sd">            tp.export.save_png(&#39;add_ordered_zones.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        ..  figure:: /_static/images/add_ordered_zones.png</span>
+<span class="sd">            :width: 300px</span>
+<span class="sd">            :figwidth: 300px</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_zone</span><span class="p">(</span><span class="n">ZoneType</span><span class="o">.</span><span class="n">Ordered</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Dataset.add_fe_zone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.add_fe_zone">[docs]</a>    <span class="k">def</span> <span class="nf">add_fe_zone</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone_type</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">num_points</span><span class="p">,</span> <span class="n">num_elements</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Add a single finite-element `Zone &lt;data_access&gt;` to this `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            zone_type (`ZoneType`): The type of `Zone &lt;data_access&gt;` to be</span>
+<span class="sd">                created. Possible values are: `FETriangle`, `FEQuad`,</span>
+<span class="sd">                `FETetra`, `FEBrick` and `FELineSeg`.</span>
+<span class="sd">            name (`string &lt;str&gt;`): Name of the new `Zone &lt;data_access&gt;`. This</span>
+<span class="sd">                does not have to be unique.</span>
+<span class="sd">            num_points (`integer &lt;int&gt;`): Number of points (nodes) in this</span>
+<span class="sd">                zone.</span>
+<span class="sd">            num_elements (`integer &lt;int&gt;`): Number of elements in this zone.</span>
+<span class="sd">                The nodemap will have the shape (num_points, num_elements).</span>
+<span class="sd">            **kwargs: These arguments are passed to `Dataset.add_zone`.</span>
+
+<span class="sd">        .. seealso:: `Dataset.add_zone`</span>
+
+<span class="sd">            Keyword arguments are passed to the parent zone creation method</span>
+<span class="sd">            `Dataset.add_zone`.</span>
+
+<span class="sd">        The number of points (also known as nodes) per finite-element is</span>
+<span class="sd">        determined from the ``zone_type`` parameter. The follow table shows the</span>
+<span class="sd">        number of points per element for the available zone types along with</span>
+<span class="sd">        the resulting shape of the nodemap based on the number of points</span>
+<span class="sd">        specified (:math:`N`):</span>
+
+<span class="sd">            ============== ============== ========================</span>
+<span class="sd">            Zone Type      Points/Element Nodemap Shape</span>
+<span class="sd">            ============== ============== ========================</span>
+<span class="sd">            ``FELineSeg``  2              (:math:`N`, :math:`2 N`)</span>
+<span class="sd">            ``FETriangle`` 3              (:math:`N`, :math:`3 N`)</span>
+<span class="sd">            ``FEQuad``     4              (:math:`N`, :math:`4 N`)</span>
+<span class="sd">            ``FETetra``    4              (:math:`N`, :math:`4 N`)</span>
+<span class="sd">            ``FEBrick``    8              (:math:`N`, :math:`8 N`)</span>
+<span class="sd">            ============== ============== ========================</span>
+
+<span class="sd">        For more details, see the &quot;working with datasets&quot; examples shipped with</span>
+<span class="sd">        PyTecplot in the Tecplot 360 distribution.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">zone_type</span> <span class="ow">in</span> <span class="p">[</span><span class="n">ZoneType</span><span class="o">.</span><span class="n">FETriangle</span><span class="p">,</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEQuad</span><span class="p">,</span>
+                             <span class="n">ZoneType</span><span class="o">.</span><span class="n">FETetra</span><span class="p">,</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEBrick</span><span class="p">,</span>
+                             <span class="n">ZoneType</span><span class="o">.</span><span class="n">FELineSeg</span><span class="p">]</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_zone</span><span class="p">(</span><span class="n">zone_type</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">num_points</span><span class="p">,</span> <span class="n">num_elements</span><span class="p">),</span>
+                             <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Dataset.add_poly_zone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.add_poly_zone">[docs]</a>    <span class="k">def</span> <span class="nf">add_poly_zone</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone_type</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">num_points</span><span class="p">,</span> <span class="n">num_elements</span><span class="p">,</span>
+                      <span class="n">num_faces</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a single polygonal `Zone &lt;data_access&gt;` to this `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            zone_type (`ZoneType`): The type of `Zone &lt;data_access&gt;` to be</span>
+<span class="sd">                created. Possible values are: `FEPolyhedron` and `FEPolygon`.</span>
+<span class="sd">            name (`string &lt;str&gt;`): Name of the new `Zone &lt;data_access&gt;`. This</span>
+<span class="sd">                does not have to be unique.</span>
+<span class="sd">            num_points (`integer &lt;int&gt;`): Number of points in this zone.</span>
+<span class="sd">            num_elements (`integer &lt;int&gt;`): Number of elements in this zone.</span>
+<span class="sd">            num_faces (`integer &lt;int&gt;`): Number of faces in this zone.</span>
+<span class="sd">            **kwargs: These arguments are passed to `Dataset.add_zone`.</span>
+
+<span class="sd">        .. seealso:: `Dataset.add_zone`</span>
+
+<span class="sd">            Keyword arguments are passed to the parent zone creation method</span>
+<span class="sd">            `Dataset.add_zone`.</span>
+
+<span class="sd">        .. note:: The **num_faces** is the number of *unique faces*.</span>
+
+<span class="sd">            The number of unique faces, given an element map can be obtained</span>
+<span class="sd">            using the following function for polygon data::</span>
+
+<span class="sd">                def num_unique_faces(elementmap):</span>
+<span class="sd">                    return len(set( tuple(sorted([e[i], e[(i+1)%len(e)]]))</span>
+<span class="sd">                                for e in elementmap for i in range(len(e)) ))</span>
+
+<span class="sd">            This function creates a unique set of node pairs (edges around</span>
+<span class="sd">            the polygons) and counts them. For polyhedron data, the following</span>
+<span class="sd">            can be used::</span>
+
+<span class="sd">                def num_unique_faces(elementmap):</span>
+<span class="sd">                    return len(set( tuple(sorted(f)) for e in elementmap</span>
+<span class="sd">                                                     for f in e ))</span>
+
+<span class="sd">            which merely counts the number of unique faces defined in the</span>
+<span class="sd">            element map.</span>
+
+<span class="sd">        For more details, see the &quot;working with datasets&quot; examples shipped with</span>
+<span class="sd">        PyTecplot in the Tecplot 360 distribution.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">zone_type</span> <span class="ow">in</span> <span class="p">[</span><span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolyhedron</span><span class="p">,</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolygon</span><span class="p">]</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_zone</span><span class="p">(</span><span class="n">zone_type</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">num_points</span><span class="p">,</span> <span class="n">num_elements</span><span class="p">,</span>
+                             <span class="n">num_faces</span><span class="p">),</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Dataset.delete_variables"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.delete_variables">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">delete_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">variables</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Remove `Variables &lt;Variable&gt;` from this `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            *variables (`Variable` or index `integer &lt;int&gt;`): Variables to</span>
+<span class="sd">                remove from this dataset.</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 3</span>
+
+<span class="sd">            &gt;&gt;&gt; print([v.name for v in dataset.variables()])</span>
+<span class="sd">            [&#39;X&#39;,&#39;Y&#39;,&#39;Z&#39;]</span>
+<span class="sd">            &gt;&gt;&gt; dataset.delete_variables(dataset.variable(&#39;Z&#39;))</span>
+<span class="sd">            &gt;&gt;&gt; print([v.name for v in dataset.variables()])</span>
+<span class="sd">            [&#39;X&#39;,&#39;Y&#39;]</span>
+
+<span class="sd">        Notes:</span>
+<span class="sd">            Multiple `Variables &lt;Variable&gt;` can be deleted at once, though</span>
+<span class="sd">            the last `Variable` can not be deleted. This command deletes all</span>
+<span class="sd">            but the first `Variable` in the `Dataset` (usually ``X``)::</span>
+
+<span class="sd">                &gt;&gt;&gt; # Try to delete all variables:</span>
+<span class="sd">                &gt;&gt;&gt; dataset.delete_variables(dataset.variables())</span>
+<span class="sd">                &gt;&gt;&gt; # Dataset requires at least one variable to</span>
+<span class="sd">                &gt;&gt;&gt; # exist, so it leaves the first one:</span>
+<span class="sd">                &gt;&gt;&gt; print([v.name for v in dataset.variables()])</span>
+<span class="sd">                [&#39;X&#39;]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">variables</span> <span class="o">=</span> <span class="n">flatten_args</span><span class="p">(</span><span class="o">*</span><span class="n">variables</span><span class="p">)</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">with</span> <span class="n">IndexSet</span><span class="p">(</span><span class="o">*</span><span class="n">variables</span><span class="p">)</span> <span class="k">as</span> <span class="n">vlist</span><span class="p">:</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetDeleteVar</span><span class="p">(</span><span class="n">vlist</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Dataset.delete_zones"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.delete_zones">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">delete_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">zones</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Remove `Zones &lt;data_access&gt;` from this `Dataset`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            *zones (`Zones &lt;data_access&gt;` or index `integers &lt;int&gt;`): Zones to</span>
+<span class="sd">                remove from this dataset.</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 3</span>
+
+<span class="sd">            &gt;&gt;&gt; print([z.name for z in dataset.zones()])</span>
+<span class="sd">            [&#39;Zone 1&#39;, &#39;Zone 2&#39;]</span>
+<span class="sd">            &gt;&gt;&gt; dataset.delete_zones(dataset.zone(&#39;Zone 2&#39;))</span>
+<span class="sd">            &gt;&gt;&gt; print([z.name for z in dataset.zones()])</span>
+<span class="sd">            [&#39;Zone 1&#39;]</span>
+
+<span class="sd">        Notes:</span>
+<span class="sd">            Multiple `Zones &lt;data_access&gt;` can be deleted at once, though the</span>
+<span class="sd">            at least one `Zone &lt;data_access&gt;` must remain. This command deletes</span>
+<span class="sd">            all but the first `Zone &lt;data_access&gt;` in the `Dataset`::</span>
+
+<span class="sd">                &gt;&gt;&gt; dataset.delete_zones(dataset.zones())</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">zones</span> <span class="o">=</span> <span class="n">flatten_args</span><span class="p">(</span><span class="o">*</span><span class="n">zones</span><span class="p">)</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">with</span> <span class="n">IndexSet</span><span class="p">(</span><span class="o">*</span><span class="n">zones</span><span class="p">)</span> <span class="k">as</span> <span class="n">zlist</span><span class="p">:</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetDeleteZone</span><span class="p">(</span><span class="n">zlist</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_solution_times</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of solution times for all zones in the dataset.</span>
+
+<span class="sd">        :type: `int` (read-only)</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.num_solution_times)</span>
+<span class="sd">            10</span>
+
+<span class="sd">        .. versionadded:: 2017.3</span>
+<span class="sd">            Solution time manipulation requires Tecplot 360 2017 R3 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">sdk_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_required</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R3 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">sdk_required</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetNumTimeStepsByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">res</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">value</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">solution_times</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`List &lt;list&gt;` of solution times for all zones in the dataset.</span>
+
+<span class="sd">        :type: `list` of `floats &lt;float&gt;` (read-only)</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.solution_times)</span>
+<span class="sd">            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]</span>
+
+<span class="sd">        .. versionadded:: 2017.3</span>
+<span class="sd">            Solution time manipulation requires Tecplot 360 2017 R3 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">sdk_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_required</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R3 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">sdk_required</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetSolutionTimesByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">ntimes</span><span class="p">,</span> <span class="n">times</span> <span class="o">=</span> <span class="n">res</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">times</span><span class="p">[:</span><span class="n">ntimes</span><span class="p">])</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil_connector</span><span class="o">.</span><span class="n">connected</span><span class="p">:</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">ArrayDealloc</span><span class="p">(</span><span class="n">times</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ret</span>
+
+<div class="viewcode-block" id="Dataset.branch_variables"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.branch_variables">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">branch_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zones</span><span class="p">,</span> <span class="n">variables</span><span class="p">,</span> <span class="n">copy_data</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Breaks data sharing between zones.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            zones (`list` of `Zones &lt;data_access&gt;`): Zones to be branched.</span>
+<span class="sd">            variables (`list` of `Variables &lt;Variable&gt;`): Variables to be</span>
+<span class="sd">                branched.</span>
+<span class="sd">            copy_data (`bool`, optional): Allocate space for the branched</span>
+<span class="sd">                values and copy the data. If `False`, the new variables will</span>
+<span class="sd">                be passive. (default: `True`)</span>
+
+<span class="sd">        .. seealso:: `Dataset.share_variables()`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; z = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; zcopy = z.copy(share_variables=True)</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.values(0).shared_zones])</span>
+<span class="sd">            [0,1]</span>
+<span class="sd">            &gt;&gt;&gt; dataset.branch_variables(zcopy,dataset.variable(0))</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.values(0).shared_zones])</span>
+<span class="sd">            []</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.values(1).shared_zones])</span>
+<span class="sd">            [0,1]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">sdk_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_required</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;branching variables not supported.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">sdk_required</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">zones</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">zones</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variables</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="n">variables</span> <span class="o">=</span> <span class="p">[</span><span class="n">variables</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">variables</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">varidx</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">var</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">)</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="n">varidx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">var</span><span class="p">)</span><span class="o">.</span><span class="n">index</span>
+            <span class="k">for</span> <span class="n">zone</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">zoneidx</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">zone</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">)</span>
+                <span class="k">except</span><span class="p">:</span>
+                    <span class="n">zoneidx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">zone</span><span class="p">)</span><span class="o">.</span><span class="n">index</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueBranchShared</span><span class="p">(</span><span class="n">zoneidx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">varidx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                                      <span class="n">copy_data</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Dataset.share_variables"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.share_variables">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">share_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">source_zone</span><span class="p">,</span> <span class="n">destination_zones</span><span class="p">,</span> <span class="n">variables</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Share field data between zones.</span>
+
+<span class="sd">        This method links the underlying data `arrays &lt;Array&gt;` of the</span>
+<span class="sd">        destination `zones &lt;data_access&gt;` to the data of the source `zone</span>
+<span class="sd">        &lt;data_access&gt;`. Modifying the array data of one zone will affect all</span>
+<span class="sd">        others in this group.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            source_zone (`Zone &lt;data_access&gt;`): Zone which provides data to be</span>
+<span class="sd">                shared.</span>
+<span class="sd">            destination_zones (`list` of `Zones &lt;data_access&gt;`): Zones</span>
+<span class="sd">                where data will be overwritten.</span>
+<span class="sd">            variables (`list` of `Variables &lt;Variable&gt;`): Variables to be</span>
+<span class="sd">                branched.</span>
+
+<span class="sd">        .. seealso:: `Dataset.branch_variables()`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; z = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; zcopy = z.copy(share_variables=False)</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.values(0).shared_zones])</span>
+<span class="sd">            []</span>
+<span class="sd">            &gt;&gt;&gt; dataset.share_variables(zcopy,[z],[dataset.variable(0)])</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.values(0).shared_zones])</span>
+<span class="sd">            [0,1]</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.values(1).shared_zones])</span>
+<span class="sd">            []</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">destination_zones</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="n">destination_zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">destination_zones</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variables</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="n">variables</span> <span class="o">=</span> <span class="p">[</span><span class="n">variables</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">variables</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">varidx</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">var</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">)</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="n">varidx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">var</span><span class="p">)</span><span class="o">.</span><span class="n">index</span>
+            <span class="k">for</span> <span class="n">zone</span> <span class="ow">in</span> <span class="n">destination_zones</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">zoneidx</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">zone</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">)</span>
+                <span class="k">except</span><span class="p">:</span>
+                    <span class="n">zoneidx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">zone</span><span class="p">)</span><span class="o">.</span><span class="n">index</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">source_zoneidx</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">source_zone</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">)</span>
+                <span class="k">except</span><span class="p">:</span>
+                    <span class="n">source_zoneidx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">source_zone</span><span class="p">)</span><span class="o">.</span><span class="n">index</span>
+
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueIsSharingOk</span><span class="p">(</span><span class="n">source_zoneidx</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">zoneidx</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">varidx</span><span class="o">+</span><span class="mi">1</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueShare</span><span class="p">(</span><span class="n">source_zoneidx</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">zoneidx</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">varidx</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Dataset.branch_connectivity"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.branch_connectivity">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">branch_connectivity</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zones</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Breaks connectivity sharing between zones.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            zones (`list` of `Zones &lt;data_access&gt;`): Zones to be branched.</span>
+
+<span class="sd">        .. seealso:: `Dataset.share_connectivity()`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; z = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; zcopy = z.copy()</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.shared_connectivity])</span>
+<span class="sd">            [0,1]</span>
+<span class="sd">            &gt;&gt;&gt; dataset.branch_connectivity(zcopy)</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.shared_connectivity])</span>
+<span class="sd">            []</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">zones</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">zones</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">zone</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">:</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">zoneidx</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">zone</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">)</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="n">zoneidx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">zone</span><span class="p">)</span><span class="o">.</span><span class="n">index</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataConnectBranchShared</span><span class="p">(</span><span class="n">zoneidx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Dataset.share_connectivity"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Dataset.share_connectivity">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">share_connectivity</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">source_zone</span><span class="p">,</span> <span class="n">destination_zones</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Share connectivity between zones.</span>
+
+<span class="sd">        This method links the connectivity (`nodemap` or `facemap`) of the</span>
+<span class="sd">        destination `zones &lt;data_access&gt;` to the connectivity of the source</span>
+<span class="sd">        zone. Modifying the connectivity of one zone will affect all others in</span>
+<span class="sd">        this group.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            source_zone (`Zone &lt;data_access&gt;`): Zone which provides data to be</span>
+<span class="sd">                shared.</span>
+<span class="sd">            destination_zones (`list` of `Zones &lt;data_access&gt;`): Zones where</span>
+<span class="sd">                connectivity list will be overwritten.</span>
+
+<span class="sd">        .. seealso:: `Dataset.branch_connectivity()`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; z = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; zcopy = z.copy()</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.shared_connectivity])</span>
+<span class="sd">            [0,1]</span>
+<span class="sd">            &gt;&gt;&gt; dataset.branch_connectivity(zcopy)</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.shared_connectivity])</span>
+<span class="sd">            []</span>
+<span class="sd">            &gt;&gt;&gt; dataset.share_connectivity(z,zcopy)</span>
+<span class="sd">            &gt;&gt;&gt; print([zn.index for zn in z.shared_connectivity])</span>
+<span class="sd">            [0,1]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">destination_zones</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="n">destination_zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">destination_zones</span><span class="p">]</span>
+
+        <span class="k">def</span> <span class="nf">_index</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">i</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span><span class="o">.</span><span class="n">index</span>
+            <span class="k">return</span> <span class="n">i</span>
+
+        <span class="k">for</span> <span class="n">zone</span> <span class="ow">in</span> <span class="n">destination_zones</span><span class="p">:</span>
+            <span class="n">idst</span> <span class="o">=</span> <span class="n">_index</span><span class="p">(</span><span class="n">zone</span><span class="p">)</span>
+            <span class="n">isrc</span> <span class="o">=</span> <span class="n">_index</span><span class="p">(</span><span class="n">source_zone</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataConnectIsSharingOk</span><span class="p">(</span><span class="n">isrc</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">idst</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataConnectShare</span><span class="p">(</span><span class="n">isrc</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">idst</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span></div></div>
+
+
+<span class="nd">@property</span>
+<span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">dataset</span><span class="p">(</span><span class="n">frame</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;`Dataset` attached to this `Frame`.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        `Dataset`: The object holding onto the data associated with this</span>
+<span class="sd">        `Frame`.</span>
+
+<span class="sd">    If no `Dataset` has been created for this `Frame`, a new one is created</span>
+<span class="sd">    and returned::</span>
+
+<span class="sd">        &gt;&gt;&gt; dataset = frame.dataset</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">MESSAGES</span><span class="o">.</span><span class="n">PERFORMANCE_IMPROVEMENTS</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">frame</span><span class="o">.</span><span class="n">has_dataset</span><span class="p">:</span>
+                <span class="n">frame</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">name</span> <span class="o">+</span> <span class="s1">&#39; Dataset&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">Dataset</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetGetUniqueID</span><span class="p">(),</span> <span class="n">frame</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">frame</span><span class="o">.</span><span class="n">has_dataset</span><span class="p">:</span>
+            <span class="n">frame</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">name</span> <span class="o">+</span> <span class="s1">&#39; Dataset&#39;</span><span class="p">)</span>
+        <span class="n">dataset_uid</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetDataSetUniqueIDByFrameID</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Dataset</span><span class="p">(</span><span class="n">dataset_uid</span><span class="p">,</span> <span class="n">frame</span><span class="p">)</span>
+
+
+<span class="nd">@property</span>
+<span class="k">def</span> <span class="nf">has_dataset</span><span class="p">(</span><span class="n">frame</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Checks to see if the `Frame` as an attached `Dataset`</span>
+
+<span class="sd">    :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">    Example usage::</span>
+
+<span class="sd">        &gt;&gt;&gt; if not frame.has_dataset:</span>
+<span class="sd">        ...     dataset = frame.create_dataset(&#39;Dataset&#39;, [&#39;x&#39;,&#39;y&#39;,&#39;z&#39;,&#39;p&#39;])</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetIsAvailableForFrame</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+<span class="n">layout</span><span class="o">.</span><span class="n">Frame</span><span class="o">.</span><span class="n">dataset</span> <span class="o">=</span> <span class="n">dataset</span>
+<span class="n">layout</span><span class="o">.</span><span class="n">Frame</span><span class="o">.</span><span class="n">has_dataset</span> <span class="o">=</span> <span class="n">has_dataset</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

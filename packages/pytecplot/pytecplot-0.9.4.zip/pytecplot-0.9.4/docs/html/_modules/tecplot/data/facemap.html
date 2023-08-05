@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.facemap &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.facemap</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">itertools</span> <span class="kn">as</span> <span class="nn">it</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">deque</span><span class="p">,</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="kn">import</span> <span class="n">contextmanager</span>
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="n">c_int32</span><span class="p">,</span> <span class="n">c_int64</span><span class="p">,</span> <span class="n">c_void_p</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">,</span> <span class="n">addressof</span><span class="p">,</span> <span class="n">cast</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">version</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">array_to_str</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Elementmap</span><span class="p">(</span><span class="n">c_void_p</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Facemap reverse look-up.&quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">zone</span> <span class="o">=</span> <span class="n">zone</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">())</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_native_reference</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataElemGetReadableRef</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">num_faces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataElemGetNumFaces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">face</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">,</span> <span class="n">offset</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataElemGetFace</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">offset</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+
+    <span class="k">def</span> <span class="nf">faces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_faces</span><span class="p">(</span><span class="n">element</span><span class="p">))]</span>
+
+
+<div class="viewcode-block" id="Facemap"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap">[docs]</a><span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Facemap</span><span class="p">(</span><span class="n">c_void_p</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Connectivity list definition and control.</span>
+
+<span class="sd">    A facemap holds the connectivity for a polytopal finite-element zone. This</span>
+<span class="sd">    includes node-to-element and element-to-element connections. The following</span>
+<span class="sd">    script creates a quad of two triangles from scratch using the PyTecplot</span>
+<span class="sd">    low-level data creation interface. The data created looks like this:</span>
+
+<span class="sd">    .. code-block:: none</span>
+
+<span class="sd">        Node positions (x,y,z):</span>
+
+<span class="sd">                       (1,1,1)</span>
+<span class="sd">                      3</span>
+<span class="sd">                     / \</span>
+<span class="sd">                    /   \</span>
+<span class="sd">         (0,1,.5)  2-----1  (1,0,.5)</span>
+<span class="sd">                    \   /</span>
+<span class="sd">                     \ /</span>
+<span class="sd">                      0</span>
+<span class="sd">                       (0,0,0)</span>
+
+<span class="sd">    Element indices are used when identifying the left and right of each face,</span>
+<span class="sd">    where :math:`-1` is used to indicate no element:</span>
+
+<span class="sd">    .. code-block:: none</span>
+
+<span class="sd">                      *</span>
+<span class="sd">                  -1 / \ -1</span>
+<span class="sd">                    / 1 \</span>
+<span class="sd">                   *-----*</span>
+<span class="sd">                    \ 0 /</span>
+<span class="sd">                  -1 \ / -1</span>
+<span class="sd">                      *</span>
+
+<span class="sd">    .. code-block:: python</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        nodes = ((0, 0, 0  ),</span>
+<span class="sd">                 (1, 0, 0.5),</span>
+<span class="sd">                 (0, 1, 0.5),</span>
+<span class="sd">                 (1, 1, 1  ))</span>
+<span class="sd">        faces = ((0, 1),</span>
+<span class="sd">                 (1, 2),</span>
+<span class="sd">                 (2, 0),</span>
+<span class="sd">                 (1, 3),</span>
+<span class="sd">                 (3, 2))</span>
+<span class="sd">        elements = (( 0, 0,  0,  1,  1),  # elements to the left of each face</span>
+<span class="sd">                    (-1, 1, -1, -1, -1))  # elements to the right of each face</span>
+<span class="sd">        num_elements = 2</span>
+<span class="sd">        scalar_data = (0, 1, 2, 3)</span>
+
+<span class="sd">        ds = tp.active_frame().create_dataset(&#39;Data&#39;, [&#39;x&#39;,&#39;y&#39;,&#39;z&#39;,&#39;s&#39;])</span>
+<span class="sd">        z = ds.add_poly_zone(ZoneType.FEPolygon,</span>
+<span class="sd">                             name=&#39;FE Polygon Float (4,2,5) Nodal&#39;,</span>
+<span class="sd">                             num_points=len(nodes),</span>
+<span class="sd">                             num_elements=num_elements,</span>
+<span class="sd">                             num_faces=len(faces))</span>
+
+<span class="sd">        z.values(&#39;x&#39;)[:] = [n[0] for n in nodes]</span>
+<span class="sd">        z.values(&#39;y&#39;)[:] = [n[1] for n in nodes]</span>
+<span class="sd">        z.values(&#39;z&#39;)[:] = [n[2] for n in nodes]</span>
+<span class="sd">        z.facemap.set_mapping(faces, elements)</span>
+<span class="sd">        z.values(&#39;s&#39;)[:] = scalar_data</span>
+
+<span class="sd">        ### setup a view of the data</span>
+<span class="sd">        plot = tp.active_frame().plot(PlotType.Cartesian3D)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        cont = plot.contour(0)</span>
+<span class="sd">        cont.colormap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+<span class="sd">        cont.colormap_filter.distribution = ColorMapDistribution.Continuous</span>
+
+<span class="sd">        for ax in plot.axes:</span>
+<span class="sd">            ax.show = True</span>
+
+<span class="sd">        plot.show_mesh = False</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.show_edge = True</span>
+<span class="sd">        plot.use_translucency = True</span>
+
+<span class="sd">        fmap = plot.fieldmap(z)</span>
+<span class="sd">        fmap.surfaces.surfaces_to_plot = SurfacesToPlot.All</span>
+<span class="sd">        fmap.effects.surface_translucency = 40</span>
+
+<span class="sd">        # View parameters obtained interactively from Tecplot 360</span>
+<span class="sd">        plot.view.distance = 10</span>
+<span class="sd">        plot.view.width = 2</span>
+<span class="sd">        plot.view.psi = 80</span>
+<span class="sd">        plot.view.theta = 30</span>
+<span class="sd">        plot.view.alpha = 0</span>
+<span class="sd">        plot.view.position = (-4.2, -8.0, 2.3)</span>
+
+<span class="sd">        # Turning on mesh, we can see all the individual triangles</span>
+<span class="sd">        plot.show_mesh = True</span>
+<span class="sd">        plot.fieldmap(z).mesh.line_pattern = LinePattern.Dashed</span>
+<span class="sd">        tp.export.save_png(&#39;polygons1.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/polygons1.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+<span class="sd">        Two triangle polygons showing edge and mesh lines.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">sdk_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_required</span> <span class="ow">and</span>
+                <span class="n">zone</span><span class="o">.</span><span class="n">num_faces</span> <span class="o">==</span> <span class="mi">0</span>
+            <span class="p">):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Deferred allocation of facemap not supported.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">sdk_required</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">zone</span> <span class="o">=</span> <span class="n">zone</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_faces</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">()</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="n">ref</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ref</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">ref</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">_has_data_backing</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">bool</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_native_reference</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">writable</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="bp">True</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetWritableRef</span><span class="p">,</span>
+                <span class="bp">False</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetReadableRef</span><span class="p">}</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">_dispatch</span><span class="p">[</span><span class="n">writable</span><span class="p">](</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">TecplotLogicError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span>
+                <span class="s1">&#39;A facemap must first be created with Facemap.alloc()&#39;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Facemap.alloc"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.alloc">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">alloc</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face_nodes</span><span class="p">,</span> <span class="n">boundary_faces</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">boundary_connections</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Allocate space for the facemap.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            face_nodes (`int`):  Total number of nodes for all faces. This is</span>
+<span class="sd">                not the number of unique nodes but the total number. For</span>
+<span class="sd">                example if a facemap defines two triangle polygons that share a</span>
+<span class="sd">                common face, ``faces`` would be 5 and ``face_nodes`` would be</span>
+<span class="sd">                6, not 4.</span>
+<span class="sd">            boundary_faces (`int`, optional): Total number of boundary faces.</span>
+<span class="sd">                (default: 0)</span>
+<span class="sd">            boundary_connections (`int`, optional): Total number of boundary</span>
+<span class="sd">                face elements or boundary face element/zone pairs. (default: 0)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Facemap`</span>
+
+<span class="sd">        This is called when using the `Facemap.set_mapping()` method which is</span>
+<span class="sd">        the preferred method for filling the connectivity of polytope zones. If</span>
+<span class="sd">        the zone does not already have space allocated for a facemap and if you</span>
+<span class="sd">        wish to use the `Facemap.set_nodes()` and `Facemap.set_elements()`</span>
+<span class="sd">        methods to fill in the connectivity, then this must be called first::</span>
+
+<span class="sd">            &gt;&gt;&gt; facemap = zone.facemap.alloc(400, 25, 50)</span>
+
+<span class="sd">        .. note:: Tecplot version 2017.2 or later.</span>
+
+<span class="sd">            Setting the boundary faces and boundary connections using PyTecplot</span>
+<span class="sd">            requires Tecplot version 2017.2 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">sdk_version_required</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">sdk_version_required</span> <span class="ow">and</span>
+                <span class="n">boundary_faces</span>
+            <span class="p">):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Creation of facemap boundary elements not supported.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">sdk_version_required</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAlloc</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                         <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_faces</span><span class="p">,</span> <span class="n">face_nodes</span><span class="p">,</span>
+                                         <span class="n">boundary_faces</span><span class="p">,</span> <span class="n">boundary_connections</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="n">c_void_p</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">())</span></div>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_has_data_backing</span> <span class="ow">and</span> <span class="n">other</span><span class="o">.</span><span class="n">_has_data_backing</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">False</span>
+        <span class="n">self_addr</span> <span class="o">=</span> <span class="n">addressof</span><span class="p">(</span><span class="n">cast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">(</span><span class="n">c_int64</span><span class="p">))</span><span class="o">.</span><span class="n">contents</span><span class="p">)</span>
+        <span class="n">other_addr</span> <span class="o">=</span> <span class="n">addressof</span><span class="p">(</span><span class="n">cast</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">(</span><span class="n">c_int64</span><span class="p">))</span><span class="o">.</span><span class="n">contents</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">self_addr</span> <span class="o">==</span> <span class="n">other_addr</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_faces</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Facemap.num_faces"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.num_faces">[docs]</a>    <span class="k">def</span> <span class="nf">num_faces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The number of faces of an element in this `Facemap`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            element (`integer &lt;int&gt;`, optional): Zero-based index of an</span>
+<span class="sd">                element. If no element is given, the total number of faces</span>
+<span class="sd">                in the map are returned.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.num_faces())</span>
+<span class="sd">            1048576</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_has_data_backing</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_faces</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetNFaces</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">Elementmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">)</span><span class="o">.</span><span class="n">num_faces</span><span class="p">(</span><span class="n">element</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_unique_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The number of unique nodes in this `Facemap`.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        .. note:: This property is read-only.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.num_unique_nodes)</span>
+<span class="sd">            4194304</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_has_data_backing</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_points</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetNumNodes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Facemap.num_nodes"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.num_nodes">[docs]</a>    <span class="k">def</span> <span class="nf">num_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The number nodes for a given face in this `Facemap`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            face (`integer &lt;int&gt;`, required if no *element* is given): The</span>
+<span class="sd">                zero-based index of the face either within the given *element*</span>
+<span class="sd">                or globally. If no face is given, the number of nodes on the</span>
+<span class="sd">                given *element* are returned.</span>
+<span class="sd">            element (`integer &lt;int&gt;`, required if no face is given): The</span>
+<span class="sd">                zero-based index of an element. If no element is given, then</span>
+<span class="sd">                *face* is globally indexed from zero over the whole zone.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;` The number of nodes.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.num_nodes(face=1))</span>
+<span class="sd">            4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">face</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotNotImplementedError</span>
+                <span class="c1"># While the following sum() is technically correct, it is</span>
+                <span class="c1"># extremely slow as currently, there is no way to query</span>
+                <span class="c1"># the total number of nodes in the connectivity list directly.</span>
+                <span class="c1">#</span>
+                <span class="c1"># return sum(self.num_nodes(i) for i in range(self.num_faces()))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">zone_type</span> <span class="o">==</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolygon</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="mi">2</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetNFaceNodes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">emap</span> <span class="o">=</span> <span class="n">Elementmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">face</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_nodes</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">emap</span><span class="o">.</span><span class="n">faces</span><span class="p">(</span><span class="n">element</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_nodes</span><span class="p">(</span><span class="n">emap</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">face</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="Facemap.num_boundary_connections"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.num_boundary_connections">[docs]</a>    <span class="k">def</span> <span class="nf">num_boundary_connections</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The number of boundary connections for a given face.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            face (`integer &lt;int&gt;`, required if no element is given): The</span>
+<span class="sd">                zero-based index of the face.</span>
+<span class="sd">            element (`integer &lt;int&gt;`, optional): Zero-based index of an</span>
+<span class="sd">                element. If given, *face* will be locally indexed within this</span>
+<span class="sd">                element, otherwise *face* is globally indexed over the whole</span>
+<span class="sd">                zone.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;` The number of boundary connections.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.num_boundary_connections(1))</span>
+<span class="sd">            1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">face</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotNotImplementedError</span>
+                <span class="c1"># While the following sum() is technically correct using</span>
+                <span class="c1"># the face indices here, it is extremely slow as currently,</span>
+                <span class="c1"># there is no way to query the total number of boundary</span>
+                <span class="c1"># connections directly.</span>
+                <span class="c1">#</span>
+                <span class="c1"># faces = range(self.num_faces())</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">emap</span> <span class="o">=</span> <span class="n">Elementmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">)</span>
+                <span class="n">faces</span> <span class="o">=</span> <span class="n">emap</span><span class="o">.</span><span class="n">faces</span><span class="p">(</span><span class="n">element</span><span class="p">)</span>
+            <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_boundary_connections</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">faces</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">element</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">face</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">face</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetNBndryConns</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span></div>
+
+    <span class="n">_BoundaryConnection</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;BoundaryConnection&#39;</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;element&#39;</span><span class="p">,</span> <span class="s1">&#39;zone&#39;</span><span class="p">])</span>
+
+<div class="viewcode-block" id="Facemap.boundary_connection"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.boundary_connection">[docs]</a>    <span class="k">def</span> <span class="nf">boundary_connection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The connected element and zone along a boundary face.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            face (`integer &lt;int&gt;`): The zero-based index of the face.</span>
+<span class="sd">            offset (`integer &lt;int&gt;`): The zero-based index of the node being</span>
+<span class="sd">                requested.</span>
+<span class="sd">            element (`integer &lt;int&gt;`, optional): Zero-based index of an</span>
+<span class="sd">                element. If given, *face* will be locally indexed within this</span>
+<span class="sd">                element, otherwise *face* is globally indexed over the whole</span>
+<span class="sd">                zone.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `namedtuple &lt;collections.namedtuple&gt;`: ``(element, zone)``:</span>
+<span class="sd">                ``element``</span>
+<span class="sd">                    The zero-based index of the neighboring element.</span>
+<span class="sd">                ``zone``</span>
+<span class="sd">                    The zone holding the neighboring element.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; bconn = zone.facemap.boundary_connection(0, 2)</span>
+<span class="sd">            &gt;&gt;&gt; print(bconn.element)</span>
+<span class="sd">            128</span>
+<span class="sd">            &gt;&gt;&gt; print(bconn.zone.index)</span>
+<span class="sd">            2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">face</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">face</span><span class="p">)</span>
+        <span class="n">elem</span><span class="p">,</span> <span class="n">zone</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetBndryConn</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                                      <span class="n">offset</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Facemap</span><span class="o">.</span><span class="n">_BoundaryConnection</span><span class="p">(</span><span class="n">elem</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span>
+                                           <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">zone</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="Facemap.node"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.node">[docs]</a>    <span class="k">def</span> <span class="nf">node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The node index along a specific face.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            face (`integer &lt;int&gt;`): The zero-based index of the face.</span>
+<span class="sd">            offset (`integer &lt;int&gt;`): The zero-based index of the node being</span>
+<span class="sd">                requested.</span>
+<span class="sd">            element (`integer &lt;int&gt;`, optional): Zero-based index of an</span>
+<span class="sd">                element. If given, *face* will be locally indexed within this</span>
+<span class="sd">                element, otherwise *face* is globally indexed over the whole</span>
+<span class="sd">                zone.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;` The node at the specified location.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.face_node(0, 2))</span>
+<span class="sd">            128</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">face</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">face</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetFaceNode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">offset</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span></div>
+
+<div class="viewcode-block" id="Facemap.left_element"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.left_element">[docs]</a>    <span class="k">def</span> <span class="nf">left_element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The element to the left of a specific face.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            face (`integer &lt;int&gt;`): The zero-based index of the face.</span>
+<span class="sd">            element (`integer &lt;int&gt;`, optional): Zero-based index of an</span>
+<span class="sd">                element. If given, *face* will be locally indexed within this</span>
+<span class="sd">                element, otherwise *face* is globally indexed over the whole</span>
+<span class="sd">                zone.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;`</span>
+
+<span class="sd">        A negative number indicates there is no element to the left of this</span>
+<span class="sd">        face. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.left_element(0))</span>
+<span class="sd">            128</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">face</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">face</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetLeftElem</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span></div>
+
+<div class="viewcode-block" id="Facemap.right_element"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.right_element">[docs]</a>    <span class="k">def</span> <span class="nf">right_element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The element to the right of a specific face.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            face (`integer &lt;int&gt;`): The zero-based index of the face.</span>
+<span class="sd">            element (`integer &lt;int&gt;`, optional): Zero-based index of an</span>
+<span class="sd">                element. If given, *face* will be locally indexed within this</span>
+<span class="sd">                element, otherwise *face* is globally indexed over the whole</span>
+<span class="sd">                zone.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;`</span>
+
+<span class="sd">        A negative number indicates there is no element to the right of this</span>
+<span class="sd">        face. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.right_element(0))</span>
+<span class="sd">            -1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">face</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">face</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetRightElem</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">face</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span></div>
+
+<div class="viewcode-block" id="Facemap.face"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.face">[docs]</a>    <span class="k">def</span> <span class="nf">face</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">,</span> <span class="n">offset</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Face index on a specific element.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            element (`integer &lt;int&gt;`): The zero-based index of the element.</span>
+<span class="sd">            offset (`integer &lt;int&gt;`): The zero-based index of the face being</span>
+<span class="sd">                requested.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;` Zero-based index of the face at the specified</span>
+<span class="sd">            location.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.face(0, 2))</span>
+<span class="sd">            128</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Elementmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">)</span><span class="o">.</span><span class="n">face</span><span class="p">(</span><span class="n">element</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">node_c_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The data type of the node indices.</span>
+
+<span class="sd">        Possible values: `ctypes.c_int32`, `ctypes.c_int64`</span>
+
+<span class="sd">        .. note:: This property is read-only.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_ctypes</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">OffsetDataType</span><span class="o">.</span><span class="n">OffsetDataType_32Bit</span><span class="p">:</span> <span class="n">c_int32</span><span class="p">,</span>
+            <span class="n">OffsetDataType</span><span class="o">.</span><span class="n">OffsetDataType_64Bit</span><span class="p">:</span> <span class="n">c_int64</span><span class="p">}</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_has_data_backing</span><span class="p">:</span>
+            <span class="n">data_type</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetNodeRawItemType</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">_ctypes</span><span class="p">[</span><span class="n">data_type</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">element_c_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The data type of the element indices.</span>
+
+<span class="sd">        Possible values: `ctypes.c_int32`, `ctypes.c_int64`</span>
+
+<span class="sd">        .. note:: This property is read-only.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_ctypes</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">OffsetDataType</span><span class="o">.</span><span class="n">OffsetDataType_32Bit</span><span class="p">:</span> <span class="n">c_int32</span><span class="p">,</span>
+            <span class="n">OffsetDataType</span><span class="o">.</span><span class="n">OffsetDataType_64Bit</span><span class="p">:</span> <span class="n">c_int64</span><span class="p">}</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_has_data_backing</span><span class="p">:</span>
+            <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+            <span class="n">data_type</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapGetElementRawItemType</span><span class="p">(</span><span class="n">ref</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">_ctypes</span><span class="p">[</span><span class="n">data_type</span><span class="p">]</span>
+
+<div class="viewcode-block" id="Facemap.set_nodes"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.set_nodes">[docs]</a>    <span class="k">def</span> <span class="nf">set_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">facemap</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Sets the polytope node-connectivity.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            facemap (2D array of zero-based `integers &lt;int&gt;`): The `list` of</span>
+<span class="sd">                `lists &lt;list&gt;` which need not all be the same length, defining</span>
+<span class="sd">                the individual elements by their nodes.</span>
+
+<span class="sd">        The facemap must first be allocated with `Facemap.alloc()` and must be</span>
+<span class="sd">        called from within a `Facemap.assignment()` context and should be</span>
+<span class="sd">        followed by a call to `Facemap.set_elements()` to complete the</span>
+<span class="sd">        connectivity map information needed for rendering. It is recomended to</span>
+<span class="sd">        use the `Facemap.set_mapping()` which does all the required</span>
+<span class="sd">        book keeping.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">c_int32</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAssignNodes</span><span class="p">,</span>
+            <span class="n">c_int64</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAssignNodes64</span><span class="p">}</span>
+        <span class="n">data_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_c_type</span>
+        <span class="n">nfaces</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">facemap</span><span class="p">)</span>
+        <span class="n">nnodes</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">facemap</span><span class="p">]</span>
+        <span class="n">nfacenodes</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">nnodes</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">zone_type</span> <span class="ow">is</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolygon</span><span class="p">:</span>
+            <span class="n">faces</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">faces</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="n">nfaces</span><span class="p">)(</span><span class="o">*</span><span class="n">nnodes</span><span class="p">)</span>
+        <span class="n">nodes</span> <span class="o">=</span> <span class="p">(</span><span class="n">data_type</span> <span class="o">*</span> <span class="n">nfacenodes</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">it</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span><span class="o">*</span><span class="n">facemap</span><span class="p">)])</span>
+
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">min</span><span class="p">(</span><span class="n">nodes</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_unique_nodes</span> <span class="o">&lt;</span> <span class="nb">max</span><span class="p">(</span><span class="n">nodes</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotIndexError</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                Facemap set nodes:</span>
+<span class="s1">                    faces({}): {}</span>
+<span class="s1">                    nodes: {}&#39;&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">nfaces</span><span class="p">,</span> <span class="n">array_to_str</span><span class="p">(</span><span class="n">faces</span><span class="p">),</span>
+                                         <span class="n">array_to_str</span><span class="p">(</span><span class="n">nodes</span><span class="p">)))</span>
+
+        <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="n">_dispatch</span><span class="p">[</span><span class="n">data_type</span><span class="p">](</span><span class="n">ref</span><span class="p">,</span> <span class="n">nfaces</span><span class="p">,</span> <span class="n">faces</span><span class="p">,</span> <span class="n">nodes</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Facemap.set_elements"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.set_elements">[docs]</a>    <span class="k">def</span> <span class="nf">set_elements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">left_elements</span><span class="p">,</span> <span class="n">right_elements</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Sets the polytope node-connectivity.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            left_elements (array of zero-based `integers &lt;int&gt;`): This is an</span>
+<span class="sd">                array of the elements to the left of each face in the facemap</span>
+<span class="sd">                and must be the same length as the number of faces.</span>
+<span class="sd">            right_elements (array of zero-based `integers &lt;int&gt;`): Same as</span>
+<span class="sd">                *left_elements* for the right side of each face.</span>
+
+<span class="sd">        The facemap must first be allocated with `Facemap.alloc()` and must be</span>
+<span class="sd">        called from within a `Facemap.assignment()` context and should follow a</span>
+<span class="sd">        call to `Facemap.set_nodes()` to complete the connectivity map</span>
+<span class="sd">        information needed for rendering. Using `Facemap.set_mapping()` is</span>
+<span class="sd">        recommended, which does all the required book keeping.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">c_int32</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAssignElems</span><span class="p">,</span>
+            <span class="n">c_int64</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAssignElems64</span><span class="p">}</span>
+        <span class="n">data_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">element_c_type</span>
+        <span class="n">nelements</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">left_elements</span><span class="p">)</span>
+        <span class="n">left</span> <span class="o">=</span> <span class="p">(</span><span class="n">data_type</span> <span class="o">*</span> <span class="n">nelements</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="n">e</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">left_elements</span><span class="p">])</span>
+        <span class="n">right</span> <span class="o">=</span> <span class="p">(</span><span class="n">data_type</span> <span class="o">*</span> <span class="n">nelements</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="n">e</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">right_elements</span><span class="p">])</span>
+
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_elements</span> <span class="o">&lt;</span> <span class="nb">max</span><span class="p">(</span><span class="n">left</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotIndexError</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_elements</span> <span class="o">&lt;</span> <span class="nb">max</span><span class="p">(</span><span class="n">right</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotIndexError</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                Facemap set elements:</span>
+<span class="s1">                    left({}): {}</span>
+<span class="s1">                    right({}): {}&#39;&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">left</span><span class="p">),</span> <span class="n">array_to_str</span><span class="p">(</span><span class="n">left</span><span class="p">),</span>
+                                             <span class="nb">len</span><span class="p">(</span><span class="n">right</span><span class="p">),</span> <span class="n">array_to_str</span><span class="p">(</span><span class="n">right</span><span class="p">)))</span>
+
+        <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="n">_dispatch</span><span class="p">[</span><span class="n">data_type</span><span class="p">](</span><span class="n">ref</span><span class="p">,</span> <span class="n">nelements</span><span class="p">,</span> <span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Facemap.set_boundary_connections"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.set_boundary_connections">[docs]</a>    <span class="k">def</span> <span class="nf">set_boundary_connections</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">elements</span><span class="p">,</span> <span class="n">zones</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the boundary connections.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            elements (2D array of `integers &lt;int&gt;`): Zero-based indices of the</span>
+<span class="sd">                connected elements. This is a &quot;ragged&quot; array of dimension</span>
+<span class="sd">                :math:`(N,E_i)` where :math:`N` is the number of boundary faces</span>
+<span class="sd">                and :math:`E_i` is the number of boundary connected elements</span>
+<span class="sd">                for the :math:`i^{th}` face.</span>
+<span class="sd">            zones (2D array of `integers &lt;int&gt;`): Zero-based indices of the</span>
+<span class="sd">                zones for each entry given in *elements*. This must be the same</span>
+<span class="sd">                shape as *elements*.</span>
+
+<span class="sd">        The facemap must first be allocated with `Facemap.alloc()` and must be</span>
+<span class="sd">        called from within a `Facemap.assignment()` context, and should follow</span>
+<span class="sd">        calls to `Facemap.set_nodes()` and `Facemap.set_elements()` to complete</span>
+<span class="sd">        the connectivity map information needed for rendering. Using</span>
+<span class="sd">        `Facemap.set_mapping()` is recommended, which does all the required</span>
+<span class="sd">        book keeping.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">c_int32</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAssignBConns</span><span class="p">,</span>
+            <span class="n">c_int64</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAssignBConns64</span><span class="p">}</span>
+        <span class="n">data_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_c_type</span>
+        <span class="n">nbfaces</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">elements</span><span class="p">)</span>
+        <span class="n">nbconns</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="n">nbfaces</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">elements</span><span class="p">])</span>
+        <span class="n">nbelems</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">nbconns</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">_flatten_add_one</span><span class="p">(</span><span class="n">arr</span><span class="p">):</span>
+            <span class="k">def</span> <span class="nf">_f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">x</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="n">_f</span><span class="p">,</span> <span class="n">it</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span><span class="o">*</span><span class="n">arr</span><span class="p">)))</span>
+
+        <span class="k">def</span> <span class="nf">_flatten_add_one_index</span><span class="p">(</span><span class="n">arr</span><span class="p">):</span>
+            <span class="k">def</span> <span class="nf">_f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+                <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">x</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="n">_f</span><span class="p">,</span> <span class="n">it</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span><span class="o">*</span><span class="n">arr</span><span class="p">)))</span>
+
+        <span class="n">belems</span> <span class="o">=</span> <span class="p">(</span><span class="n">data_type</span> <span class="o">*</span> <span class="n">nbelems</span><span class="p">)(</span><span class="o">*</span><span class="n">_flatten_add_one</span><span class="p">(</span><span class="n">elements</span><span class="p">))</span>
+        <span class="n">bzones</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="n">nbelems</span><span class="p">)(</span><span class="o">*</span><span class="n">_flatten_add_one_index</span><span class="p">(</span><span class="n">zones</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">min</span><span class="p">(</span><span class="n">belems</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_elements</span> <span class="o">&lt;</span> <span class="nb">max</span><span class="p">(</span><span class="n">belems</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotIndexError</span>
+            <span class="k">if</span> <span class="nb">min</span><span class="p">(</span><span class="n">bzones</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span> <span class="o">&lt;</span> <span class="nb">max</span><span class="p">(</span><span class="n">bzones</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotIndexError</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                Facemap set boundary connections:</span>
+<span class="s1">                    num boundary faces: {}</span>
+<span class="s1">                    num boundary conns: {}</span>
+<span class="s1">                    boundary elems: {}</span>
+<span class="s1">                    boundary zones: {}&#39;&#39;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">nbfaces</span><span class="p">,</span>
+                                                 <span class="n">array_to_str</span><span class="p">(</span><span class="n">nbconns</span><span class="p">),</span>
+                                                 <span class="n">array_to_str</span><span class="p">(</span><span class="n">belems</span><span class="p">),</span>
+                                                 <span class="n">array_to_str</span><span class="p">(</span><span class="n">bzones</span><span class="p">))))</span>
+
+        <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="n">_dispatch</span><span class="p">[</span><span class="n">data_type</span><span class="p">](</span><span class="n">ref</span><span class="p">,</span> <span class="n">nbfaces</span><span class="p">,</span> <span class="n">nbconns</span><span class="p">,</span> <span class="n">belems</span><span class="p">,</span> <span class="n">bzones</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Facemap.set_mapping"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.set_mapping">[docs]</a>    <span class="k">def</span> <span class="nf">set_mapping</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">facemap</span><span class="p">,</span> <span class="n">elements</span><span class="p">,</span> <span class="n">boundary_elements</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                    <span class="n">boundary_zones</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the node and element connectivity for this polytope zone.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            facemap (2D array of zero-based `integers &lt;int&gt;`): The `list` of</span>
+<span class="sd">                `lists &lt;list&gt;` which need not all be the same length, defining</span>
+<span class="sd">                the individual elements by their nodes.</span>
+<span class="sd">            elements (2D array of zero-based `integers &lt;int&gt;`): This is a</span>
+<span class="sd">                :math:`(2,N)` array where :math:`N` is the number of faces and</span>
+<span class="sd">                the items are a list of the elements to the left and right of</span>
+<span class="sd">                the face respectively.</span>
+<span class="sd">            boundary_elements (2D array of `integers &lt;int&gt;`, optional):</span>
+<span class="sd">                Zero-based indices of the connected elements. This is a</span>
+<span class="sd">                &quot;ragged&quot; array of dimension :math:`(N, E_i)` where :math:`N` is</span>
+<span class="sd">                the number of boundary faces and :math:`E_i` is the number of</span>
+<span class="sd">                boundary connected elements for the :math:`i^{th}` face.</span>
+<span class="sd">            boundary_zones (2D array of `integers &lt;int&gt;`, optional): Zero-based</span>
+<span class="sd">                indices of the zones for each entry given in *elements*. This</span>
+<span class="sd">                must be the same shape as *elements*.</span>
+
+<span class="sd">        See the code example for the `Facemap` class object for details.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">nfacenodes</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">facemap</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">boundary_elements</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">nbfaces</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">boundary_elements</span><span class="p">)</span>
+            <span class="n">nbelems</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">boundary_elements</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">nbfaces</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">nbelems</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                Facemap alloc:</span>
+<span class="s1">                    num face nodes: {}</span>
+<span class="s1">                    num boundary faces: {}</span>
+<span class="s1">                    num boundary elements: {}&#39;&#39;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">nfacenodes</span><span class="p">,</span> <span class="n">nbfaces</span><span class="p">,</span>
+                                                        <span class="n">nbelems</span><span class="p">)))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">alloc</span><span class="p">(</span><span class="n">nfacenodes</span><span class="p">,</span> <span class="n">nbfaces</span><span class="p">,</span> <span class="n">nbelems</span><span class="p">)</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">assignment</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">set_nodes</span><span class="p">(</span><span class="n">facemap</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">set_elements</span><span class="p">(</span><span class="o">*</span><span class="n">elements</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">boundary_elements</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">set_boundary_connections</span><span class="p">(</span><span class="n">boundary_elements</span><span class="p">,</span> <span class="n">boundary_zones</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Facemap.assignment"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.assignment">[docs]</a>    <span class="nd">@contextmanager</span>
+    <span class="k">def</span> <span class="nf">assignment</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Context manager for assigning facemap connections.</span>
+
+<span class="sd">        This context ensures the proper book keeping is done when setting the</span>
+<span class="sd">        connectivity list and must be used with `Facemap.set_nodes()`,</span>
+<span class="sd">        `Facemap.set_elements()` and `Facemap.set_boundary_connections()`,</span>
+<span class="sd">        which are used to define the connectivity of the zone.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="n">lock</span><span class="p">():</span>
+            <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapBeginAssign</span><span class="p">(</span><span class="n">ref</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">yield</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapEndAssign</span><span class="p">(</span><span class="n">ref</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Facemap.set_elementmap"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Facemap.set_elementmap">[docs]</a>    <span class="k">def</span> <span class="nf">set_elementmap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">elementmap</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Define connectivity per element.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            elementmap (`integers &lt;int&gt;`): Zero-based indices of the nodes that</span>
+<span class="sd">                make up each face of each element. For polygons, the map is a</span>
+<span class="sd">                list of elements, each made of up a list of nodes. For</span>
+<span class="sd">                polyhedrons, this is a list of elements, made up a list of</span>
+<span class="sd">                faces, each made up of a list of nodes.</span>
+
+<span class="sd">        .. warning::</span>
+
+<span class="sd">            This method is mutually exclusive with the `Facemap.set_mapping()`</span>
+<span class="sd">            and `Facemap.assignment()`, `Facemap.set_nodes()`,</span>
+<span class="sd">            `Facemap.set_elements()` and `Facemap.set_boundary_connections()`</span>
+<span class="sd">            family of methods. The size of the underlying arrays are calculated</span>
+<span class="sd">            based on the elementmap given and a call to `Facemap.alloc()` is</span>
+<span class="sd">            made which will override any previous allocation.</span>
+
+<span class="sd">        This may be a more convenient way to describe the connectivity of a</span>
+<span class="sd">        polytope zone, however it does not support boundary face connections to</span>
+<span class="sd">        other zones (see `Facemap.set_mapping()`).</span>
+
+<span class="sd">        Here is an example of an elementmap for two triangles (polygons)::</span>
+
+<span class="sd">            nodes = ((0, 0, 0  ),</span>
+<span class="sd">                     (1, 0, 0.5),</span>
+<span class="sd">                     (0, 1, 0.5),</span>
+<span class="sd">                     (1, 1, 1  ))</span>
+<span class="sd">            elementmap = ((0, 1, 2),  # polygon 0, 3 faces</span>
+<span class="sd">                          (1, 3, 2))  # polygon 1, 3 faces</span>
+
+<span class="sd">        This is an example of an elementmap for two tetrahedrons</span>
+<span class="sd">        (polyhedrons)::</span>
+
+<span class="sd">            nodes = ((0, 0, 0),</span>
+<span class="sd">                     (1, 1, 0),</span>
+<span class="sd">                     (1, 0, 1),</span>
+<span class="sd">                     (0, 1, 1),</span>
+<span class="sd">                     (0, 0, 1))</span>
+<span class="sd">            elementmap = (((0, 1, 2),  # polyhedron 0, 4 faces</span>
+<span class="sd">                           (0, 1, 3),</span>
+<span class="sd">                           (1, 3, 2),</span>
+<span class="sd">                           (0, 2, 3)),</span>
+<span class="sd">                          ((0, 2, 3),  # polyhedron 1, 4 faces</span>
+<span class="sd">                           (2, 3, 4),</span>
+<span class="sd">                           (0, 2, 4),</span>
+<span class="sd">                           (0, 4, 3)))</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">nelems</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">elementmap</span><span class="p">)</span>
+
+        <span class="n">faces</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">elementmap</span><span class="p">]</span>
+        <span class="n">faces</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">faces</span><span class="p">))(</span><span class="o">*</span><span class="n">faces</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">zone_type</span> <span class="o">==</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolygon</span><span class="p">:</span>
+            <span class="n">nodes</span> <span class="o">=</span> <span class="bp">None</span>
+            <span class="n">elemmap</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">face</span> <span class="ow">in</span> <span class="n">elementmap</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">face</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># if self.zone.zone_type == ZoneType.FEPolyhedron:</span>
+            <span class="n">nodes</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">face</span><span class="p">)</span> <span class="k">for</span> <span class="n">elem</span> <span class="ow">in</span> <span class="n">elementmap</span> <span class="k">for</span> <span class="n">face</span> <span class="ow">in</span> <span class="n">elem</span><span class="p">]</span>
+            <span class="n">nodes</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">nodes</span><span class="p">))(</span><span class="o">*</span><span class="n">nodes</span><span class="p">)</span>
+            <span class="n">elemmap</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">elem</span> <span class="ow">in</span> <span class="n">elementmap</span>
+                       <span class="k">for</span> <span class="n">face</span> <span class="ow">in</span> <span class="n">elem</span>
+                       <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">face</span><span class="p">]</span>
+
+        <span class="n">elemmap</span> <span class="o">=</span> <span class="p">(</span><span class="n">c_int32</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">elemmap</span><span class="p">))(</span><span class="o">*</span><span class="n">elemmap</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">elemmap</span><span class="p">):</span>
+                <span class="k">if</span> <span class="nb">min</span><span class="p">(</span><span class="n">elemmap</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_unique_nodes</span> <span class="o">&lt;</span> <span class="nb">max</span><span class="p">(</span><span class="n">elemmap</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotIndexError</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                FaceMapAssign:</span>
+<span class="s1">                    nelems: {}</span>
+<span class="s1">                    faces: {}</span>
+<span class="s1">                    nodes: {}</span>
+<span class="s1">                    elemmap: {}&#39;&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">nelems</span><span class="p">,</span> <span class="n">array_to_str</span><span class="p">(</span><span class="n">faces</span><span class="p">),</span>
+                                           <span class="n">array_to_str</span><span class="p">(</span><span class="n">nodes</span><span class="p">),</span>
+                                           <span class="n">array_to_str</span><span class="p">(</span><span class="n">elemmap</span><span class="p">)))</span>
+
+        <span class="c1"># reset facemap before we fill it with the nodemap</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">zone_type</span> <span class="o">==</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolygon</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">alloc</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_faces</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_nodes</span><span class="p">(</span><span class="mi">0</span><span class="p">)))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">alloc</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="n">lock</span><span class="p">():</span>
+            <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataFaceMapAssignElemToNodeMap</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">nelems</span><span class="p">,</span> <span class="n">faces</span><span class="p">,</span>
+                                                           <span class="n">nodes</span><span class="p">,</span> <span class="n">elemmap</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

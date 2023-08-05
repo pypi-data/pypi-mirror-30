@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.extract &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.extract</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">layout</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="n">TecplotSystemError</span><span class="p">,</span> <span class="n">TecplotLogicError</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">ArgList</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">sv</span>
+
+
+<div class="viewcode-block" id="extract_slice"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.extract.extract_slice">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">extract_slice</span><span class="p">(</span><span class="n">origin</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">normal</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">source</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                  <span class="n">multiple_zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">copy_cell_centers</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                  <span class="n">assign_strand_ids</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Create new zone slices from the zones in a dataset.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        origin (array of three `floats &lt;float&gt;`): Point in space,</span>
+<span class="sd">            :math:`(x, y, z)`, that lies on the slice plane.</span>
+<span class="sd">        normal (array of three `floats &lt;float&gt;`): Vector direction,</span>
+<span class="sd">            :math:`(x, y, z)`, indicating the normal of the slice plane.</span>
+<span class="sd">        source (`SliceSource`): Source zone types to consider when extracting</span>
+<span class="sd">            the slice. Possible values: `SliceSource.LinearZones`,</span>
+<span class="sd">            `SliceSource.SurfaceZones`, `SliceSource.SurfacesOfVolumeZones`,</span>
+<span class="sd">            `SliceSource.VolumeZones` (default).</span>
+<span class="sd">        multiple_zones (`boolean &lt;bool&gt;`): If `True`, this allows the</span>
+<span class="sd">            extracted slice to consist of one zone per contiguous region. By</span>
+<span class="sd">            default, only a single zone is created.  (default: `False`)</span>
+<span class="sd">        copy_cell_centers (`boolean &lt;bool&gt;`): If `True`, cell-center</span>
+<span class="sd">            values will be copied when possible to the extracted slice plane.</span>
+<span class="sd">            Cell-centers are copied when a variable is cell-centered for all</span>
+<span class="sd">            the source zones through which the slice passes. Otherwise,</span>
+<span class="sd">            extracted planes use node-centered data, which is calculated by</span>
+<span class="sd">            interpolation. (default: `False`)</span>
+<span class="sd">        assign_strand_ids (`boolean &lt;bool&gt;`): automatically assign strand IDs</span>
+<span class="sd">            to the data extracted from transient sources. This is only</span>
+<span class="sd">            available if *multiple_zones* is `False`. (default: `True`)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        One or a `list` of `Zones &lt;data_access&gt;` representing a planar slice.</span>
+
+<span class="sd">    .. warning::</span>
+
+<span class="sd">        Slicing is only available when the plot type is set to 3D::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.Cartesian3D</span>
+
+<span class="sd">    .. note::</span>
+
+<span class="sd">        This function returns a list of zones if *multiple_zones* is set to</span>
+<span class="sd">        `True`. Otherwise, a single zone is returned.</span>
+
+<span class="sd">    This example shows extracting a slice zone from the surface a wing:</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 16-20</span>
+
+<span class="sd">        import os</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, SliceSource</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;OneraM6wing&#39;,</span>
+<span class="sd">                                &#39;OneraM6_SU2_RANS.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+
+<span class="sd">        # set active plot to 3D and extract</span>
+<span class="sd">        # an arbitrary slice from the surface</span>
+<span class="sd">        # data on the wing</span>
+<span class="sd">        extracted_slice = tp.data.extract.extract_slice(</span>
+<span class="sd">            origin=(0, 0.25, 0),</span>
+<span class="sd">            normal=(0, 1, 0),</span>
+<span class="sd">            source=SliceSource.SurfaceZones,</span>
+<span class="sd">            dataset=dataset)</span>
+
+<span class="sd">        # switch plot type in current frame, clear plot</span>
+<span class="sd">        plot = frame.plot(PlotType.XYLine)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.delete_linemaps()</span>
+
+<span class="sd">        # create line plot from extracted zone data</span>
+<span class="sd">        cp_linemap = plot.add_linemap(</span>
+<span class="sd">            name=&#39;Quarter-chord C_p&#39;,</span>
+<span class="sd">            zone=extracted_slice,</span>
+<span class="sd">            x=dataset.variable(&#39;x&#39;),</span>
+<span class="sd">            y=dataset.variable(&#39;Pressure_Coefficient&#39;))</span>
+
+<span class="sd">        # set style of linemap plot and</span>
+<span class="sd">        # update axes limits to show data</span>
+<span class="sd">        cp_linemap.line.color = tp.constant.Color.Blue</span>
+<span class="sd">        cp_linemap.line.line_thickness = 0.8</span>
+<span class="sd">        cp_linemap.y_axis.reverse = True</span>
+<span class="sd">        plot.view.fit()</span>
+
+<span class="sd">        # export image of pressure coefficient as a function of x</span>
+<span class="sd">        tp.export.save_png(&#39;wing_slice_pressure_coeff.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/wing_slice_pressure_coeff.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    <span class="k">if</span> <span class="n">dataset</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">frame</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span>
+        <span class="n">dataset</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span>
+    <span class="k">elif</span> <span class="n">frame</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="n">frame</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">frame</span>
+
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">frame</span><span class="o">.</span><span class="n">dataset</span> <span class="o">!=</span> <span class="n">dataset</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="s1">&#39;Dataset is not attached to frame.&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">frame</span><span class="o">.</span><span class="n">plot_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">Cartesian3D</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Plot Type must be Cartesian3D to create a slice.&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+        <span class="n">new_zone_index</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span>
+        <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ORIGINX</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">origin</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ORIGINY</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">origin</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ORIGINZ</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">origin</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">NORMALX</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">normal</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">NORMALY</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">normal</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">NORMALZ</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">normal</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">source</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">SLICESOURCE</span><span class="p">]</span> <span class="o">=</span> <span class="n">SliceSource</span><span class="p">(</span><span class="n">source</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">multiple_zones</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">sigle_zone</span> <span class="o">=</span> <span class="ow">not</span> <span class="nb">bool</span><span class="p">(</span><span class="n">multiple_zones</span><span class="p">)</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">FORCEEXTRACTIONTOSINGLEZONE</span><span class="p">]</span> <span class="o">=</span> <span class="n">sigle_zone</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">COPYCELLCENTEREDVALUES</span><span class="p">]</span> <span class="o">=</span> <span class="n">copy_cell_centers</span>
+            <span class="k">if</span> <span class="n">assign_strand_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">AUTOSTRANDTRANSIENTDATA</span><span class="p">]</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">assign_strand_ids</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">CreateSliceZoneFromPlneX</span><span class="p">(</span><span class="n">arglist</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span> <span class="o">==</span> <span class="n">new_zone_index</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="s1">&#39;No zones found when extracting slice&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">multiple_zones</span><span class="p">:</span>
+                <span class="n">zone_indices</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="n">new_zone_index</span><span class="p">,</span> <span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span><span class="p">)</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">zone_indices</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">new_zone_index</span><span class="p">)</span></div>
+
+<span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">extract_zones_from_connected_regions</span><span class="p">(</span><span class="n">zones</span><span class="p">):</span>
+    <span class="k">with</span> <span class="n">IndexSet</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span> <span class="k">as</span> <span class="n">zone_set</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ExtractZonesFromConnectedRegions</span><span class="p">(</span><span class="n">zone_set</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

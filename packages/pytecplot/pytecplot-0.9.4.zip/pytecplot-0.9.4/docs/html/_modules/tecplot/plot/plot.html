@@ -1,0 +1,1523 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.plot.plot &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.plot.plot</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">super</span><span class="p">,</span> <span class="nb">int</span>
+
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="kn">import</span> <span class="n">contextmanager</span>
+<span class="kn">from</span> <span class="nn">fnmatch</span> <span class="kn">import</span> <span class="n">fnmatch</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">_tecutil_connector</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">session</span><span class="p">,</span> <span class="n">version</span>
+<span class="kn">from</span> <span class="nn">..legend</span> <span class="kn">import</span> <span class="n">LineLegend</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">Index</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">flatten_args</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span><span class="p">,</span> <span class="n">sv</span>
+<span class="kn">from</span> <span class="nn">.axes</span> <span class="kn">import</span> <span class="p">(</span><span class="n">Cartesian2DFieldAxes</span><span class="p">,</span> <span class="n">Cartesian3DFieldAxes</span><span class="p">,</span> <span class="n">SketchAxes</span><span class="p">,</span>
+                   <span class="n">PolarLineAxes</span><span class="p">,</span> <span class="n">XYLineAxes</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">.contour</span> <span class="kn">import</span> <span class="n">ContourGroup</span>
+<span class="kn">from</span> <span class="nn">.fieldmap</span> <span class="kn">import</span> <span class="n">Cartesian2DFieldmap</span><span class="p">,</span> <span class="n">Cartesian3DFieldmap</span>
+<span class="kn">from</span> <span class="nn">.isosurface</span> <span class="kn">import</span> <span class="n">IsosurfaceGroup</span>
+<span class="kn">from</span> <span class="nn">.linemap</span> <span class="kn">import</span> <span class="n">PolarLinemap</span><span class="p">,</span> <span class="n">XYLinemap</span>
+<span class="kn">from</span> <span class="nn">.scatter</span> <span class="kn">import</span> <span class="n">Scatter</span>
+<span class="kn">from</span> <span class="nn">.slice</span> <span class="kn">import</span> <span class="n">SliceGroup</span>
+<span class="kn">from</span> <span class="nn">.streamtrace</span> <span class="kn">import</span> <span class="n">StreamtraceRodRibbon</span><span class="p">,</span> <span class="n">Streamtraces</span>
+<span class="kn">from</span> <span class="nn">.vector</span> <span class="kn">import</span> <span class="n">Vector2D</span><span class="p">,</span> <span class="n">Vector3D</span>
+<span class="kn">from</span> <span class="nn">.view</span> <span class="kn">import</span> <span class="n">Cartesian2DView</span><span class="p">,</span> <span class="n">Cartesian3DView</span><span class="p">,</span> <span class="n">LineView</span><span class="p">,</span> <span class="n">PolarView</span>
+
+
+<span class="k">class</span> <span class="nc">Plot</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span> <span class="o">=</span> <span class="n">frame</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">svargs</span><span class="p">,</span> <span class="n">uniqueid</span><span class="o">=</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">that</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">frame</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">that</span><span class="p">)</span>
+
+    <span class="nd">@contextmanager</span>
+    <span class="k">def</span> <span class="nf">activated</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Context to ensure this plot is active.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.XYLine  # set active plot type</span>
+<span class="sd">            &gt;&gt;&gt; plot = frame.plot(PlotType.Cartesian3D)  # get inactive plot</span>
+<span class="sd">            &gt;&gt;&gt; print(frame.plot_type)</span>
+<span class="sd">            PlotType.XYLine</span>
+<span class="sd">            &gt;&gt;&gt; with plot.activated():</span>
+<span class="sd">            ...     print(frame.plot_type)  # 3D plot temporarily active</span>
+<span class="sd">            PlotType.Cartesian3D</span>
+<span class="sd">            &gt;&gt;&gt; print(frame.plot_type)  # original plot type restored</span>
+<span class="sd">            PlotType.XYLine</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">orig_plot</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">plot</span><span class="p">()</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span>
+                <span class="k">yield</span> <span class="bp">self</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="n">orig_plot</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="SketchPlot"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.SketchPlot">[docs]</a><span class="k">class</span> <span class="nc">SketchPlot</span><span class="p">(</span><span class="n">Plot</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A plot space with no data attached.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 5,8-9</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        plot = frame.plot(PlotType.Sketch)</span>
+
+<span class="sd">        frame.add_text(&#39;Hello, World!&#39;, (36, 50), size=34)</span>
+<span class="sd">        plot.axes.x_axis.show = True</span>
+<span class="sd">        plot.axes.y_axis.show = True</span>
+
+<span class="sd">        tp.export.save_png(&#39;plot_sketch.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/plot_sketch.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SketchPlot.activate"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.SketchPlot.activate">[docs]</a>    <span class="k">def</span> <span class="nf">activate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Make this the active plot type on the parent frame.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; plot = frame.plot(PlotType.Sketch)</span>
+<span class="sd">            &gt;&gt;&gt; plot.activate()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">plot_type</span> <span class="o">=</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">Sketch</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">axes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axes (x and y) for the sketch plot.</span>
+
+<span class="sd">        :type: `SketchAxes`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.Sketch</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot().axes.x_axis.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SketchAxes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<span class="k">class</span> <span class="nc">FieldPlot</span><span class="p">(</span><span class="n">Plot</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Plot containing data associated with style through fieldmaps.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 8-12</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;F18.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        plot = frame.plot(PlotType.Cartesian3D)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.use_translucency = True</span>
+<span class="sd">        plot.contour(0).variable = dataset.variable(&#39;S&#39;)</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;plot_field.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/plot_field.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">FIELDLAYERS</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">contour</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot-local `ContourGroup` style control.</span>
+
+<span class="sd">        :type: `ContourGroup`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = frame.plot().contour(0)</span>
+<span class="sd">            &gt;&gt;&gt; contour.colormap_name = &#39;Magma&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">ContourGroup</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">streamtraces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot-local `streamtrace &lt;Streamtraces&gt;` attributes.</span>
+
+<span class="sd">        :type: `Streamtraces`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; streamtraces = frame.plot().streamtraces</span>
+<span class="sd">            &gt;&gt;&gt; streamtraces.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Streamtraces</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">slice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot-local `slice &lt;SliceGroup&gt;` style control.</span>
+
+<span class="sd">        :type: `SliceGroup`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; slice_0 = frame.plot().slice(0)</span>
+<span class="sd">            &gt;&gt;&gt; slice_0.mesh.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SliceGroup</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">isosurface</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot-local `isosurface &lt;IsosurfaceGroup&gt;` settings.</span>
+
+<span class="sd">        :type: `IsosurfaceGroup`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; isosurface_0 = frame.plot().isosurface(0)</span>
+<span class="sd">            &gt;&gt;&gt; isosurface_0.mesh.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">IsosurfaceGroup</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">scatter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot-local `Scatter` style control.</span>
+
+<span class="sd">        :type: `Scatter`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; scatter = frame.plot().scatter</span>
+<span class="sd">            &gt;&gt;&gt; scatter.variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Scatter</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_contour</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable contours for this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().show_contour = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWCONTOUR</span><span class="p">)</span>
+
+    <span class="nd">@show_contour.setter</span>
+    <span class="k">def</span> <span class="nf">show_contour</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWCONTOUR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable zone edge lines for this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().show_edge = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWEDGE</span><span class="p">)</span>
+
+    <span class="nd">@show_edge.setter</span>
+    <span class="k">def</span> <span class="nf">show_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWEDGE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_mesh</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable mesh lines for this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().show_mesh = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWMESH</span><span class="p">)</span>
+
+    <span class="nd">@show_mesh.setter</span>
+    <span class="k">def</span> <span class="nf">show_mesh</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWMESH</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_scatter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable scatter symbols for this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().show_scatter = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSCATTER</span><span class="p">)</span>
+
+    <span class="nd">@show_scatter.setter</span>
+    <span class="k">def</span> <span class="nf">show_scatter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSCATTER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_shade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable surface shading effect for this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().show_shade = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSHADE</span><span class="p">)</span>
+
+    <span class="nd">@show_shade.setter</span>
+    <span class="k">def</span> <span class="nf">show_shade</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSHADE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show slices for this plot.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+<span class="sd">            &gt;&gt;&gt;frame.plot().show_slices(True)</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SLICELAYERS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">,</span>
+                                     <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@show_slices.setter</span>
+    <span class="k">def</span> <span class="nf">show_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SLICELAYERS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">,</span>
+                              <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_isosurfaces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show isosurfaces for this plot.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+<span class="sd">            &gt;&gt;&gt;frame.plot().show_isosurfaces(True)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISOSURFACELAYERS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">,</span>
+                                     <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@show_isosurfaces.setter</span>
+    <span class="k">def</span> <span class="nf">show_isosurfaces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISOSURFACELAYERS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">,</span>
+                              <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_streamtraces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable drawing `Streamtraces` on this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().show_streamtraces = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">STREAMTRACELAYERS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">,</span>
+                                     <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@show_streamtraces.setter</span>
+    <span class="k">def</span> <span class="nf">show_streamtraces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">STREAMTRACELAYERS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">,</span>
+                              <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_vector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable drawing of vectors.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().show_vector = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWVECTOR</span><span class="p">)</span>
+
+    <span class="nd">@show_vector.setter</span>
+    <span class="k">def</span> <span class="nf">show_vector</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWVECTOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_fieldmaps</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of all fieldmaps in this plot.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(frame.plot().num_fieldmaps)</span>
+<span class="sd">            3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FieldMapGetCountForFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">fieldmap_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the index of the fieldmap associated with a `Zone &lt;data_access&gt;`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            zone (`Zone &lt;data_access&gt;`): The `Zone &lt;data_access&gt;` object that</span>
+<span class="sd">                belongs to the `Dataset` associated with this plot.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Index`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; fmap_index = plot.fieldmap_index(dataset.zone(&#39;Zone&#39;))</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(fmap_index).show_mesh = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">Index</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetFieldMap</span><span class="p">(</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">fieldmaps</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;All fieldmaps in this plot.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Iterator of `Cartesian2DFieldmap` or `Cartesian3DFieldmap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for fmap in plot.fieldmaps():</span>
+<span class="sd">            ...     fmap.mesh.show = True</span>
+
+<span class="sd">        .. versionchanged:: 0.9</span>
+<span class="sd">            `fieldmaps` was changed from a property (0.8 and earlier) to a</span>
+<span class="sd">            method requiring parentheses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_fieldmaps</span><span class="p">):</span>
+            <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">active_fieldmap_indices</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set of active fieldmaps by index.</span>
+
+<span class="sd">        :type: `set`</span>
+
+<span class="sd">        This example sets the first three fieldmaps active, disabling all</span>
+<span class="sd">        others. It then turns on scatter symbols for just these three::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.active_fieldmap_indices = [0, 1, 2]</span>
+<span class="sd">            &gt;&gt;&gt; for i in plot.active_fieldmap_indices:</span>
+<span class="sd">            ...     plot.fieldmap(i).scatter.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">get_style</span><span class="p">(</span><span class="nb">set</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ACTIVEFIELDMAPS</span><span class="p">,</span>
+                                 <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@active_fieldmap_indices.setter</span>
+    <span class="k">def</span> <span class="nf">active_fieldmap_indices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">):</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">set_style</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">values</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ACTIVEFIELDMAPS</span><span class="p">,</span>
+                          <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">active_fieldmaps</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Active fieldmaps in this plot.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Cartesian2DFieldmap` or `Cartesian3DFieldmap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for fmap in plot.active_fieldmaps:</span>
+<span class="sd">            ...     fmap.vector.show = True</span>
+
+<span class="sd">        .. note:: **Possible side-effect when connected to Tecplot 360.**</span>
+
+<span class="sd">                Changing the solution times in the dataset or modifying the</span>
+<span class="sd">                active fieldmaps in a frame may trigger a change in the active</span>
+<span class="sd">                plot&#39;s solution time by the Tecplot 360 interface. This is done</span>
+<span class="sd">                to keep the GUI controls consistent. In batch mode, no such</span>
+<span class="sd">                side-effect will take place and the user must take care to set</span>
+<span class="sd">                the plot&#39;s solution time with the `plot.solution_time</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_time&gt;` or</span>
+<span class="sd">                `plot.solution_timestep</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_timestep&gt;` properties.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">active_fieldmap_indices</span><span class="p">)]</span>
+
+    <span class="nd">@active_fieldmaps.setter</span>
+    <span class="k">def</span> <span class="nf">active_fieldmaps</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">active_fieldmap_indices</span> <span class="o">=</span> <span class="p">[</span><span class="nb">getattr</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">values</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_solution_times</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of solution times for all active fieldmaps.</span>
+
+<span class="sd">        :type: `int`</span>
+
+<span class="sd">        .. note::</span>
+
+<span class="sd">            This only returns the number of *active* solution times. When</span>
+<span class="sd">            assigning strands and solution times to zones, the zones are</span>
+<span class="sd">            placed into an *inactive* fieldmap that must be subsequently</span>
+<span class="sd">            activated. See example below.</span>
+
+<span class="sd">        .. code-block:: python</span>
+
+<span class="sd">            &gt;&gt;&gt; # place all zones into a single fieldmap (strand: 1)</span>
+<span class="sd">            &gt;&gt;&gt; # with incrementing solution times</span>
+<span class="sd">            &gt;&gt;&gt; for time, zone in enumerate(dataset.zones()):</span>
+<span class="sd">            ...     zone.strand = 1</span>
+<span class="sd">            ...     zone.solution_time = time</span>
+<span class="sd">            ...</span>
+<span class="sd">            &gt;&gt;&gt; # We must activate the fieldmap to ensure the plot&#39;s</span>
+<span class="sd">            &gt;&gt;&gt; # solution times have been updated. Since we placed</span>
+<span class="sd">            &gt;&gt;&gt; # all zones into a single fieldmap, we can assume the</span>
+<span class="sd">            &gt;&gt;&gt; # first fieldmap (index: 0) is the one we want.</span>
+<span class="sd">            &gt;&gt;&gt; plot.active_fieldmaps += [0]</span>
+<span class="sd">            &gt;&gt;&gt;</span>
+<span class="sd">            &gt;&gt;&gt; # now the plot&#39;s solution times are available.</span>
+<span class="sd">            &gt;&gt;&gt; print(plot.num_solution_times)</span>
+<span class="sd">            10</span>
+<span class="sd">            &gt;&gt;&gt; print(plot.solution_times)</span>
+<span class="sd">            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]</span>
+
+<span class="sd">        .. versionadded:: 2017.2</span>
+<span class="sd">            Solution time manipulation requires Tecplot 360 2017 R2 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">reqver</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">reqver</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R2 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">reqver</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">result</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetNumTimeStepsForFrame</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">solution_times</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`List &lt;list&gt;` of active solution times.</span>
+
+<span class="sd">        :type: `list` of `floats &lt;float&gt;`</span>
+
+<span class="sd">        .. note::</span>
+
+<span class="sd">            This only returns the list of *active* solution times. When</span>
+<span class="sd">            assigning strands and solution times to zones, the zones are placed</span>
+<span class="sd">            into an *inactive* fieldmap that must be subsequently activated.</span>
+<span class="sd">            See example below.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(plot.solution_times)</span>
+<span class="sd">            [0.0, 1.0, 2.0]</span>
+
+<span class="sd">        .. versionadded:: 2017.2</span>
+<span class="sd">            Solution time manipulation requires Tecplot 360 2017 R2 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">reqver</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">reqver</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R2 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">reqver</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetSolutionTimesForFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">ntimes</span><span class="p">,</span> <span class="n">times</span> <span class="o">=</span> <span class="n">res</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">times</span><span class="p">[:</span><span class="n">ntimes</span><span class="p">])</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil_connector</span><span class="o">.</span><span class="n">connected</span><span class="p">:</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">ArrayDealloc</span><span class="p">(</span><span class="n">times</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ret</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">solution_time</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The current solution time.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(plot.solution_times)</span>
+<span class="sd">            [0.0, 1.0, 2.0]</span>
+<span class="sd">            &gt;&gt;&gt; plot.solution_time = 1.0</span>
+
+<span class="sd">        .. note:: **Possible side-effect when connected to Tecplot 360.**</span>
+
+<span class="sd">                Changing the solution times in the dataset or modifying the</span>
+<span class="sd">                active fieldmaps in a frame may trigger a change in the active</span>
+<span class="sd">                plot&#39;s solution time by the Tecplot 360 interface. This is done</span>
+<span class="sd">                to keep the GUI controls consistent. In batch mode, no such</span>
+<span class="sd">                side-effect will take place and the user must take care to set</span>
+<span class="sd">                the plot&#39;s solution time with the `plot.solution_time</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_time&gt;` or</span>
+<span class="sd">                `plot.solution_timestep</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_timestep&gt;` properties.</span>
+
+<span class="sd">        .. versionadded:: 2017.2</span>
+<span class="sd">            Solution time manipulation requires Tecplot 360 2017 R2 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">reqver</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">reqver</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R2 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">reqver</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetCurrentForFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@solution_time.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">solution_time</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">reqver</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">reqver</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R2 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">reqver</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeSetCurrent</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">res</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="n">SetValueReturnCode</span><span class="o">.</span><span class="n">Ok</span><span class="p">,</span>
+                           <span class="n">SetValueReturnCode</span><span class="o">.</span><span class="n">DuplicateValue</span><span class="p">]:</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">solution_timestep</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The zero-based index of the current solution time.</span>
+
+<span class="sd">        :type: `int`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(plot.solution_times)</span>
+<span class="sd">            [0.0, 1.0, 2.0]</span>
+<span class="sd">            &gt;&gt;&gt; print(plot.solution_time)</span>
+<span class="sd">            0.0</span>
+<span class="sd">            &gt;&gt;&gt; plot.solution_timestep += 1</span>
+<span class="sd">            &gt;&gt;&gt; print(plot.solution_time)</span>
+<span class="sd">            1.0</span>
+
+<span class="sd">        .. note:: **Possible side-effect when connected to Tecplot 360.**</span>
+
+<span class="sd">                Changing the solution times in the dataset or modifying the</span>
+<span class="sd">                active fieldmaps in a frame may trigger a change in the active</span>
+<span class="sd">                plot&#39;s solution time by the Tecplot 360 interface. This is done</span>
+<span class="sd">                to keep the GUI controls consistent. In batch mode, no such</span>
+<span class="sd">                side-effect will take place and the user must take care to set</span>
+<span class="sd">                the plot&#39;s solution time with the `plot.solution_time</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_time&gt;` or</span>
+<span class="sd">                `plot.solution_timestep</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_timestep&gt;` properties.</span>
+
+<span class="sd">        .. versionadded:: 2017.2</span>
+<span class="sd">            Solution time manipulation requires Tecplot 360 2017 R2 or later.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">reqver</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">reqver</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R2 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">reqver</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">result</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetCurrentTimeStepForFrame</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">result</span> <span class="o">-</span> <span class="mi">1</span>
+
+    <span class="nd">@solution_timestep.setter</span>
+    <span class="k">def</span> <span class="nf">solution_timestep</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">timestep</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="n">reqver</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="n">reqver</span><span class="p">:</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Solution time manipulation requires 2017 R2 or later.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotOutOfDateEngineError</span><span class="p">(</span><span class="n">reqver</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">time</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetSolutionTimeAtTimeStepForFrame</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">timestep</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">solution_time</span> <span class="o">=</span> <span class="n">time</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_ensure_valid_solution_time</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Sets the plot&#39;s solution time to a valid value.</span>
+
+<span class="sd">        To mimick behavior when connected to 360</span>
+<span class="sd">        we have to update the plot&#39;s solution time</span>
+<span class="sd">        to make sure it is always valid, i.e. within</span>
+<span class="sd">        the dataset&#39;s solution time range.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_solution_times</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">t</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">solution_time</span>
+                <span class="n">tmin</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetMin</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">t</span> <span class="o">&lt;</span> <span class="n">tmin</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">solution_time</span> <span class="o">=</span> <span class="n">tmin</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">tmax</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">SolutionTimeGetMax</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="n">t</span> <span class="o">&gt;</span> <span class="n">tmax</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">solution_time</span> <span class="o">=</span> <span class="n">tmax</span>
+
+
+<div class="viewcode-block" id="Cartesian2DFieldPlot"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian2DFieldPlot">[docs]</a><span class="k">class</span> <span class="nc">Cartesian2DFieldPlot</span><span class="p">(</span><span class="n">FieldPlot</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;2D plot containing field data associated with style through fieldmaps.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 10-17,23-24</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;HeatExchanger.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        plot = frame.plot(PlotType.Cartesian2D)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        plot.vector.u_variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+<span class="sd">        plot.vector.v_variable = dataset.variable(&#39;V(M/S)&#39;)</span>
+
+<span class="sd">        plot.contour(2).variable = dataset.variable(&#39;T(K)&#39;)</span>
+<span class="sd">        plot.contour(2).colormap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+
+<span class="sd">        for z in dataset.zones():</span>
+<span class="sd">            fmap = plot.fieldmap(z)</span>
+<span class="sd">            fmap.contour.flood_contour_group = plot.contour(2)</span>
+
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.show_vector = True</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;plot_field2d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/plot_field2d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Cartesian2DFieldPlot.activate"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian2DFieldPlot.activate">[docs]</a>    <span class="k">def</span> <span class="nf">activate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Make this the active plot type on the parent frame.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; plot = frame.plot(PlotType.Cartesian2D)</span>
+<span class="sd">            &gt;&gt;&gt; plot.activate()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">plot_type</span> <span class="o">=</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">Cartesian2D</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">axes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axes style control for this plot.</span>
+
+<span class="sd">        :type: `Cartesian2DFieldAxes`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.Cartesian2D</span>
+<span class="sd">            &gt;&gt;&gt; axes = frame.plot().axes</span>
+<span class="sd">            &gt;&gt;&gt; axes.x_axis.variable = dataset.variable(&#39;U&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; axes.y_axis.variable = dataset.variable(&#39;V&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Cartesian2DFieldAxes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Cartesian2DFieldPlot.fieldmap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian2DFieldPlot.fieldmap">[docs]</a>    <span class="k">def</span> <span class="nf">fieldmap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a `Cartesian2DFieldmap` by `Zone &lt;data_access&gt;` or index.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            key (`Zone &lt;data_access&gt;` or `integer &lt;int&gt;`): The</span>
+<span class="sd">                `Zone &lt;data_access&gt;` must be in the `Dataset` attached to the</span>
+<span class="sd">                assocated frame of this plot.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; fmap = plot.fieldmap(dataset.zone(0))</span>
+<span class="sd">            &gt;&gt;&gt; fmap.scatter.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">key</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap_index</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Cartesian2DFieldmap</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">vector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Vector variable and style control for this plot.</span>
+
+<span class="sd">        :type: `Vector2D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.vector.u_variable = dataset.variable(&#39;U&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Vector2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">draw_order</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The order in which objects are drawn to the screen.</span>
+
+<span class="sd">        :type: `TwoDDrawOrder`</span>
+
+<span class="sd">        Possible values: `TwoDDrawOrder.ByZone`, `TwoDDrawOrder.ByLayer`.</span>
+
+<span class="sd">        The order is either by `Zone &lt;data_access&gt;` or by visual layer</span>
+<span class="sd">        (contour, mesh, etc.)::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.draw_order = TwoDDrawOrder.ByZone</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">TwoDDrawOrder</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">TWODDRAWORDER</span><span class="p">)</span>
+
+    <span class="nd">@draw_order.setter</span>
+    <span class="k">def</span> <span class="nf">draw_order</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">order</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">TwoDDrawOrder</span><span class="p">(</span><span class="n">order</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">TWODDRAWORDER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">view</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axes orientation and limits adjustments.</span>
+
+<span class="sd">        :type: `Cartesian2DView`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.view.fit()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Cartesian2DView</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Cartesian3DFieldPlot"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian3DFieldPlot">[docs]</a><span class="k">class</span> <span class="nc">Cartesian3DFieldPlot</span><span class="p">(</span><span class="n">FieldPlot</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;3D plot containing field data associated with style through fieldmaps.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 10-14</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;SpaceShip.lpk&#39;)</span>
+<span class="sd">        dataset = tp.load_layout(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        plot = frame.plot(PlotType.Cartesian3D)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.use_lighting_effect = False</span>
+<span class="sd">        plot.show_streamtraces = False</span>
+<span class="sd">        plot.use_translucency = True</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;plot_field3d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/plot_field3d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Cartesian3DFieldPlot.activate"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian3DFieldPlot.activate">[docs]</a>    <span class="k">def</span> <span class="nf">activate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Make this the active plot type on the parent frame.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; plot = frame.plot(PlotType.Cartesian3D)</span>
+<span class="sd">            &gt;&gt;&gt; plot.activate()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">plot_type</span> <span class="o">=</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">Cartesian3D</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">axes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axes style control for this plot.</span>
+
+<span class="sd">        :type: `Cartesian3DFieldAxes`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">            &gt;&gt;&gt; axes = frame.plot().axes</span>
+<span class="sd">            &gt;&gt;&gt; axes.x_axis.variable = dataset.variable(&#39;U&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; axes.y_axis.variable = dataset.variable(&#39;V&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; axes.z_axis.variable = dataset.variable(&#39;W&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Cartesian3DFieldAxes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Cartesian3DFieldPlot.fieldmap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian3DFieldPlot.fieldmap">[docs]</a>    <span class="k">def</span> <span class="nf">fieldmap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a `Cartesian3DFieldmap` by `Zone &lt;data_access&gt;` or index.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            key (`Zone &lt;data_access&gt;` or `integer &lt;int&gt;`): The `Zone</span>
+<span class="sd">                &lt;data_access&gt;` must be in the `Dataset` attached to the</span>
+<span class="sd">                assocated frame of this plot.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; fmap = plot.fieldmap(dataset.zone(0))</span>
+<span class="sd">            &gt;&gt;&gt; fmap.scatter.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">key</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap_index</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Cartesian3DFieldmap</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">vector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Vector variable and style control for this plot.</span>
+
+<span class="sd">        :type: `Vector3D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.vector.u_variable = dataset.variable(&#39;U&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Vector3D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">view</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Viewport, axes orientation and limits adjustments.</span>
+
+<span class="sd">        :type: `Cartesian3DView`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.view.fit()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Cartesian3DView</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable lighting effect for all objects within this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().use_lighting_effect = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@use_lighting_effect.setter</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable translucent effect for all objects within this plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame.plot().use_translucency = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USETRANSLUCENCY</span><span class="p">)</span>
+
+    <span class="nd">@use_translucency.setter</span>
+    <span class="k">def</span> <span class="nf">use_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USETRANSLUCENCY</span><span class="p">)</span></div>
+
+
+<span class="k">class</span> <span class="nc">LinePlot</span><span class="p">(</span><span class="n">Plot</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Plot with line data and associated style through linemaps.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 10-12</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, Color, LinePattern</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;Rainfall.dat&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        frame.plot_type = PlotType.XYLine</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.show_symbols = True</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;plot_line.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/plot_line.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINEPLOTLAYERS</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">delete_linemaps</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">linemaps</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Clear all linemaps within this plot.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            \*linemaps (:ref:`Linemap`, `integer &lt;int&gt;` or `string &lt;str&gt;`):</span>
+<span class="sd">                One or more of the following: :ref:`Linemap` objects, linemap</span>
+<span class="sd">                indices (zero-based) or linemap names. If none are given, all</span>
+<span class="sd">                linemaps will be deleted.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.delete_linemaps()</span>
+<span class="sd">            &gt;&gt;&gt; print(plot.num_linemaps)</span>
+<span class="sd">            0</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">linemaps</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">LineMapDelete</span><span class="p">(</span><span class="bp">None</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">IndexSet</span><span class="p">()</span> <span class="k">as</span> <span class="n">indices</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">lmap</span> <span class="ow">in</span> <span class="n">flatten_args</span><span class="p">(</span><span class="o">*</span><span class="n">linemaps</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="c1"># try as a Linemap object</span>
+                    <span class="n">indices</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lmap</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+                <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="c1"># try as a linemap index</span>
+                        <span class="n">indices</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lmap</span><span class="p">)</span>
+                    <span class="k">except</span> <span class="ne">TypeError</span><span class="p">:</span>
+                        <span class="c1"># assume name pattern</span>
+                        <span class="k">for</span> <span class="n">submap</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">linemaps</span><span class="p">(</span><span class="n">lmap</span><span class="p">):</span>
+                            <span class="n">indices</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">submap</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">LineMapDelete</span><span class="p">(</span><span class="n">indices</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_linemaps</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of linemaps held by this plot.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(plot.num_linemaps)</span>
+<span class="sd">            3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">LineMapGetCountForFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">linemaps</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Yields linemaps matching the given pattern</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`string &lt;str&gt;`, optional): A name pattern to match. If no</span>
+<span class="sd">                pattern is given, all linemaps are yielded.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `XYLinemap` or `PolarLine` objects.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for lmap in plot.linemaps():</span>
+<span class="sd">            ...     lmap.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_linemaps</span><span class="p">):</span>
+                <span class="n">success</span><span class="p">,</span> <span class="n">name</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">LineMapGetName</span><span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">success</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">pattern</span> <span class="ow">is</span> <span class="bp">None</span> <span class="ow">or</span> <span class="n">fnmatch</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+                        <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">linemap</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_linemap_unique_id</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">LineMapGetUniqueID</span><span class="p">(</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_add_linemap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">zone</span><span class="p">,</span> <span class="n">show</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">new_linemap_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_linemaps</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">LineMapCreate</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="n">linemap</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">linemap</span><span class="p">(</span><span class="n">new_linemap_index</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">linemap</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
+            <span class="k">if</span> <span class="n">zone</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">linemap</span><span class="o">.</span><span class="n">zone_index</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">zone</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">,</span> <span class="n">zone</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">show</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">linemap</span><span class="o">.</span><span class="n">show</span> <span class="o">=</span> <span class="n">show</span>
+            <span class="k">return</span> <span class="n">linemap</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">legend</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Line plot legend style and placement control.</span>
+
+<span class="sd">        :type: `LineLegend`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.legend.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">LineLegend</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">GLOBALLINEPLOT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">active_linemap_indices</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`set` of all active linemaps by index.</span>
+
+<span class="sd">        :type: `set` of `integers &lt;int&gt;`</span>
+
+<span class="sd">        Numbers are zero-based indices to the linemaps::</span>
+
+<span class="sd">            &gt;&gt;&gt; active_indices = plot.active_linemap_indices</span>
+<span class="sd">            &gt;&gt;&gt; active_lmaps = [plot.linemap(i) for i in active_indices]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">get_style</span><span class="p">(</span><span class="nb">set</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ACTIVELINEMAPS</span><span class="p">,</span>
+                                 <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">active_linemaps</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Yields all active linemaps.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `XYLinemap` or `PolarLinemap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; for lmap in plot.active_linemaps:</span>
+<span class="sd">            ...     lmap.line.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">active_linemap_indices</span><span class="p">):</span>
+            <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">linemap</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable lines for this plot.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_lines = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWLINES</span><span class="p">)</span>
+
+    <span class="nd">@show_lines.setter</span>
+    <span class="k">def</span> <span class="nf">show_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWLINES</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_symbols</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable symbols at line vertices for this plot.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_symbols = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSYMBOLS</span><span class="p">)</span>
+
+    <span class="nd">@show_symbols.setter</span>
+    <span class="k">def</span> <span class="nf">show_symbols</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSYMBOLS</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="XYLinePlot"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.XYLinePlot">[docs]</a><span class="k">class</span> <span class="nc">XYLinePlot</span><span class="p">(</span><span class="n">LinePlot</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Cartesian plot with line data and associated style through linemaps.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 10-14</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, FillMode</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;SunSpots.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        plot = frame.plot(PlotType.XYLine)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.show_symbols = True</span>
+<span class="sd">        plot.linemap(0).symbols.fill_mode = FillMode.UseLineColor</span>
+<span class="sd">        plot.linemap(0).symbols.size = 1</span>
+
+<span class="sd">        tp.export.save_png(&#39;plot_xyline.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/plot_xyline.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="XYLinePlot.activate"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.XYLinePlot.activate">[docs]</a>    <span class="k">def</span> <span class="nf">activate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Make this the active plot type on the parent frame.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; plot = frame.plot(PlotType.XYLine)</span>
+<span class="sd">            &gt;&gt;&gt; plot.activate()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">plot_type</span> <span class="o">=</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">XYLine</span></div>
+
+<div class="viewcode-block" id="XYLinePlot.linemap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.XYLinePlot.linemap">[docs]</a>    <span class="k">def</span> <span class="nf">linemap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a specific linemap within this plot.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`integer &lt;int&gt;` or `string &lt;str&gt;`): This is either a</span>
+<span class="sd">                zero-based index or a glob-like pattern which is matched to the</span>
+<span class="sd">                linemap names. If more than one linemap shares the same name,</span>
+<span class="sd">                the lowest indexed linemap will be returned.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `XYLinemap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.linemap(0).error_bar.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">XYLinemap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_linemap_unique_id</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span> <span class="bp">self</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">linemaps</span><span class="p">(</span><span class="n">pattern</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotPatternMatchError</span><span class="p">(</span>
+                    <span class="n">pattern</span><span class="p">,</span>
+                    <span class="s1">&#39;no linemap found with name: &quot;{}&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span>
+                    <span class="s1">&#39;glob&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="XYLinePlot.add_linemap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.XYLinePlot.add_linemap">[docs]</a>    <span class="k">def</span> <span class="nf">add_linemap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">zone</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">x</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">show</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a linemap using the specified zone and variables.</span>
+
+<span class="sd">        Parameters:</span>
+
+<span class="sd">            name (`string &lt;str&gt;`): Name of the linemap which can be used for</span>
+<span class="sd">                retrieving with `XYLinePlot.linemap`. If `None`, then the</span>
+<span class="sd">                linemap will not have a name. Default: `None`.</span>
+<span class="sd">            zone (`Zone &lt;data_access&gt;`): The data to be used when drawing this</span>
+<span class="sd">                linemap. If `None`, then |Tecplot Engine| will select a zone.</span>
+<span class="sd">                Default: `None`.</span>
+<span class="sd">            x (`Variable`): The ``x`` variable which must be from the same</span>
+<span class="sd">                `Dataset` as ``y`` and ``zone``. If `None`, then</span>
+<span class="sd">                |Tecplot Engine| will select an x variable. Default: `None`.</span>
+<span class="sd">            y (`Variable`): The ``y`` variable which must be from the same</span>
+<span class="sd">                `Dataset` as ``x`` and ``zone``. If `None`, then</span>
+<span class="sd">                |Tecplot Engine| will select a ``y`` variable. Default: `None`.</span>
+<span class="sd">            show (`boolean &lt;bool&gt;`, optional): Enable this linemap as soon as</span>
+<span class="sd">                it&#39;s added. (default: `True`). If `None`, then |Tecplot Engine|</span>
+<span class="sd">                will determine if the linemap should be enabled.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `XYLinemap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; lmap = plot.add_linemap(&#39;Line 1&#39;, dataset.zone(&#39;Zone&#39;),</span>
+<span class="sd">            ...                         dataset.variable(&#39;X&#39;),</span>
+<span class="sd">            ...                         dataset.variable(&#39;Y&#39;))</span>
+<span class="sd">            &gt;&gt;&gt; lmap.line.line_thickness = 0.8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">lmap</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_linemap</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">zone</span><span class="p">,</span> <span class="n">show</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">x</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">lmap</span><span class="o">.</span><span class="n">x_variable</span> <span class="o">=</span> <span class="n">x</span>
+        <span class="k">if</span> <span class="n">y</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">lmap</span><span class="o">.</span><span class="n">y_variable</span> <span class="o">=</span> <span class="n">y</span>
+        <span class="k">return</span> <span class="n">lmap</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">axes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axes style control for this plot.</span>
+
+<span class="sd">        :type: `XYLineAxes`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType, AxisMode</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.XYLine</span>
+<span class="sd">            &gt;&gt;&gt; axes = frame.plot().axes</span>
+<span class="sd">            &gt;&gt;&gt; axes.axis_mode = AxisMode.XYDependent</span>
+<span class="sd">            &gt;&gt;&gt; axes.xy_ratio = 2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">XYLineAxes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_bars</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable bar chart drawing mode for this plot.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_bars = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWBARCHARTS</span><span class="p">)</span>
+
+    <span class="nd">@show_bars.setter</span>
+    <span class="k">def</span> <span class="nf">show_bars</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWBARCHARTS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_error_bars</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable error bars for this plot.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        The variable to be used for error bars must be set first on at least</span>
+<span class="sd">        one linemap within this plot::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.linemap(0).error_bars.variable = dataset.variable(&#39;E&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; plot.show_error_bars = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWERRORBARS</span><span class="p">)</span>
+
+    <span class="nd">@show_error_bars.setter</span>
+    <span class="k">def</span> <span class="nf">show_error_bars</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWERRORBARS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">view</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;View control of the plot relative to the frame.</span>
+
+<span class="sd">        :type: `LineView`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.view.fit()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">LineView</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="PolarLinePlot"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.PolarLinePlot">[docs]</a><span class="k">class</span> <span class="nc">PolarLinePlot</span><span class="p">(</span><span class="n">LinePlot</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Polar plot with line data and associated style through linemaps.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 16-22,25</span>
+
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+
+<span class="sd">        npoints = 300</span>
+<span class="sd">        r = np.linspace(0, 2000, npoints)</span>
+<span class="sd">        theta = np.linspace(0, 10, npoints)</span>
+
+<span class="sd">        dataset = frame.create_dataset(&#39;Data&#39;, [&#39;R&#39;, &#39;Theta&#39;])</span>
+<span class="sd">        zone = dataset.add_ordered_zone(&#39;Zone&#39;, (300,))</span>
+<span class="sd">        zone.values(&#39;R&#39;)[:] = r</span>
+<span class="sd">        zone.values(&#39;Theta&#39;)[:] = theta</span>
+
+<span class="sd">        plot = frame.plot(PlotType.PolarLine)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.axes.r_axis.max = r.max()</span>
+<span class="sd">        plot.axes.theta_axis.mode = ThetaMode.Radians</span>
+<span class="sd">        plot.delete_linemaps()</span>
+<span class="sd">        lmap = plot.add_linemap(&#39;Linemap&#39;, zone, dataset.variable(&#39;R&#39;),</span>
+<span class="sd">                                    dataset.variable(&#39;Theta&#39;))</span>
+<span class="sd">        lmap.line.line_thickness = 0.8</span>
+<span class="sd">        lmap.line.color = Color.Green</span>
+
+<span class="sd">        plot.view.fit()</span>
+
+<span class="sd">        tp.export.save_png(&#39;plot_polar.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/plot_polar.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="PolarLinePlot.activate"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.PolarLinePlot.activate">[docs]</a>    <span class="k">def</span> <span class="nf">activate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Make this the active plot type on the parent frame.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+<span class="sd">            &gt;&gt;&gt; plot = frame.plot(PlotType.PolarLine)</span>
+<span class="sd">            &gt;&gt;&gt; plot.activate()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">plot_type</span> <span class="o">=</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">PolarLine</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">axes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axes style control for this plot.</span>
+
+<span class="sd">        :type: `PolarLineAxes`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType, ThetaMode</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.PolarLine</span>
+<span class="sd">            &gt;&gt;&gt; axes = frame.plot().axes</span>
+<span class="sd">            &gt;&gt;&gt; axes.theta_mode = ThetaMode.Radians</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">PolarLineAxes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">view</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;View control of the plot relative to the frame.</span>
+
+<span class="sd">        :type: `PolarView`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.view.fit()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">PolarView</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="PolarLinePlot.add_linemap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.PolarLinePlot.add_linemap">[docs]</a>    <span class="k">def</span> <span class="nf">add_linemap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">zone</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">r</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">theta</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">show</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a linemap using the specified zone and variables.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            name (`string &lt;str&gt;`): Name of the linemap which can be used for</span>
+<span class="sd">                retrieving with `PolarLinePlot.linemap`. If `None`, then the</span>
+<span class="sd">                linemap will not have a name. Default: `None`.</span>
+<span class="sd">            zone (`Zone &lt;data_access&gt;`): The data to be used when drawing this</span>
+<span class="sd">                linemap. If `None`, then |Tecplot Engine| will select a</span>
+<span class="sd">                `Zone &lt;data_access&gt;`.</span>
+<span class="sd">                Default: `None`.</span>
+<span class="sd">            r (`Variable`): The ``r`` variable which must be from the same</span>
+<span class="sd">                `Dataset` as ``theta`` and ``zone``. If `None`, then</span>
+<span class="sd">                |Tecplot Engine| will select a variable. Default: `None`.</span>
+<span class="sd">            theta (`Variable`): The ``theta`` variable which must be from the</span>
+<span class="sd">                same `Dataset` as ``r`` and ``zone``. If `None`, then</span>
+<span class="sd">                |Tecplot Engine| will select a variable. Default: `None`.</span>
+<span class="sd">            show (`boolean &lt;bool&gt;`, optional): Enable this linemap as soon as</span>
+<span class="sd">                it&#39;s added. (default: `True`)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `PolarLinemap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; lmap = plot.add_linemap(&#39;Line 1&#39;, dataset.zone(&#39;Zone&#39;),</span>
+<span class="sd">            ...                         dataset.variable(&#39;R&#39;),</span>
+<span class="sd">            ...                         dataset.variable(&#39;Theta&#39;))</span>
+<span class="sd">            &gt;&gt;&gt; lmap.line.line_thickness = 0.8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">lmap</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_linemap</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">zone</span><span class="p">,</span> <span class="n">show</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">r</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">lmap</span><span class="o">.</span><span class="n">r_variable</span> <span class="o">=</span> <span class="n">r</span>
+        <span class="k">if</span> <span class="n">theta</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">lmap</span><span class="o">.</span><span class="n">theta_variable</span> <span class="o">=</span> <span class="n">theta</span>
+        <span class="k">return</span> <span class="n">lmap</span></div>
+
+<div class="viewcode-block" id="PolarLinePlot.linemap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.PolarLinePlot.linemap">[docs]</a>    <span class="k">def</span> <span class="nf">linemap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a specific linemap within this plot.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`integer &lt;int&gt;` or `string &lt;str&gt;`): This is either a</span>
+<span class="sd">                zero-based index or a glob-like pattern which is matched to the</span>
+<span class="sd">                linemap names. If more than one linemap shares the same name,</span>
+<span class="sd">                the lowest indexed linemap will be returned.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `PolarLinemap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.linemap(0).error_bar.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">PolarLinemap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_linemap_unique_id</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span> <span class="bp">self</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">linemaps</span><span class="p">(</span><span class="n">pattern</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotPatternMatchError</span><span class="p">(</span>
+                    <span class="n">pattern</span><span class="p">,</span>
+                    <span class="s1">&#39;no linemap found with name: &quot;{}&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pattern</span><span class="p">),</span>
+                    <span class="s1">&#39;glob&#39;</span><span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

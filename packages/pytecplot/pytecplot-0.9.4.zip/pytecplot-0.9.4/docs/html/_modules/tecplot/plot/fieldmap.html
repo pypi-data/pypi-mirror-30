@@ -1,0 +1,2125 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.plot.fieldmap &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.plot.fieldmap</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">super</span><span class="p">,</span> <span class="nb">int</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">Iterable</span><span class="p">,</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="n">cast</span>
+<span class="kn">from</span> <span class="nn">enum</span> <span class="kn">import</span> <span class="n">Enum</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="n">TecplotLogicError</span><span class="p">,</span> <span class="n">TecplotSystemError</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">session</span>
+<span class="kn">from</span> <span class="nn">..session</span> <span class="kn">import</span> <span class="n">Style</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">Index</span><span class="p">,</span> <span class="n">IndexRange</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">color_spec</span><span class="p">,</span> <span class="n">flatten_args</span><span class="p">,</span> <span class="n">sv</span>
+<span class="kn">from</span> <span class="nn">.scatter</span> <span class="kn">import</span> <span class="n">GeometryScatterSymbol</span><span class="p">,</span> <span class="n">TextScatterSymbol</span><span class="p">,</span> <span class="n">Symbol</span>
+
+
+<span class="k">class</span> <span class="nc">FieldmapStyle</span><span class="p">(</span><span class="n">Style</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span> <span class="o">=</span> <span class="n">fieldmap</span>
+        <span class="n">kw</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">uniqueid</span><span class="o">=</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="n">offset1</span><span class="o">=</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">index</span><span class="p">,</span>
+                  <span class="n">multiset</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">_sv</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">that</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">fieldmap</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">that</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="FieldmapContour"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapContour">[docs]</a><span class="k">class</span> <span class="nc">FieldmapContour</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Style control for flooding and contour lines.</span>
+
+<span class="sd">    This object controls which contour groups are associated with flooding,</span>
+<span class="sd">    line placement and line coloring. Three different contour groups may be</span>
+<span class="sd">    used though there are eight total groups that can be configured in a single</span>
+<span class="sd">    plot. In this example, we flood by the first contour group (index: 0),</span>
+<span class="sd">    place contour lines by the second contour group (index: 1) and color the</span>
+<span class="sd">    lines by the third contour group (index: 2)::</span>
+
+<span class="sd">        import numpy as np</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+<span class="sd">        from tecplot.data.operate import execute_equation</span>
+
+<span class="sd">        # Get the active frame, setup a grid (30x30x30)</span>
+<span class="sd">        # where each dimension ranges from 0 to 30.</span>
+<span class="sd">        # Add variables P,Q,R to the dataset and give</span>
+<span class="sd">        # values to the data.</span>
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        dataset = frame.dataset</span>
+<span class="sd">        for v in [&#39;X&#39;,&#39;Y&#39;,&#39;Z&#39;,&#39;P&#39;,&#39;Q&#39;,&#39;R&#39;]:</span>
+<span class="sd">            dataset.add_variable(v)</span>
+<span class="sd">        zone = dataset.add_ordered_zone(&#39;Zone&#39;, (30,30,30))</span>
+<span class="sd">        xx = np.linspace(0,30,30)</span>
+<span class="sd">        for v,arr in zip([&#39;X&#39;,&#39;Y&#39;,&#39;Z&#39;],np.meshgrid(xx,xx,xx)):</span>
+<span class="sd">            zone.values(v)[:] = arr.ravel()</span>
+<span class="sd">        execute_equation(&#39;{P} = -10 * {X}    +      {Y}**2 + {Z}**2&#39;)</span>
+<span class="sd">        execute_equation(&#39;{Q} =       {X}    - 10 * {Y}    - {Z}**2&#39;)</span>
+<span class="sd">        execute_equation(&#39;{R} =       {X}**2 +      {Y}**2 - {Z}   &#39;)</span>
+
+<span class="sd">        # Enable 3D field plot and turn on contouring</span>
+<span class="sd">        # with boundary faces</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        srf = plot.fieldmap(0).surfaces</span>
+<span class="sd">        srf.surfaces_to_plot = SurfacesToPlot.BoundaryFaces</span>
+<span class="sd">        plot.show_contour = True</span>
+
+<span class="sd">        # get the contour group associated with the</span>
+<span class="sd">        # newly created zone</span>
+<span class="sd">        contour = plot.fieldmap(dataset.zone(&#39;Zone&#39;)).contour</span>
+
+<span class="sd">        # turn on flooding and lines, increase line thickness</span>
+<span class="sd">        contour.contour_type = ContourType.Overlay</span>
+<span class="sd">        contour.line_thickness = 0.7</span>
+
+<span class="sd">        # assign flooding to the first contour group</span>
+<span class="sd">        contour.flood_contour_group = plot.contour(0)</span>
+<span class="sd">        contour.flood_contour_group.variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">        contour.flood_contour_group.colormap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+<span class="sd">        contour.flood_contour_group.legend.show = False</span>
+
+<span class="sd">        # assign line placement to the second contour group</span>
+<span class="sd">        contour.line_group = plot.contour(1)</span>
+<span class="sd">        contour.line_group.legend.show = False</span>
+<span class="sd">        contour.line_group.variable = dataset.variable(&#39;Q&#39;)</span>
+<span class="sd">        contour.line_group.default_num_levels = 4</span>
+
+<span class="sd">        # add labels to the lines based on placement</span>
+<span class="sd">        contour.line_group.labels.show = True</span>
+<span class="sd">        contour.line_group.labels.font.size = 3.5</span>
+<span class="sd">        contour.line_group.labels.font.bold = True</span>
+
+<span class="sd">        # assign line coloring to the third contour group</span>
+<span class="sd">        contour.line_color = plot.contour(2)</span>
+<span class="sd">        contour.line_color.legend.show = False</span>
+<span class="sd">        contour.line_color.variable = dataset.variable(&#39;R&#39;)</span>
+
+<span class="sd">        # save image to PNG file</span>
+<span class="sd">        tp.export.save_png(&#39;fieldmap_contour.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_contour.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">CONTOUR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable drawing the contours.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">contour_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`ContourType` to plot.</span>
+
+<span class="sd">        :type: `ContourType`</span>
+
+<span class="sd">        Possible values are:</span>
+
+<span class="sd">            `ContourType.Flood` (default)</span>
+<span class="sd">                Filled color between the contour levels.</span>
+<span class="sd">            `ContourType.Lines`</span>
+<span class="sd">                Lines only.</span>
+<span class="sd">            `ContourType.Overlay`</span>
+<span class="sd">                Lines overlayed on flood.</span>
+<span class="sd">            `ContourType.AverageCell`</span>
+<span class="sd">                Filled color by the average value within cells.</span>
+<span class="sd">            `ContourType.PrimaryValue`</span>
+<span class="sd">                Filled color by the value at the primary corner of the cells.</span>
+
+<span class="sd">        In this example, we enable both flooding and contour lines::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import ContourType</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.contour_type = ContourType.Overlay</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">ContourType</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">CONTOURTYPE</span><span class="p">)</span>
+
+    <span class="nd">@contour_type.setter</span>
+    <span class="k">def</span> <span class="nf">contour_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">ContourType</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">CONTOURTYPE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Index` of the `ContourGroup` to use for flooding.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;` (zero-based index)</span>
+
+<span class="sd">        This property sets and gets, by `Index`, the `ContourGroup` used for</span>
+<span class="sd">        flooding. Changing style on this `ContourGroup` will affect all other</span>
+<span class="sd">        fieldmaps on the same `Frame` that use it. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.flood_contour_group_index = 1</span>
+<span class="sd">            &gt;&gt;&gt; contour.flood_contour_group.variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Index</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">FLOODCOLORING</span><span class="p">)</span>
+
+    <span class="nd">@flood_contour_group_index.setter</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">index</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">FLOODCOLORING</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `ContourGroup` to use for flooding.</span>
+
+<span class="sd">        :type: `ContourGroup`</span>
+
+<span class="sd">        This property sets and gets the `ContourGroup` used for flooding.</span>
+<span class="sd">        Changing style on this `ContourGroup` will affect all other fieldmaps</span>
+<span class="sd">        on the same `Frame` that use it. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; cmap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.flood_contour_group = plot.contour(1)</span>
+<span class="sd">            &gt;&gt;&gt; contour.flood_contour_group.variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; contour.flood_contour_group.colormap_name = cmap_name</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">contour</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">flood_contour_group_index</span><span class="p">)</span>
+
+    <span class="nd">@flood_contour_group.setter</span>
+    <span class="k">def</span> <span class="nf">flood_contour_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">contour_group</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">flood_contour_group_index</span> <span class="o">=</span> <span class="n">contour_group</span><span class="o">.</span><span class="n">index</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Index` of the `ContourGroup` to use for contour lines.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;` (zero-based index)</span>
+
+<span class="sd">        This property sets and gets, by `Index`, the `ContourGroup` used for</span>
+<span class="sd">        line placement and though all properties of the `ContourGroup` can be</span>
+<span class="sd">        manipulated through this object, many of them such as color will not</span>
+<span class="sd">        affect the lines unless the `FieldmapContour.line_color` is set to the</span>
+<span class="sd">        same `ContourGroup`. Note that changing style on this `ContourGroup`</span>
+<span class="sd">        will affect all other fieldmaps on the same `Frame` that use it.</span>
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_group_index = 2</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_group.variable = dataset.variable(&#39;Z&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Index</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINECONTOURGROUP</span><span class="p">)</span>
+
+    <span class="nd">@line_group_index.setter</span>
+    <span class="k">def</span> <span class="nf">line_group_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">index</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINECONTOURGROUP</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_group</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `ContourGroup` to use for line placement and style.</span>
+
+<span class="sd">        :type: `ContourGroup`</span>
+
+<span class="sd">        This property sets and gets the `ContourGroup` used for line placement</span>
+<span class="sd">        and though all properties of the `ContourGroup` can be manipulated</span>
+<span class="sd">        through this object, many of them such as color will not effect the</span>
+<span class="sd">        lines unless the `FieldmapContour.line_color` is set to the same</span>
+<span class="sd">        `ContourGroup`. Note that changing style on this `ContourGroup` will</span>
+<span class="sd">        affect all other fieldmaps on the same `Frame` that use it. Example</span>
+<span class="sd">        usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_group = plot.contour(2)</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_group.variable = dataset.variable(&#39;Z&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">contour</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">line_group_index</span><span class="p">)</span>
+
+    <span class="nd">@line_group.setter</span>
+    <span class="k">def</span> <span class="nf">line_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">contour_group</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">line_group_index</span> <span class="o">=</span> <span class="n">contour_group</span><span class="o">.</span><span class="n">index</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Color` or `ContourGroup` to use when coloring the lines.</span>
+
+<span class="sd">        :type: `Color` or `ContourGroup`</span>
+
+<span class="sd">        FieldmapContour lines can be a solid color or be colored by a</span>
+<span class="sd">        `ContourGroup` as obtained through the ``plot.contour`` property. Note</span>
+<span class="sd">        that changing style on this `ContourGroup` will affect all other</span>
+<span class="sd">        fieldmaps on the same `Frame` that use it. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(1).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_color = Color.Blue</span>
+
+<span class="sd">        Example of setting the color from a `ContourGroup`::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_color = plot.contour(1)</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_color.variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">color_spec</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="p">)</span>
+
+    <span class="nd">@line_color.setter</span>
+    <span class="k">def</span> <span class="nf">line_color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">color_spec</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_pattern</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`LinePattern` type to use for contour lines.</span>
+
+<span class="sd">        :type: `LinePattern`</span>
+
+<span class="sd">        Possible values: `Solid &lt;LinePattern.Solid&gt;`, `Dashed`, `DashDot`,</span>
+<span class="sd">        `Dotted`, `LongDash`, `DashDotDot`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import LinePattern</span>
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_pattern = LinePattern.DashDotDot</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">LinePattern</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINEPATTERN</span><span class="p">)</span>
+
+    <span class="nd">@line_pattern.setter</span>
+    <span class="k">def</span> <span class="nf">line_pattern</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">LinePattern</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINEPATTERN</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Thickness (`float`) of the drawn lines.</span>
+
+<span class="sd">        :type: `float` in percentage of the `Frame`&#39;s height.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.line_thickness = 0.7</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">pattern_length</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Length (`float`) of the pattern segment for non-solid lines.</span>
+
+<span class="sd">        :type: `float` in percentage of the `Frame`&#39;s height.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.pattern_length = 3.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">PATTERNLENGTH</span><span class="p">)</span>
+
+    <span class="nd">@pattern_length.setter</span>
+    <span class="k">def</span> <span class="nf">pattern_length</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">PATTERNLENGTH</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable lighting effect on this contour.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; contour = plot.fieldmap(0).contour</span>
+<span class="sd">            &gt;&gt;&gt; contour.use_lighting_effect = False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@use_lighting_effect.setter</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapEdge"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapEdge">[docs]</a><span class="k">class</span> <span class="nc">FieldmapEdge</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Volume boundary lines.</span>
+
+<span class="sd">    An edge plot layer displays the connections of the outer lines</span>
+<span class="sd">    (``IJ``-ordered zones), finite element surface zones, or planes</span>
+<span class="sd">    (``IJK``-ordered zones). The FieldmapEdge layer allows you to display the</span>
+<span class="sd">    edges (creases and borders) of your data. Zone edges exist only for ordered</span>
+<span class="sd">    zones or 2D finite element zones. Three-dimensional finite element zones do</span>
+<span class="sd">    not have boundaries.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 15,25-28</span>
+
+<span class="sd">        import os</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import Color, EdgeType, PlotType, SurfacesToPlot</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;SimpleData&#39;, &#39;F18.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+<span class="sd">        frame = dataset.frame</span>
+
+<span class="sd">        # Enable 3D field plot, turn on contouring and translucency</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.show_edge = True</span>
+
+<span class="sd">        plot.contour(0).colormap_name = &#39;Sequential - Blue&#39;</span>
+
+<span class="sd">        # adjust effects for every fieldmap in this dataset</span>
+<span class="sd">        for zone in dataset.zones():</span>
+<span class="sd">            fmap = plot.fieldmap(zone)</span>
+<span class="sd">            fmap.contour.flood_contour_group.variable = dataset.variable(&#39;S&#39;)</span>
+<span class="sd">            fmap.surfaces.surfaces_to_plot = SurfacesToPlot.BoundaryFaces</span>
+
+<span class="sd">            edge = fmap.edge</span>
+<span class="sd">            edge.edge_type = EdgeType.Creases</span>
+<span class="sd">            edge.color = Color.RedOrange</span>
+<span class="sd">            edge.line_thickness = 0.7</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;fieldmap_edge.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_edge.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGELAYER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Draw the mesh for this fieldmap.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_edge = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).edge.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">edge_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Where to draw edge lines.</span>
+
+<span class="sd">        :type: `EdgeType`</span>
+
+<span class="sd">        Possible values: `Borders`, `Creases`, `BordersAndCreases`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import EdgeType</span>
+<span class="sd">            &gt;&gt;&gt; plot.show_edge = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).edge.edge_type = EdgeType.Creases</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">EdgeType</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGETYPE</span><span class="p">)</span>
+
+    <span class="nd">@edge_type.setter</span>
+    <span class="k">def</span> <span class="nf">edge_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">EdgeType</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGETYPE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Line `Color`.</span>
+
+<span class="sd">        :type: `Color`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Thickness of the edge lines drawn.</span>
+
+<span class="sd">        :type: `float` in percentage of `Frame` height.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).edge.line_thickness = 0.4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">i_border</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Which border lines to draw in the ``I``-dimension.</span>
+
+<span class="sd">        :type: `BorderLocation`</span>
+
+<span class="sd">        Possible values: `None`, `Min &lt;BorderLocation.Min&gt;`, `Max</span>
+<span class="sd">        &lt;BorderLocation.Max&gt;`, `Both &lt;BorderLocation.Both&gt;`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import BorderLocation</span>
+<span class="sd">            &gt;&gt;&gt; plot.show_edge = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).edge.i_border = BorderLocation.Min</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">BorderLocation</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">IBORDER</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">None</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="n">BorderLocation</span><span class="o">.</span><span class="n">None_</span> <span class="k">else</span> <span class="n">value</span>
+
+    <span class="nd">@i_border.setter</span>
+    <span class="k">def</span> <span class="nf">i_border</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">BorderLocation</span><span class="o">.</span><span class="n">None_</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">BorderLocation</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">IBORDER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">j_border</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Which border lines to draw in the ``J``-dimension.</span>
+
+<span class="sd">        :type: `BorderLocation`</span>
+
+<span class="sd">        Possible values: `None`, `Min &lt;BorderLocation.Min&gt;`, `Max</span>
+<span class="sd">        &lt;BorderLocation.Max&gt;`, `Both &lt;BorderLocation.Both&gt;`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import BorderLocation</span>
+<span class="sd">            &gt;&gt;&gt; plot.show_edge = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).edge.j_border = BorderLocation.Both</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">BorderLocation</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">JBORDER</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">None</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="n">BorderLocation</span><span class="o">.</span><span class="n">None_</span> <span class="k">else</span> <span class="n">value</span>
+
+    <span class="nd">@j_border.setter</span>
+    <span class="k">def</span> <span class="nf">j_border</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">BorderLocation</span><span class="o">.</span><span class="n">None_</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">BorderLocation</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">JBORDER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">k_border</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Which border lines to draw in the ``K``-dimension.</span>
+
+<span class="sd">        :type: `BorderLocation`</span>
+
+<span class="sd">        Possible values: `None`, `Min &lt;BorderLocation.Min&gt;`, `Max</span>
+<span class="sd">        &lt;BorderLocation.Max&gt;`, `Both &lt;BorderLocation.Both&gt;`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import BorderLocation</span>
+<span class="sd">            &gt;&gt;&gt; plot.show_edge = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).edge.k_border = None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">BorderLocation</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">KBORDER</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">None</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="n">BorderLocation</span><span class="o">.</span><span class="n">None_</span> <span class="k">else</span> <span class="n">value</span>
+
+    <span class="nd">@k_border.setter</span>
+    <span class="k">def</span> <span class="nf">k_border</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">BorderLocation</span><span class="o">.</span><span class="n">None_</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">BorderLocation</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">KBORDER</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapMesh"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapMesh">[docs]</a><span class="k">class</span> <span class="nc">FieldmapMesh</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Lines connecting neighboring data points.</span>
+
+<span class="sd">    The mesh plot layer displays the lines connecting neighboring data points</span>
+<span class="sd">    within a `Zone &lt;data_access&gt;`. For ``I``-ordered data, the mesh is a single line</span>
+<span class="sd">    connecting all of the points in order of increasing ``I``-index. For</span>
+<span class="sd">    ``IJ``-ordered data, the mesh consists of two families of lines connecting</span>
+<span class="sd">    adjacent data points of increasing ``I``-index and increasing ``J``-index.</span>
+<span class="sd">    For ``IJK``-ordered data, the mesh consists of three families of lines, one</span>
+<span class="sd">    connecting points of increasing ``I``-index, one connecting points of</span>
+<span class="sd">    increasing ``J``-index, and one connecting points of increasing</span>
+<span class="sd">    ``K``-index. For finite element zones, the mesh is a plot of every edge of</span>
+<span class="sd">    all of the elements that are defined by the connectivity list for the node</span>
+<span class="sd">    points.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 23-25</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, MeshType</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;F18.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        # Enable 3D field plot and turn on contouring</span>
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.show_mesh = True</span>
+
+<span class="sd">        contour = plot.contour(0)</span>
+<span class="sd">        contour.variable = dataset.variable(&#39;S&#39;)</span>
+<span class="sd">        contour.colormap_name = &#39;Doppler&#39;</span>
+<span class="sd">        contour.levels.reset_levels(np.linspace(0.02,0.12,11))</span>
+
+<span class="sd">        # set the mesh type and color for all zones</span>
+<span class="sd">        for zone in dataset.zones():</span>
+<span class="sd">            mesh = plot.fieldmap(zone).mesh</span>
+<span class="sd">            mesh.mesh_type = MeshType.HiddenLine</span>
+<span class="sd">            mesh.color = contour</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;fieldmap_mesh.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_mesh.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">MESH</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Draw the mesh for this fieldmap.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SurfacesToPlot</span>
+<span class="sd">            &gt;&gt;&gt; plot.show_mesh = True</span>
+<span class="sd">            &gt;&gt;&gt; surfaces = plot.fieldmap(0).surfaces</span>
+<span class="sd">            &gt;&gt;&gt; surfaces.surfaces_to_plot = SurfacesToPlot.IPlanes</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).mesh.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">mesh_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`MeshType` to show.</span>
+
+<span class="sd">        :type: `MeshType`</span>
+
+<span class="sd">        Possible values:</span>
+
+<span class="sd">        `Wireframe &lt;MeshType.Wireframe&gt;`</span>
+<span class="sd">            Wire frame meshes are drawn below any other zone layers on the same</span>
+<span class="sd">            zone. In 3D Cartesian plots, no hidden lines are removed. For 3D</span>
+<span class="sd">            volume zones (finite element volume or IJK-ordered), the full 3D</span>
+<span class="sd">            mesh (consisting of all the connecting lines between data points)</span>
+<span class="sd">            is not generally drawn because the sheer number of lines would make</span>
+<span class="sd">            it confusing. The mesh drawn will depend on `FieldmapSurfaces`</span>
+<span class="sd">            which can be obtained through the parent fieldmap with</span>
+<span class="sd">            ``mesh.fieldmap.surfaces``::</span>
+
+<span class="sd">                from tecplot.constant import MeshType, SurfacesToPlot</span>
+<span class="sd">                mesh = plot.fieldmap(0).mesh</span>
+<span class="sd">                mesh.mesh_type = MeshType.Wireframe</span>
+<span class="sd">                surfaces = mesh.fieldmap.surfaces</span>
+<span class="sd">                surfaces.surfaces_to_plot = SurfacesToPlot.IPlanes</span>
+
+<span class="sd">            By default, only the mesh on exposed cell faces is shown.</span>
+
+<span class="sd">        `Overlay &lt;MeshType.Overlay&gt;`</span>
+<span class="sd">            Similar to Wire Frame, mesh lines are drawn over all other zone</span>
+<span class="sd">            layers except for vectors and scatter symbols. In 3D Cartesian</span>
+<span class="sd">            plots, the area behind the cells of the plot is still visible</span>
+<span class="sd">            (unless another plot type such as contour flooding prevents this).</span>
+<span class="sd">            As with Wire Frame, the mesh drawn will depend on</span>
+<span class="sd">            `FieldmapSurfaces` which can be obtained through the parent</span>
+<span class="sd">            fieldmap with ``mesh.fieldmap.surfaces``.</span>
+
+<span class="sd">        `HiddenLine &lt;MeshType.HiddenLine&gt;`</span>
+<span class="sd">            Similar to Overlay, except hidden lines are removed from behind the</span>
+<span class="sd">            mesh. In effect, the cells (elements) of the mesh are opaque.</span>
+<span class="sd">            FieldmapSurfaces and lines that are hidden behind another surface</span>
+<span class="sd">            are removed from the plot. For 3D volume zones, using this plot</span>
+<span class="sd">            type obscures everything inside the zone. If you choose this option</span>
+<span class="sd">            for 3D volume zones, then choosing to plot every surface with::</span>
+
+<span class="sd">                from tecplot.constant import HiddenLine, SurfacesToPlot</span>
+<span class="sd">                mesh = plot.fieldmap(0).mesh</span>
+<span class="sd">                mesh.mesh_type = MeshType.HiddenLine</span>
+<span class="sd">                surfaces = mesh.fieldmap.surfaces</span>
+<span class="sd">                surfaces.surfaces_to_plot = SurfacesToPlot.All</span>
+
+<span class="sd">            has the same effect as plotting only exposed cell faces with::</span>
+
+<span class="sd">                surfaces.surfaces_to_plot = SurfacesToPlot.ExposedCellFaces</span>
+
+<span class="sd">            but is much slower.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">MeshType</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">MESHTYPE</span><span class="p">)</span>
+
+    <span class="nd">@mesh_type.setter</span>
+    <span class="k">def</span> <span class="nf">mesh_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">MeshType</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">MESHTYPE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Color` or `ContourGroup` to use when drawing the lines.</span>
+
+<span class="sd">        :type: `Color` or `ContourGroup`</span>
+
+<span class="sd">        FieldmapContour lines can be a solid color or be colored by a</span>
+<span class="sd">        `ContourGroup` as obtained through the ``plot.contour`` property. Note</span>
+<span class="sd">        that changing style on this `ContourGroup` will affect all other</span>
+<span class="sd">        fieldmaps on the same `Frame` that use it. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(1).mesh.color = Color.Blue</span>
+
+<span class="sd">        Example of setting the color from a `ContourGroup`::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(1).mesh.color = plot.contour(1)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">color_spec</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">color_spec</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_pattern</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`LinePattern` type to use for mesh lines.</span>
+
+<span class="sd">        :type: `LinePattern`</span>
+
+<span class="sd">        Possible values: `Solid &lt;LinePattern.Solid&gt;`, `Dashed`, `DashDot`,</span>
+<span class="sd">        `Dotted`, `LongDash`, `DashDotDot`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import LinePattern</span>
+<span class="sd">            &gt;&gt;&gt; mesh = plot.fieldmap(0).mesh</span>
+<span class="sd">            &gt;&gt;&gt; mesh.line_pattern = LinePattern.Dashed</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">LinePattern</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINEPATTERN</span><span class="p">)</span>
+
+    <span class="nd">@line_pattern.setter</span>
+    <span class="k">def</span> <span class="nf">line_pattern</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">LinePattern</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINEPATTERN</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Thickness (`float`) of the drawn lines.</span>
+
+<span class="sd">        :type: `float` in percentage of the `Frame`&#39;s height.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).mesh.line_thickness = 0.7</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">pattern_length</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Length (`float`) of the pattern segment for non-solid lines.</span>
+
+<span class="sd">        :type: `float` in percentage of the `Frame`&#39;s height.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).mesh.pattern_length = 3.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">PATTERNLENGTH</span><span class="p">)</span>
+
+    <span class="nd">@pattern_length.setter</span>
+    <span class="k">def</span> <span class="nf">pattern_length</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">PATTERNLENGTH</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapPoints"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapPoints">[docs]</a><span class="k">class</span> <span class="nc">FieldmapPoints</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Type and density of the points used for vector and scatter plots.</span>
+
+<span class="sd">    This object controls the location of the points for `FieldmapVector` and</span>
+<span class="sd">    `FieldmapScatter` plots relative to the cells.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 18-22</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, PointsToPlot</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;HeatExchanger.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        # Enable 3D field plot and turn on contouring</span>
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian2D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.vector.u_variable = dataset.variable(&#39;U(M/S)&#39;)</span>
+<span class="sd">        plot.vector.v_variable = dataset.variable(&#39;V(M/S)&#39;)</span>
+<span class="sd">        plot.show_vector = True</span>
+
+<span class="sd">        for zone in dataset.zones():</span>
+<span class="sd">            points = plot.fieldmap(zone).points</span>
+<span class="sd">            points.points_to_plot = PointsToPlot.SurfaceCellCenters</span>
+<span class="sd">            points.step = (2,2)</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;fieldmap_points.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_points.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">POINTS</span><span class="p">)</span>
+
+    <span class="n">_IJKStep</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;IJKStep&#39;</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">,</span> <span class="s1">&#39;j&#39;</span><span class="p">,</span> <span class="s1">&#39;k&#39;</span><span class="p">])</span>
+    <span class="n">_IJKStep</span><span class="o">.</span><span class="fm">__new__</span><span class="o">.</span><span class="vm">__defaults__</span> <span class="o">=</span> <span class="p">(</span><span class="bp">None</span><span class="p">,</span> <span class="bp">None</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">points_to_plot</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Location of the points to show.</span>
+
+<span class="sd">        :type: `PointsToPlot`</span>
+
+<span class="sd">        Possible values:</span>
+
+<span class="sd">        `SurfaceNodes`</span>
+<span class="sd">            Draws only the nodes that are on the surface of the `Zone &lt;data_access&gt;`.</span>
+
+<span class="sd">        `AllNodes`</span>
+<span class="sd">            Draws all nodes in the `Zone &lt;data_access&gt;`.</span>
+
+<span class="sd">        `SurfaceCellCenters`</span>
+<span class="sd">            Draws points at the cell centers which are on or near the surface</span>
+<span class="sd">            of the `Zone &lt;data_access&gt;`.</span>
+
+<span class="sd">        `AllCellCenters`</span>
+<span class="sd">             Draws points at all cell centers in the `Zone &lt;data_access&gt;`.</span>
+
+<span class="sd">        `AllConnected`</span>
+<span class="sd">            Draws all the nodes that are connected by the node map. Nodes</span>
+<span class="sd">            without any connectivity are not drawn.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PointsToPlot</span>
+<span class="sd">            &gt;&gt;&gt; pts = plot.fieldmap(0).points</span>
+<span class="sd">            &gt;&gt;&gt; sts.points_to_plot = PointsToPlot.SurfaceCellCenters</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">PointsToPlot</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">POINTSTOPLOT</span><span class="p">)</span>
+
+    <span class="nd">@points_to_plot.setter</span>
+    <span class="k">def</span> <span class="nf">points_to_plot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">points</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">PointsToPlot</span><span class="p">(</span><span class="n">points</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">POINTSTOPLOT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Step along the dimensions (``I``, ``J``, ``K``).</span>
+
+<span class="sd">        :type: `tuple` of `integers &lt;int&gt;`</span>
+
+<span class="sd">        This property specifies the ``I``, ``J``, and ``K``-step intervals. For</span>
+<span class="sd">        irregular and finite element data, only the first parameter or</span>
+<span class="sd">        ``I``-Step has an effect. This steps through the nodes in the order</span>
+<span class="sd">        they are listed in the data file. In this case, a single number can be</span>
+<span class="sd">        given, but note that the return type is always a 3-`tuple` for both</span>
+<span class="sd">        ordered and irregular data.</span>
+
+<span class="sd">        Example for ``IJK`` ordered data::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).points.step = (10,10,None)</span>
+<span class="sd">            &gt;&gt;&gt; print(plot.fieldmap(0).points.step)</span>
+<span class="sd">            (10, 10, 1)</span>
+
+<span class="sd">        Example for irregular data::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).points.step = 10</span>
+<span class="sd">            &gt;&gt;&gt; print(plot.fieldmap(0).points.step)</span>
+<span class="sd">            (10, 1, 1)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">FieldmapPoints</span><span class="o">.</span><span class="n">_IJKStep</span><span class="p">(</span>
+                     <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">IJKSKIP</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">I</span><span class="p">),</span>
+                     <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">IJKSKIP</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">J</span><span class="p">),</span>
+                     <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">IJKSKIP</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">K</span><span class="p">)))</span>
+
+    <span class="nd">@step.setter</span>
+    <span class="k">def</span> <span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">values</span><span class="p">):</span>
+        <span class="n">ijkstep</span> <span class="o">=</span> <span class="n">FieldmapPoints</span><span class="o">.</span><span class="n">_IJKStep</span><span class="p">(</span><span class="o">*</span><span class="n">flatten_args</span><span class="p">(</span><span class="o">*</span><span class="n">values</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">ijkstep</span><span class="o">.</span><span class="n">i</span> <span class="ow">or</span> <span class="mi">1</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">IJKSKIP</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">I</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">ijkstep</span><span class="o">.</span><span class="n">j</span> <span class="ow">or</span> <span class="mi">1</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">IJKSKIP</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">J</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">ijkstep</span><span class="o">.</span><span class="n">k</span> <span class="ow">or</span> <span class="mi">1</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">IJKSKIP</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">K</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapScatter"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapScatter">[docs]</a><span class="k">class</span> <span class="nc">FieldmapScatter</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Plot of nodes using symbols.</span>
+
+<span class="sd">    `FieldmapScatter` plots display symbols at the data points in a field. The</span>
+<span class="sd">    symbols may be sized according to the values of a specified variable,</span>
+<span class="sd">    colored by the values of the contour variable, or may be uniformly sized or</span>
+<span class="sd">    colored. Unlike contour plots, scatter plots do not require any mesh</span>
+<span class="sd">    structure connecting the points, allowing scatter plots of irregular data.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 12,14-17</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, SymbolType, FillMode</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;HeatExchanger.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian2D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.show_scatter = True</span>
+
+<span class="sd">        for z in dataset.zones():</span>
+<span class="sd">            scatter = plot.fieldmap(z).scatter</span>
+<span class="sd">            scatter.symbol_type = SymbolType.Geometry</span>
+<span class="sd">            scatter.fill_mode = FillMode.UseSpecificColor</span>
+<span class="sd">            scatter.fill_color = plot.contour(0)</span>
+<span class="sd">            scatter.size = 1</span>
+
+<span class="sd">        tp.export.save_png(&#39;fieldmap_scatter.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_scatter.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SCATTER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show the scatter symbols.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_scatter = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(2).scatter.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">symbol_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `SymbolType` to use for this scatter plot.</span>
+
+<span class="sd">        :type: `SymbolType`</span>
+
+<span class="sd">        Possible values are: `Geometry`, `Text &lt;SymbolType.Text&gt;`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SymbolType</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).scatter.symbol_type = SymbolType.Text</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Symbol</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">_symbol_type</span>
+
+    <span class="nd">@symbol_type.setter</span>
+    <span class="k">def</span> <span class="nf">symbol_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="n">Symbol</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">_symbol_type</span> <span class="o">=</span> <span class="n">value</span>
+
+<div class="viewcode-block" id="FieldmapScatter.symbol"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapScatter.symbol">[docs]</a>    <span class="k">def</span> <span class="nf">symbol</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">symbol_type</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a scatter symbol style object.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            symbol_type (`SymbolType`, optional): The type of symbol to return.</span>
+<span class="sd">                By default, this will return the active symbol type which is</span>
+<span class="sd">                obtained from `FieldmapScatter.symbol_type`.</span>
+
+<span class="sd">        Returns: `TextScatterSymbol` or `GeometryScatterSymbol`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SymbolType</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).scatter.symbol_type = SymbolType.Text</span>
+<span class="sd">            &gt;&gt;&gt; symbol = plot.fieldmap(0).scatter.symbol()</span>
+<span class="sd">            &gt;&gt;&gt; symbol.text = &#39;a&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">SymbolType</span><span class="o">.</span><span class="n">Text</span><span class="p">:</span> <span class="n">TextScatterSymbol</span><span class="p">,</span>
+            <span class="n">SymbolType</span><span class="o">.</span><span class="n">Geometry</span><span class="p">:</span> <span class="n">GeometryScatterSymbol</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">_dispatch</span><span class="p">[</span><span class="n">symbol_type</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">symbol_type</span><span class="p">](</span><span class="bp">self</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">size</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Size of the symbols to draw.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).scatter.size = 4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">FRAMESIZE</span><span class="p">)</span>
+
+    <span class="nd">@size.setter</span>
+    <span class="k">def</span> <span class="nf">size</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">FRAMESIZE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">size_by_variable</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Use a variable to determine relative size of symbols.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.scatter.variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).scatter.size_by_variable = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SIZEBYVARIABLE</span><span class="p">)</span>
+
+    <span class="nd">@size_by_variable.setter</span>
+    <span class="k">def</span> <span class="nf">size_by_variable</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SIZEBYVARIABLE</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">TecplotSystemError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="o">==</span> <span class="nb">str</span><span class="p">(</span><span class="n">SetValueReturnCode</span><span class="o">.</span><span class="n">ContextError1</span><span class="p">):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                A scatter variable must be set using the</span>
+<span class="s1">                    plot.scatter.variable property.&#39;&#39;&#39;</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Width of the lines when drawing symbols.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SymbolType</span>
+<span class="sd">            &gt;&gt;&gt; scatter = plot.fieldmap(0).scatter</span>
+<span class="sd">            &gt;&gt;&gt; scatter.symbol_type = SymbolType.Geometry</span>
+<span class="sd">            &gt;&gt;&gt; scatter.line_thickness = 1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Line `Color` or `ContourGroup` of the drawn symbols.</span>
+
+<span class="sd">        :type: `Color` or `ContourGroup`</span>
+
+<span class="sd">        This can be a solid color or  a `ContourGroup` as obtained through the</span>
+<span class="sd">        ``plot.contour`` property. Note that changing style on the</span>
+<span class="sd">        `ContourGroup` will affect all other fieldmaps in the same `Frame` that</span>
+<span class="sd">        use it. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(1).scatter.color = Color.Blue</span>
+
+<span class="sd">        Example of setting the color from a `ContourGroup`::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(1).scatter.color = plot.contour(1)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">color_spec</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">),</span>
+                          <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">color_spec</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">fill_mode</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Fill mode for the background color.</span>
+
+<span class="sd">        :type: `FillMode.UseSpecificColor`, `FillMode.UseLineColor`,</span>
+<span class="sd">            `FillMode.UseBackgroundColor` or `FillMode.None_`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color, SymbolType, FillMode</span>
+<span class="sd">            &gt;&gt;&gt; scatter = plot.fieldmap(0).scatter</span>
+<span class="sd">            &gt;&gt;&gt; scatter.symbol_type = SymbolType.Geometry</span>
+<span class="sd">            &gt;&gt;&gt; scatter.fill_mode = FillMode.UseSpecificColor</span>
+<span class="sd">            &gt;&gt;&gt; scatter.fill_color = Color.Red</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">FillMode</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">FILLMODE</span><span class="p">)</span>
+
+    <span class="nd">@fill_mode.setter</span>
+    <span class="k">def</span> <span class="nf">fill_mode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">FillMode</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">FILLMODE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">fill_color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Fill or background color.</span>
+
+<span class="sd">        :type: `Color`, `ContourGroup`.</span>
+
+<span class="sd">        The ``fill_mode`` attribute must be set accordingly::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color, SymbolType, FillMode</span>
+<span class="sd">            &gt;&gt;&gt; scatter = plot.fieldmap(0).scatter</span>
+<span class="sd">            &gt;&gt;&gt; scatter.symbol_type = SymbolType.Geometry</span>
+<span class="sd">            &gt;&gt;&gt; scatter.fill_mode = FillMode.UseSpecificColor</span>
+<span class="sd">            &gt;&gt;&gt; scatter.fill_color = Color.Red</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">color_spec</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">FILLCOLOR</span><span class="p">),</span>
+                          <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="p">)</span>
+
+    <span class="nd">@fill_color.setter</span>
+    <span class="k">def</span> <span class="nf">fill_color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">color_spec</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">FILLCOLOR</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapSurfaces"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapSurfaces">[docs]</a><span class="k">class</span> <span class="nc">FieldmapSurfaces</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Plot surfaces from volume data.</span>
+
+<span class="sd">    This class controls viewing volume data as surfaces, either via a boundary</span>
+<span class="sd">    surface or one or more planes along the ``I``, ``J``, ``K`` dimensions for</span>
+<span class="sd">    ordered data.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 33,39,42</span>
+
+<span class="sd">        import numpy as np</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+<span class="sd">        from tecplot.data.operate import execute_equation</span>
+
+<span class="sd">        # Get the active frame, setup a grid (30x30x30)</span>
+<span class="sd">        # where each dimension ranges from 0 to 30.</span>
+<span class="sd">        # Add variable P to the dataset and give</span>
+<span class="sd">        # values to the data.</span>
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        dataset = frame.dataset</span>
+<span class="sd">        for v in [&#39;X&#39;,&#39;Y&#39;,&#39;Z&#39;,&#39;P&#39;]:</span>
+<span class="sd">            dataset.add_variable(v)</span>
+<span class="sd">        zone = dataset.add_ordered_zone(&#39;Zone&#39;, (30,30,30))</span>
+<span class="sd">        xx = np.linspace(0,30,30)</span>
+<span class="sd">        for v,arr in zip([&#39;X&#39;,&#39;Y&#39;,&#39;Z&#39;],np.meshgrid(xx,xx,xx)):</span>
+<span class="sd">            zone.values(v)[:] = arr.ravel()</span>
+<span class="sd">        execute_equation(&#39;{P} = -10*{X} + {Y}**2 + {Z}**2&#39;)</span>
+
+<span class="sd">        # Enable 3D field plot and turn on contouring</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.show_contour = True</span>
+
+<span class="sd">        # get a handle of the fieldmap for this zone</span>
+<span class="sd">        fmap = plot.fieldmap(dataset.zone(&#39;Zone&#39;))</span>
+
+<span class="sd">        # set the active contour group to flood by variable P</span>
+<span class="sd">        fmap.contour.flood_contour_group.variable = dataset.variable(&#39;P&#39;)</span>
+
+<span class="sd">        # show I and J-planes through the surface</span>
+<span class="sd">        fmap.surfaces.surfaces_to_plot = SurfacesToPlot.IJPlanes</span>
+
+<span class="sd">        # show only the first and last I-planes</span>
+<span class="sd">        # min defaults to 0, max defaults to -1</span>
+<span class="sd">        # we set step to -1 which is equivalent</span>
+<span class="sd">        # to the I-dimensions&#39;s max</span>
+<span class="sd">        fmap.surfaces.i_range = None,None,-1</span>
+
+<span class="sd">        # show J-planes at indices: [5, 15, 25]</span>
+<span class="sd">        fmap.surfaces.j_range = 5,25,10</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;fieldmap_surfaces_ij.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_surfaces_ij.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SURFACES</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">surfaces_to_plot</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The surfaces to show.</span>
+
+<span class="sd">        :type: `SurfacesToPlot`</span>
+
+<span class="sd">        Possible values: `BoundaryFaces`, `ExposedCellFaces`, `IPlanes</span>
+<span class="sd">        &lt;SurfacesToPlot.IPlanes&gt;`, `JPlanes &lt;SurfacesToPlot.JPlanes&gt;`, `KPlanes</span>
+<span class="sd">        &lt;SurfacesToPlot.KPlanes&gt;`, `IJPlanes`, `JKPlanes`, `IKPlanes`,</span>
+<span class="sd">        `IJKPlanes`, `All &lt;SurfacesToPlot.All&gt;`, the python built-in `None`.</span>
+
+<span class="sd">        Options such as `IJKPlanes` show planes from multiple dimensions. For</span>
+<span class="sd">        example, the `IJPlanes` value shows both the ``I``-planes and the</span>
+<span class="sd">        ``J``-planes. The following example shows a 3D field plot using faces</span>
+<span class="sd">        on the boundary::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SurfacesToPlot</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">            &gt;&gt;&gt; srf = frame.plot().fieldmap(0).surfaces</span>
+<span class="sd">            &gt;&gt;&gt; srf.surfaces_to_plot = SurfacesToPlot.BoundaryFaces</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">SurfacesToPlot</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SURFACESTOPLOT</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="o">==</span> <span class="n">SurfacesToPlot</span><span class="o">.</span><span class="n">None_</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">None</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">value</span>
+
+    <span class="nd">@surfaces_to_plot.setter</span>
+    <span class="k">def</span> <span class="nf">surfaces_to_plot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">surfaces</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">surfaces</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">surfaces</span> <span class="o">=</span> <span class="n">SurfacesToPlot</span><span class="o">.</span><span class="n">None_</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">SurfacesToPlot</span><span class="p">(</span><span class="n">surfaces</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SURFACESTOPLOT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">i_range</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`IndexRange` for the *I* dimension of ordered data.</span>
+
+<span class="sd">        :type: `tuple` of `integers &lt;int&gt;` (min, max, step)</span>
+
+<span class="sd">        This example shows ``I``-planes at ``i = [0, 2, 4, 6, 8, 10]``::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SurfacesToPlot</span>
+<span class="sd">            &gt;&gt;&gt; srf = frame.plot().fieldmap(0).surfaces</span>
+<span class="sd">            &gt;&gt;&gt; srf.surfaces_to_plot = SurfacesToPlot.IPlanes</span>
+<span class="sd">            &gt;&gt;&gt; srf.i_range = 0, 10, 2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">IndexRange</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">IRANGE</span><span class="p">)</span>
+
+    <span class="nd">@i_range.setter</span>
+    <span class="k">def</span> <span class="nf">i_range</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">IndexRange</span><span class="p">(</span><span class="o">*</span><span class="n">values</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">IRANGE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">j_range</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`IndexRange` for the *J* dimension of ordered data.</span>
+
+<span class="sd">        :type: `tuple` of `integers &lt;int&gt;` (min, max, step)</span>
+
+<span class="sd">        This example shows all ``J``-planes starting with ``j = 10`` up to the</span>
+<span class="sd">        maximum ``J``-plane of the associated `Zone &lt;data_access&gt;`::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SurfacesToPlot</span>
+<span class="sd">            &gt;&gt;&gt; srf = frame.plot().fieldmap(0).surfaces</span>
+<span class="sd">            &gt;&gt;&gt; srf.surfaces_to_plot = SurfacesToPlot.JPlanes</span>
+<span class="sd">            &gt;&gt;&gt; srf.j_range = 10, None, 1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">IndexRange</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">JRANGE</span><span class="p">)</span>
+
+    <span class="nd">@j_range.setter</span>
+    <span class="k">def</span> <span class="nf">j_range</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">IndexRange</span><span class="p">(</span><span class="o">*</span><span class="n">values</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">JRANGE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">k_range</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`IndexRange` for the *K* dimension of ordered data.</span>
+
+<span class="sd">        :type: `tuple` of `integers &lt;int&gt;` (min, max, step)</span>
+
+<span class="sd">        This example shows all ``K``-planes starting with the first up to 5</span>
+<span class="sd">        from the last ``K``-plane of the associated `Zone &lt;data_access&gt;`::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import SurfacesToPlot</span>
+<span class="sd">            &gt;&gt;&gt; srf = frame.plot().fieldmap(0).surfaces</span>
+<span class="sd">            &gt;&gt;&gt; srf.surfaces_to_plot = SurfacesToPlot.KPlanes</span>
+<span class="sd">            &gt;&gt;&gt; srf.k_range = None, -5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">IndexRange</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">KRANGE</span><span class="p">)</span>
+
+    <span class="nd">@k_range.setter</span>
+    <span class="k">def</span> <span class="nf">k_range</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">IndexRange</span><span class="p">(</span><span class="o">*</span><span class="n">values</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">KRANGE</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapVector"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapVector">[docs]</a><span class="k">class</span> <span class="nc">FieldmapVector</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Field plot of arrows.</span>
+
+<span class="sd">    Before doing anything with vector plots, one must set the variables to be</span>
+<span class="sd">    used for the ``(U, V, W)`` coordinates. This is done through the plot</span>
+<span class="sd">    object. Once set, the vectors can be displayed and manipulated using this</span>
+<span class="sd">    class:</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 23-25,31-36</span>
+
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.data.operate import execute_equation</span>
+<span class="sd">        from tecplot.constant import (PlotType, PointsToPlot, VectorType,</span>
+<span class="sd">                                      ArrowheadStyle)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        dataset = frame.dataset</span>
+<span class="sd">        for v in [&#39;X&#39;,&#39;Y&#39;,&#39;Z&#39;,&#39;P&#39;,&#39;Q&#39;,&#39;R&#39;]:</span>
+<span class="sd">            dataset.add_variable(v)</span>
+<span class="sd">        zone = dataset.add_ordered_zone(&#39;Zone&#39;, (30,30,30))</span>
+<span class="sd">        xx = np.linspace(0,30,30)</span>
+<span class="sd">        for v,arr in zip([&#39;X&#39;,&#39;Y&#39;,&#39;Z&#39;],np.meshgrid(xx,xx,xx)):</span>
+<span class="sd">            zone.values(v)[:] = arr.ravel()</span>
+<span class="sd">        execute_equation(&#39;{P} = -10 * {X}    +      {Y}**2 + {Z}**2&#39;)</span>
+<span class="sd">        execute_equation(&#39;{Q} =       {X}    - 10 * {Y}    - {Z}**2&#39;)</span>
+<span class="sd">        execute_equation(&#39;{R} =       {X}**2 +      {Y}**2 - {Z}   &#39;)</span>
+
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.contour(0).variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">        plot.contour(0).colormap_name = &#39;Two Color&#39;</span>
+<span class="sd">        plot.vector.u_variable = dataset.variable(&#39;P&#39;)</span>
+<span class="sd">        plot.vector.v_variable = dataset.variable(&#39;Q&#39;)</span>
+<span class="sd">        plot.vector.w_variable = dataset.variable(&#39;R&#39;)</span>
+<span class="sd">        plot.show_vector = True</span>
+
+<span class="sd">        points = plot.fieldmap(0).points</span>
+<span class="sd">        points.points_to_plot = PointsToPlot.AllNodes</span>
+<span class="sd">        points.step = (5,3,2)</span>
+
+<span class="sd">        vector = plot.fieldmap(0).vector</span>
+<span class="sd">        vector.show = True</span>
+<span class="sd">        vector.vector_type = VectorType.MidAtPoint</span>
+<span class="sd">        vector.arrowhead_style = ArrowheadStyle.Filled</span>
+<span class="sd">        vector.color = plot.contour(0)</span>
+<span class="sd">        vector.line_thickness = 0.4</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;fieldmap_vector.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_vector.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VECTOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable drawing vectors on the plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.show_vector = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).vector.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">vector_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Anchor point of the drawn vectors.</span>
+
+<span class="sd">        :type: `VectorType`</span>
+
+<span class="sd">        Possible values: `TailAtPoint`, `HeadAtPoint`, `MidAtPoint`, `HeadOnly`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import VectorType</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).vector.vector_type = VectorType.MidAtPoint</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">VectorType</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VECTORTYPE</span><span class="p">)</span>
+
+    <span class="nd">@vector_type.setter</span>
+    <span class="k">def</span> <span class="nf">vector_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">VectorType</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">VECTORTYPE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">tangent_only</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show only tangent vectors.</span>
+
+<span class="sd">        Set to `True` to display **only** the tangent component of vectors.</span>
+<span class="sd">        Tangent vectors are drawn on 3D surfaces only where it is possible to</span>
+<span class="sd">        determine a vector normal to the surface. A plot where multiple</span>
+<span class="sd">        surfaces intersect each other using common nodes is a case where</span>
+<span class="sd">        tangent vectors are not drawn because there is more than one normal to</span>
+<span class="sd">        choose from. An example of this would be a volume ``IJK``-ordered zone</span>
+<span class="sd">        where both the ``I`` and ``J``-planes are shown. If tangent vectors</span>
+<span class="sd">        cannot be drawn, then regular vectors are plotted instead.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).vector.tangent_only = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISTANGENT</span><span class="p">)</span>
+
+    <span class="nd">@tangent_only.setter</span>
+    <span class="k">def</span> <span class="nf">tangent_only</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISTANGENT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Color` or `ContourGroup` to use when drawing vectors.</span>
+
+<span class="sd">        :type: `Color` or `ContourGroup`</span>
+
+<span class="sd">        FieldmapVectors can be a solid color or be colored by a `ContourGroup`</span>
+<span class="sd">        as obtained through the ``plot.contour`` property. Note that changing</span>
+<span class="sd">        style on this `ContourGroup` will affect all other fieldmaps on the</span>
+<span class="sd">        same `Frame` that use it. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(1).vector.color = Color.Blue</span>
+
+<span class="sd">        Example of setting the color from a `ContourGroup`::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(1).vector.color = plot.contour(1)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">color_spec</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">fieldmap</span><span class="o">.</span><span class="n">plot</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">color_spec</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">arrowhead_style</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `ArrowheadStyle` drawn.</span>
+
+<span class="sd">        :type: `ArrowheadStyle`</span>
+
+<span class="sd">        Possible values: `Plain`, `Filled &lt;ArrowheadStyle.Filled&gt;`,</span>
+<span class="sd">        `Hollow &lt;ArrowheadStyle.Hollow&gt;`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import ArrowheadStyle</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).vector.arrowhead_style = ArrowheadStyle.Filled</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">ArrowheadStyle</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ARROWHEADSTYLE</span><span class="p">)</span>
+
+    <span class="nd">@arrowhead_style.setter</span>
+    <span class="k">def</span> <span class="nf">arrowhead_style</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">ArrowheadStyle</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ARROWHEADSTYLE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_pattern</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `LinePattern` used to draw the arrow line.</span>
+
+<span class="sd">        :type: `LinePattern`</span>
+
+<span class="sd">        Possible values: `Solid &lt;LinePattern.Solid&gt;`, `Dashed`, `DashDot`,</span>
+<span class="sd">        `Dotted`, `LongDash`, `DashDotDot`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import LinePattern</span>
+<span class="sd">            &gt;&gt;&gt; vector = plot.fieldmap(0).vector</span>
+<span class="sd">            &gt;&gt;&gt; vector.line_pattern = LinePattern.DashDot</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">LinePattern</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINEPATTERN</span><span class="p">)</span>
+
+    <span class="nd">@line_pattern.setter</span>
+    <span class="k">def</span> <span class="nf">line_pattern</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">LinePattern</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINEPATTERN</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The width of the arrow line.</span>
+
+<span class="sd">        :type: `float` (percentage of `Frame` height)</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import LinePattern</span>
+<span class="sd">            &gt;&gt;&gt; vector = plot.fieldmap(0).vector.line_thickness = 0.7</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">pattern_length</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Length of the pattern used when drawing vector lines.</span>
+
+<span class="sd">        :type: `float` (percentage of `Frame` height)</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import LinePattern</span>
+<span class="sd">            &gt;&gt;&gt; vector = plot.fieldmap(0).vector</span>
+<span class="sd">            &gt;&gt;&gt; vector.line_pattern = LinePattern.Dashed</span>
+<span class="sd">            &gt;&gt;&gt; vector.pattern_length = 3.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">PATTERNLENGTH</span><span class="p">)</span>
+
+    <span class="nd">@pattern_length.setter</span>
+    <span class="k">def</span> <span class="nf">pattern_length</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">PATTERNLENGTH</span><span class="p">)</span></div>
+
+
+<span class="k">class</span> <span class="nc">Fieldmap</span><span class="p">(</span><span class="n">Style</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Style control for a specific `Zone &lt;data_access&gt;` attached to a specific `Frame`.</span>
+
+<span class="sd">    The fieldmap connects the plotting style and various elements of the plot</span>
+<span class="sd">    to a specific `Zone &lt;data_access&gt;` in the `Dataset` attached to a specific `Frame`. This</span>
+<span class="sd">    object is obtained through the ``plot.fieldmap()`` method:</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 16-17</span>
+
+<span class="sd">        import os</span>
+<span class="sd">        import numpy</span>
+<span class="sd">        import tecplot</span>
+
+<span class="sd">        examples_dir = tecplot.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = os.path.join(examples_dir, &#39;SimpleData&#39;, &#39;F18.lay&#39;)</span>
+<span class="sd">        tecplot.load_layout(infile)</span>
+<span class="sd">        frame = tecplot.active_frame()</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        dataset = frame.dataset</span>
+
+<span class="sd">        plot.contour(0).colormap_name = &#39;GrayScale&#39;</span>
+<span class="sd">        plot.contour(0).legend.show = False</span>
+
+<span class="sd">        for zone_name in [&#39;left wing&#39;, &#39;right wing&#39;]:</span>
+<span class="sd">            fmap = frame.plot().fieldmap(dataset.zone(zone_name))</span>
+<span class="sd">            fmap.contour.flood_contour_group = plot.contour(1)</span>
+
+<span class="sd">        plot.contour(1).colormap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+<span class="sd">        plot.contour(1).levels.reset_levels(numpy.linspace(-0.07, 0.07, 50))</span>
+
+<span class="sd">        tecplot.export.save_png(&#39;F18_wings.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">plot</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">Index</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">plot</span> <span class="o">=</span> <span class="n">plot</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">FIELDMAP</span><span class="p">,</span> <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                         <span class="n">offset1</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">multiset</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">that</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span> <span class="ow">and</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">plot</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">plot</span> <span class="ow">and</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">that</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Display this fieldmap on the plot.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage for turning on all fieldmaps::</span>
+
+<span class="sd">            &gt;&gt;&gt; for fmap in plot.fieldmaps():</span>
+<span class="sd">            ...     fmap.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">active_fieldmap_indices</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="n">assignment</span> <span class="o">=</span> <span class="n">AssignOp</span><span class="o">.</span><span class="n">PlusEquals</span> <span class="k">if</span> <span class="n">show</span> <span class="k">else</span> <span class="n">AssignOp</span><span class="o">.</span><span class="n">MinusEquals</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">set_style</span><span class="p">({</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span><span class="p">},</span> <span class="n">sv</span><span class="o">.</span><span class="n">ACTIVEFIELDMAPS</span><span class="p">,</span>
+                          <span class="n">assignmodifier</span><span class="o">=</span><span class="n">assignment</span><span class="p">,</span>
+                          <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">group</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Zero-based group number for this `Fieldmap`.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This is a piece of auxiliary data and can be useful for identifying a</span>
+<span class="sd">        subset of fieldmaps. For example, to loop over all fieldmaps that have</span>
+<span class="sd">        group set to 4::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).group = 4</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(3).group = 4</span>
+<span class="sd">            &gt;&gt;&gt; for fmap in filter(lambda f: f.group == 4, plot.fieldmaps()):</span>
+<span class="sd">            ...     print(fmap.index)</span>
+<span class="sd">            0</span>
+<span class="sd">            3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Index</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">GROUP</span><span class="p">)</span>
+
+    <span class="nd">@group.setter</span>
+    <span class="k">def</span> <span class="nf">group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">GROUP</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">zones</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;List of zones used by this fieldmap.</span>
+
+<span class="sd">        :type: generator of `Zones &lt;data_access&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; for zone in fieldmap.zones:</span>
+<span class="sd">            ...     print(zone.name)</span>
+<span class="sd">            Zone 1</span>
+<span class="sd">            Zone 2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">success</span><span class="p">,</span> <span class="n">zones_ptr</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FieldMapGetZones</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="n">zones_indexset</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">zones_ptr</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">)</span>
+        <span class="n">zone_indices</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">zones_indexset</span><span class="p">)</span>
+        <span class="n">zones_indexset</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="n">zone_indices</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">contour</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapContour` style including flooding, lines and line coloring.</span>
+
+<span class="sd">        :type: `FieldmapContour`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapContour</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">edge</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapEdge` style control for boundary lines.</span>
+
+<span class="sd">        :type: `FieldmapEdge`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapEdge</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">mesh</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapMesh` style lines connecting neighboring data points.</span>
+
+<span class="sd">        :type: `FieldmapMesh`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapMesh</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">scatter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapScatter` style for scatter plots.</span>
+
+<span class="sd">        :type: `FieldmapScatter`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapScatter</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">surfaces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapSurfaces` object to control which surfaces to draw.</span>
+
+<span class="sd">        :type: `FieldmapSurfaces`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapSurfaces</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">points</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapPoints` object to control which points to draw.</span>
+
+<span class="sd">        :type: `FieldmapPoints`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapPoints</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">vector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapVector` style for vector field plots using arrows.</span>
+
+<span class="sd">        :type: `FieldmapVector`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapVector</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_iso_surfaces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;(`bool`) Enable drawing of Iso-surfaces.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEMODE</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEOBJECTSTOPLOT</span><span class="p">,</span>
+                               <span class="n">sv</span><span class="o">.</span><span class="n">SHOWISOSURFACES</span><span class="p">)</span>
+
+    <span class="nd">@show_iso_surfaces.setter</span>
+    <span class="k">def</span> <span class="nf">show_iso_surfaces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEMODE</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEOBJECTSTOPLOT</span><span class="p">,</span>
+                        <span class="n">sv</span><span class="o">.</span><span class="n">SHOWISOSURFACES</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;(`bool`) Enable drawing of slice surfaces.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEMODE</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEOBJECTSTOPLOT</span><span class="p">,</span>
+                               <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSLICES</span><span class="p">)</span>
+
+    <span class="nd">@show_slices.setter</span>
+    <span class="k">def</span> <span class="nf">show_slices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEMODE</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEOBJECTSTOPLOT</span><span class="p">,</span>
+                        <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSLICES</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_streamtraces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;(`bool`) Enable drawing of streamtraces.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEMODE</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEOBJECTSTOPLOT</span><span class="p">,</span>
+                               <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSTREAMTRACES</span><span class="p">)</span>
+
+    <span class="nd">@show_streamtraces.setter</span>
+    <span class="k">def</span> <span class="nf">show_streamtraces</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEMODE</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VOLUMEOBJECTSTOPLOT</span><span class="p">,</span>
+                        <span class="n">sv</span><span class="o">.</span><span class="n">SHOWSTREAMTRACES</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="FieldmapEffects"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapEffects">[docs]</a><span class="k">class</span> <span class="nc">FieldmapEffects</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Clipping and blanking style control.</span>
+
+<span class="sd">    This object controls value blanking and clipping from plane slices for</span>
+<span class="sd">    this fieldmap.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EFFECTS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">value_blanking</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable value blanking effect for this fieldmap.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).effects.value_blanking = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USEVALUEBLANKING</span><span class="p">)</span>
+
+    <span class="nd">@value_blanking.setter</span>
+    <span class="k">def</span> <span class="nf">value_blanking</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USEVALUEBLANKING</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">clip_planes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Clip planes to use when drawing this fieldmap.</span>
+
+<span class="sd">        :type: `list` of `integers &lt;int&gt;` [0-5] or `None`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).effects.clip_planes = [0,1,2]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USECLIPPLANES</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">value</span> <span class="k">if</span> <span class="n">value</span> <span class="k">else</span> <span class="bp">None</span>
+
+    <span class="nd">@clip_planes.setter</span>
+    <span class="k">def</span> <span class="nf">clip_planes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="nb">list</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="p">[</span><span class="n">value</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USECLIPPLANES</span><span class="p">,</span>
+                        <span class="o">**</span><span class="p">{</span><span class="n">sv</span><span class="o">.</span><span class="n">ASSIGNMODIFIER</span><span class="p">:</span> <span class="n">AssignOp</span><span class="o">.</span><span class="n">Equals</span><span class="p">})</span></div>
+
+
+<div class="viewcode-block" id="FieldmapEffects3D"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapEffects3D">[docs]</a><span class="k">class</span> <span class="nc">FieldmapEffects3D</span><span class="p">(</span><span class="n">FieldmapEffects</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Lighting and translucency style control.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 23-25</span>
+
+<span class="sd">        import os</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import LightingEffect, PlotType, SurfacesToPlot</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;SimpleData&#39;, &#39;F18.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+<span class="sd">        frame = dataset.frame</span>
+
+<span class="sd">        # Enable 3D field plot, turn on contouring and translucency</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        plot = frame.plot()</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.use_translucency = True</span>
+
+<span class="sd">        # adjust effects for every fieldmap in this dataset</span>
+<span class="sd">        for zone in dataset.zones():</span>
+<span class="sd">            fmap = plot.fieldmap(zone)</span>
+<span class="sd">            fmap.contour.flood_contour_group.variable = dataset.variable(&#39;S&#39;)</span>
+<span class="sd">            fmap.surfaces.surfaces_to_plot = SurfacesToPlot.BoundaryFaces</span>
+
+<span class="sd">            eff = fmap.effects</span>
+<span class="sd">            eff.lighting_effect = LightingEffect.Paneled</span>
+<span class="sd">            eff.surface_translucency = 30</span>
+
+<span class="sd">        # save image to file</span>
+<span class="sd">        tp.export.save_png(&#39;fieldmap_effects3d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_effects3d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The type of lighting effect to render.</span>
+
+<span class="sd">        :type: `LightingEffect`</span>
+
+<span class="sd">        Possible values:</span>
+
+<span class="sd">        `Paneled &lt;LightingEffect.Paneled&gt;`</span>
+<span class="sd">            Within each cell, the color assigned to each area by shading or</span>
+<span class="sd">            contour flooding is tinted by a shade constant across the cell.</span>
+<span class="sd">            This shade is based on the orientation of the cell relative to your</span>
+<span class="sd">            3D light source.</span>
+
+<span class="sd">        `Gouraud &lt;LightingEffect.Gouraud&gt;`</span>
+<span class="sd">            This plot type offers smoother, more continuous shading than</span>
+<span class="sd">            `Paneled &lt;LightingEffect.Paneled&gt;` shading, but it results in</span>
+<span class="sd">            slower plotting and larger vector images. `Gouraud</span>
+<span class="sd">            &lt;LightingEffect.Gouraud&gt;` shading is not continuous across zone</span>
+<span class="sd">            boundaries unless face neighbors are specified in the data and is</span>
+<span class="sd">            not available for finite element volume zones when blanking is</span>
+<span class="sd">            active in which case, the zone&#39;s lighting effect reverts to</span>
+<span class="sd">            `Paneled &lt;LightingEffect.Paneled&gt;` shading in this case.</span>
+
+<span class="sd">        If ``IJK``-ordered data with `FieldmapSurfaces.surfaces_to_plot` is set</span>
+<span class="sd">        to `SurfacesToPlot.ExposedCellFaces`, faces exposed by blanking will</span>
+<span class="sd">        revert to `Paneled &lt;LightingEffect.Paneled&gt;` shading.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import LightingEffect</span>
+<span class="sd">            &gt;&gt;&gt; effects = plot.fieldmap(0).effects</span>
+<span class="sd">            &gt;&gt;&gt; effects.lighting_effect = LightingEffect.Paneled</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">LightingEffect</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@lighting_effect.setter</span>
+    <span class="k">def</span> <span class="nf">lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">LightingEffect</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable translucency of all drawn surfaces for this fieldmap.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        This enables translucency controlled by the ``surface_translucency``</span>
+<span class="sd">        attribute::</span>
+
+<span class="sd">            &gt;&gt;&gt; effects = plot.fieldmap(0).effects</span>
+<span class="sd">            &gt;&gt;&gt; effects.use_translucency = True</span>
+<span class="sd">            &gt;&gt;&gt; effects.surface_translucency = 50</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USETRANSLUCENCY</span><span class="p">)</span>
+
+    <span class="nd">@use_translucency.setter</span>
+    <span class="k">def</span> <span class="nf">use_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USETRANSLUCENCY</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">surface_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Translucency of all drawn surfaces for this fieldmap.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;` in percent</span>
+
+<span class="sd">        The ``use_translucency`` attribute must be set to `True`::</span>
+
+<span class="sd">            &gt;&gt;&gt; effects = plot.fieldmap(0).effects</span>
+<span class="sd">            &gt;&gt;&gt; effects.use_translucency = True</span>
+<span class="sd">            &gt;&gt;&gt; effects.surface_translucency = 50</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SURFACETRANSLUCENCY</span><span class="p">)</span>
+
+    <span class="nd">@surface_translucency.setter</span>
+    <span class="k">def</span> <span class="nf">surface_translucency</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SURFACETRANSLUCENCY</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapShade"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapShade">[docs]</a><span class="k">class</span> <span class="nc">FieldmapShade</span><span class="p">(</span><span class="n">FieldmapStyle</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Fill color for displayed surfaces on 2D field plots.</span>
+
+<span class="sd">    Although most commonly used with 3D surfaces (see `FieldmapShade3D`), shade</span>
+<span class="sd">    plots can be used to flood 2D plots with solid colors.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 20</span>
+
+<span class="sd">        import os</span>
+<span class="sd">        import random</span>
+<span class="sd">        import tecplot</span>
+<span class="sd">        from tecplot.constant import Color, PlotType</span>
+
+<span class="sd">        random.seed(1)</span>
+
+<span class="sd">        examples_dir = tecplot.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;SimpleData&#39;, &#39;F18.plt&#39;)</span>
+<span class="sd">        dataset = tecplot.data.load_tecplot(datafile)</span>
+<span class="sd">        frame = dataset.frame</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian2D</span>
+<span class="sd">        plot = frame.plot()</span>
+
+<span class="sd">        for zone in dataset.zones():</span>
+<span class="sd">            color = Color(random.randint(0,63))</span>
+<span class="sd">            while color == Color.White:</span>
+<span class="sd">                color = Color(random.randint(0,63))</span>
+<span class="sd">            fmap = plot.fieldmap(zone)</span>
+<span class="sd">            fmap.shade.color = color</span>
+
+<span class="sd">        tecplot.export.save_png(&#39;fieldmap_shade2d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_shade2d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fieldmap</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fieldmap</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHADE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;FieldmapShade the drawn surfaces.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).shade.show = False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Fill `Color` of the shade.</span>
+
+<span class="sd">        :type: `Color`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).shade.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FieldmapShade3D"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.FieldmapShade3D">[docs]</a><span class="k">class</span> <span class="nc">FieldmapShade3D</span><span class="p">(</span><span class="n">FieldmapShade</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Fill color for displayed surfaces on 3D field plots.</span>
+
+<span class="sd">    This class inherits all functionality and purpose from `FieldmapShade` and</span>
+<span class="sd">    adds the ability to turn on or off the lighting effect. In 3D plots,</span>
+<span class="sd">    fieldmap effects (translucency and lighting) cause color variation</span>
+<span class="sd">    (shading) throughout the zones. Shading can can be useful in discerning the</span>
+<span class="sd">    shape of the data:</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 21-22</span>
+
+<span class="sd">        import os</span>
+<span class="sd">        import random</span>
+<span class="sd">        import tecplot</span>
+<span class="sd">        from tecplot.constant import Color, PlotType, SurfacesToPlot</span>
+
+<span class="sd">        random.seed(1)</span>
+
+<span class="sd">        examples_dir = tecplot.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;SimpleData&#39;, &#39;F18.plt&#39;)</span>
+<span class="sd">        dataset = tecplot.data.load_tecplot(datafile)</span>
+<span class="sd">        frame = dataset.frame</span>
+<span class="sd">        frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">        plot = frame.plot()</span>
+
+<span class="sd">        for zone in dataset.zones():</span>
+<span class="sd">            color = Color(random.randint(0,63))</span>
+<span class="sd">            while color == Color.White:</span>
+<span class="sd">                color = Color(random.randint(0,63))</span>
+<span class="sd">            fmap = plot.fieldmap(zone)</span>
+<span class="sd">            fmap.surfaces.surfaces_to_plot = SurfacesToPlot.BoundaryFaces</span>
+<span class="sd">            fmap.shade.color = color</span>
+<span class="sd">            fmap.shade.use_lighting_effect = False</span>
+
+<span class="sd">        tecplot.export.save_png(&#39;fieldmap_shade3d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/fieldmap_shade3d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Draw a lighting effect on the shaded surfaces.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.fieldmap(0).shade.use_lighting_effect = False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span>
+
+    <span class="nd">@use_lighting_effect.setter</span>
+    <span class="k">def</span> <span class="nf">use_lighting_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">USELIGHTINGEFFECT</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Cartesian2DFieldmap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian2DFieldmap">[docs]</a><span class="k">class</span> <span class="nc">Cartesian2DFieldmap</span><span class="p">(</span><span class="n">Fieldmap</span><span class="p">):</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">effects</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapEffects` style control for clipping and blanking effects.</span>
+
+<span class="sd">        :type: `FieldmapEffects`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapEffects</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapShade` style control for surface shading.</span>
+
+<span class="sd">        :type: `FieldmapShade`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapShade</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Cartesian3DFieldmap"><a class="viewcode-back" href="../../../api/tecplot.plot.html#tecplot.plot.Cartesian3DFieldmap">[docs]</a><span class="k">class</span> <span class="nc">Cartesian3DFieldmap</span><span class="p">(</span><span class="n">Fieldmap</span><span class="p">):</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">effects</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapEffects3D` style control for blanking and lighting effects.</span>
+
+<span class="sd">        :type: `FieldmapEffects3D`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapEffects3D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldmapShade3D` style control for surface shading.</span>
+
+<span class="sd">        :type: `FieldmapShade3D`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FieldmapShade3D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.layout.frame &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.layout.frame</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="kn">import</span> <span class="n">contextmanager</span>
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="n">byref</span><span class="p">,</span> <span class="n">c_void_p</span><span class="p">,</span> <span class="n">cast</span>
+<span class="kn">from</span> <span class="nn">numbers</span> <span class="kn">import</span> <span class="n">Number</span>
+<span class="kn">from</span> <span class="nn">six</span> <span class="kn">import</span> <span class="n">string_types</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">annotation</span><span class="p">,</span> <span class="n">constant</span><span class="p">,</span> <span class="n">plot</span><span class="p">,</span> <span class="n">session</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="p">(</span><span class="n">ArgList</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">StringList</span><span class="p">,</span> <span class="n">check_arglist_argtypes</span><span class="p">,</span>
+                       <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span><span class="p">,</span> <span class="n">sv</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">..tecutil.util</span> <span class="kn">import</span> <span class="n">XYPosition</span><span class="p">,</span> <span class="n">flatten_args</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Frame"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame">[docs]</a><span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Frame</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;`Frame` object within a `Page`, holding onto a `Dataset` and a `Plot`.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        uid (`integer &lt;int&gt;`, optional): This must be a *valid* unique ID</span>
+<span class="sd">            number pointing internally to a Frame object or `None`. A new</span>
+<span class="sd">            `Frame` is created if set to `None`. (default: `None`)</span>
+<span class="sd">        page (`Page`, optional): The destination `Page` of this newly</span>
+<span class="sd">            created `Frame`. If `None`, the currently active `Page` is used.</span>
+<span class="sd">            (default: `None`)</span>
+
+<span class="sd">    Warning:</span>
+<span class="sd">        Though it is possible to create a `Frame` object using the</span>
+<span class="sd">        constructor, it is usually sufficient to obtain a frame through</span>
+<span class="sd">        `tecplot.active_frame()` or `Page.frame()`. One can also create a</span>
+<span class="sd">        `Frame` using a `Page` handle with `Page.add_frame()`.</span>
+
+<span class="sd">    The concept of the `Frame` is central to understanding the</span>
+<span class="sd">    |Tecplot Engine|. The `Frame` is what connects a `Dataset` to a `Plot`</span>
+<span class="sd">    handle from which one manipulates the desired image as well as accessing</span>
+<span class="sd">    the attached data::</span>
+
+<span class="sd">        &gt;&gt;&gt; import tecplot</span>
+<span class="sd">        &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">        &gt;&gt;&gt; frame</span>
+<span class="sd">        Frame(uid=11, Page(uid=1))</span>
+<span class="sd">        &gt;&gt;&gt; print(frame)</span>
+<span class="sd">        Frame 001</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">page</span> <span class="o">=</span> <span class="bp">None</span>
+    <span class="sd">&quot;&quot;&quot;The `Page` containing this Frame.</span>
+
+<span class="sd">    This provides access to the parent `Page`::</span>
+
+<span class="sd">        &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">        &gt;&gt;&gt; page = frame.page</span>
+<span class="sd">        &gt;&gt;&gt; page.name</span>
+<span class="sd">        Page 001</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uid</span><span class="p">,</span> <span class="n">page</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">page</span> <span class="o">=</span> <span class="n">page</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">=</span> <span class="n">uid</span>
+        <span class="sd">&quot;&quot;&quot;The internal unique ID number of this Frame.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sv</span> <span class="o">=</span> <span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">FRAMELAYOUT</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Brief string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Brief representation of this `Frame`.</span>
+
+<span class="sd">        Example::</span>
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; print(frame)</span>
+<span class="sd">            Frame: &quot;Frame 001&quot;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;Frame: &quot;{name}&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Executable string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Internal representation of this `Frame`.</span>
+
+<span class="sd">        The string returned can be executed to generate an identical</span>
+<span class="sd">        copy of this `Frame` object::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame_copy = None</span>
+<span class="sd">            &gt;&gt;&gt; print(repr(frame))</span>
+<span class="sd">            Frame(uid=11, page=Page(uid=1))</span>
+<span class="sd">            &gt;&gt;&gt; exec(&#39;frame_copy = &#39;+repr(frame))</span>
+<span class="sd">            &gt;&gt;&gt; frame_copy</span>
+<span class="sd">            Frame(uid=11, page=Page(uid=1))</span>
+
+<span class="sd">            &gt;&gt;&gt; # frame_copy is not technically a copy.</span>
+<span class="sd">            &gt;&gt;&gt; # it is the same object as the original frame:</span>
+<span class="sd">            &gt;&gt;&gt; frame == frame_copy</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;Frame(uid={uid}, page={page})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">uid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                                                      <span class="n">page</span><span class="o">=</span><span class="nb">repr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">page</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks for `Frame` equality in the |Tecplot Engine|.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `bool`: `True` if the unique ID numbers are the same for both</span>
+<span class="sd">            `Frames &lt;Frame&gt;`.</span>
+
+<span class="sd">        Example::</span>
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page = tecplot.active_page()</span>
+<span class="sd">            &gt;&gt;&gt; frame1 = page.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame2 = page.add_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame1 == frame2</span>
+<span class="sd">            False</span>
+<span class="sd">            &gt;&gt;&gt; page.active_frame() == frame2</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">uid</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;(x,y) position of the `Frame` in inches.</span>
+
+<span class="sd">        The `Frame` x position is relative to the left side of the paper.</span>
+<span class="sd">        The `Frame` y position is relative to the top of the paper.</span>
+
+<span class="sd">        If x is `None`, the `Frame` x position is not changed.</span>
+<span class="sd">        If y is `None`, the `Frame` y position is not changed.</span>
+
+<span class="sd">        :type: 2-tuple of `floats &lt;float&gt;`: ``(x, y)``</span>
+
+<span class="sd">        Set `Frame` position 1 inch from the left side of the paper</span>
+<span class="sd">        and two inches from the top of the paper::</span>
+
+<span class="sd">            &gt;&gt;&gt; tp.active_frame().position=(1.0, 2.0)</span>
+
+<span class="sd">        Move the active `Frame` one inch to the right::</span>
+
+<span class="sd">            &gt;&gt;&gt; tp.active_frame().position=(tp.active_frame().position.x+1, None)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">XYPOS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">)</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">XYPOS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">XYPosition</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+
+    <span class="nd">@position.setter</span>
+    <span class="k">def</span> <span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">pos</span><span class="p">):</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">XYPosition</span><span class="p">(</span><span class="o">*</span><span class="n">flatten_args</span><span class="p">(</span><span class="o">*</span><span class="n">pos</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">pos</span><span class="o">.</span><span class="n">x</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">pos</span><span class="o">.</span><span class="n">x</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">XYPOS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">pos</span><span class="o">.</span><span class="n">y</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">pos</span><span class="o">.</span><span class="n">y</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">XYPOS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">aux_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Auxiliary data for this frame.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `AuxData`</span>
+
+<span class="sd">        This is the auxiliary data attached to the frame. Such data is written</span>
+<span class="sd">        to the layout file by default and can be retrieved later. Example</span>
+<span class="sd">        usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; aux = tp.active_frame().aux_data</span>
+<span class="sd">            &gt;&gt;&gt; aux[&#39;Result&#39;] = &#39;3.14159&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(aux[&#39;Result&#39;])</span>
+<span class="sd">            3.14159</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">AuxData</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">AuxDataObjectType</span><span class="o">.</span><span class="n">Frame</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Frame.texts"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.texts">[docs]</a>    <span class="k">def</span> <span class="nf">texts</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get an iterator for all `Text` objects in the frame.</span>
+
+<span class="sd">        This example shows how to obtain a list of all red `Text` objects::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; all_red_text_objects = [T for T in tp.active_frame().texts()</span>
+<span class="sd">            ...                         if T.color == Color.Red]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">annotation</span><span class="o">.</span><span class="n">Annotation</span><span class="o">.</span><span class="n">_Iterator</span><span class="p">(</span><span class="n">annotation</span><span class="o">.</span><span class="n">Text</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Frame.geometries"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.geometries">[docs]</a>    <span class="k">def</span> <span class="nf">geometries</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;*Not Implemented*&quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="n">TecplotNotImplementedError</span></div>
+
+<div class="viewcode-block" id="Frame.images"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.images">[docs]</a>    <span class="k">def</span> <span class="nf">images</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;*Not Implemented*&quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="n">TecplotNotImplementedError</span></div>
+
+<div class="viewcode-block" id="Frame.activated"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.activated">[docs]</a>    <span class="nd">@contextmanager</span>
+    <span class="k">def</span> <span class="nf">activated</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Context for temporarily activating this `Frame`.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page = tecplot.active_page()</span>
+<span class="sd">            &gt;&gt;&gt; frame1 = page.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame2 = page.add_frame()</span>
+<span class="sd">            &gt;&gt;&gt; print(frame2.active)</span>
+<span class="sd">            True</span>
+<span class="sd">            &gt;&gt;&gt; with frame1.activated():</span>
+<span class="sd">            &gt;&gt;&gt;     print(frame1.active)</span>
+<span class="sd">            True</span>
+<span class="sd">            &gt;&gt;&gt; print(frame2.active)</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">frame_uid</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetActiveID</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">frame_uid</span><span class="p">:</span>
+            <span class="k">yield</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">page_uid</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetUniqueID</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">yield</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="k">with</span> <span class="n">lock</span><span class="p">():</span>
+                    <span class="k">if</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageGetUniqueID</span><span class="p">()</span> <span class="o">!=</span> <span class="n">page_uid</span><span class="p">:</span>
+                        <span class="n">_tecutil</span><span class="o">.</span><span class="n">PageSetCurrentByUniqueID</span><span class="p">(</span><span class="n">page_uid</span><span class="p">)</span>
+                    <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameActivateByUniqueID</span><span class="p">(</span><span class="n">frame_uid</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Frame.load_stylesheet"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.load_stylesheet">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">load_stylesheet</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="n">plot_style</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">geom</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                        <span class="n">streams</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">contours</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">frame_geom</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span>
+                        <span class="n">merge</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Apply a stylesheet settings file to this frame.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            filename (`string &lt;str&gt;`): The path to a stylesheet file. (See note</span>
+<span class="sd">                below conerning absolute and relative paths.)</span>
+<span class="sd">            plot_style (`boolean &lt;bool&gt;`, optional): Apply the stylesheet&#39;s</span>
+<span class="sd">                plot style. (default: `True`)</span>
+<span class="sd">            text (`boolean &lt;bool&gt;`, optional): Include the stylesheet&#39;s text</span>
+<span class="sd">                objects. (default: `True`)</span>
+<span class="sd">            geom (`boolean &lt;bool&gt;`, optional): Include the stylesheet&#39;s</span>
+<span class="sd">                geometry objects. (default: `True`)</span>
+<span class="sd">            streams (`boolean &lt;bool&gt;`, optional): Include the stylesheet&#39;s</span>
+<span class="sd">                stream traces. (default: `True`)</span>
+<span class="sd">            contours (`boolean &lt;bool&gt;`, optional): Include the stylesheet&#39;s</span>
+<span class="sd">                contour levels. (default: `True`)</span>
+<span class="sd">            frame_geom (`boolean &lt;bool&gt;`, optional): Apply the stylesheet&#39;s</span>
+<span class="sd">                frame position and size. (default: `False`)</span>
+<span class="sd">            merge (`boolean &lt;bool&gt;`, optional): Merge with the frame&#39;s current</span>
+<span class="sd">                style. (default: `False`)</span>
+
+<span class="sd">        .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">            Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">            relative to the current working directory of the parent process.</span>
+<span class="sd">            This is different when running the PyTecplot script in batch mode</span>
+<span class="sd">            and when running in connected mode with</span>
+<span class="sd">            `tecplot.session.connect()`. In batch mode, paths will be relative</span>
+<span class="sd">            to Python&#39;s current working directory as obtained by</span>
+<span class="sd">            :func:`os.getcwd()`. When connected to an instance of Tecplot 360,</span>
+<span class="sd">            paths will be relative to Tecplot 360&#39;s&#39; start-up folder which is</span>
+<span class="sd">            typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame.load_stylesheet(&#39;my_style.sty&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Applying style from {} to frame&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">filename</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ReadStylesheet</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">plot_style</span><span class="p">,</span> <span class="n">text</span><span class="p">,</span> <span class="n">geom</span><span class="p">,</span>
+                                           <span class="n">streams</span><span class="p">,</span> <span class="n">contours</span><span class="p">,</span> <span class="n">merge</span><span class="p">,</span>
+                                           <span class="n">frame_geom</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Frame.save_stylesheet"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.save_stylesheet">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">save_stylesheet</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="n">plot_style</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">aux_data</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                        <span class="n">text</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">geom</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">streams</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">contours</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                        <span class="n">defaults</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">relative_paths</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">compress</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Save the frame&#39;s current style to a file.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            filename (`string &lt;str&gt;`): The path to a stylesheet file. (See note</span>
+<span class="sd">                below conerning absolute and relative paths.)</span>
+<span class="sd">            plot_style (`boolean &lt;bool&gt;`, optional): Include the frame&#39;s plot</span>
+<span class="sd">                style. (default: `True`)</span>
+<span class="sd">            aux_data (`boolean &lt;bool&gt;`, optional): Include auxiliary data.</span>
+<span class="sd">                (default: `True`)</span>
+<span class="sd">            text (`boolean &lt;bool&gt;`, optional): Include text objects. (default:</span>
+<span class="sd">                `True`)</span>
+<span class="sd">            geom (`boolean &lt;bool&gt;`, optional): Include geometry objects.</span>
+<span class="sd">                (default: `True`)</span>
+<span class="sd">            streams (`boolean &lt;bool&gt;`, optional): Include  stream traces.</span>
+<span class="sd">                (default: `True`)</span>
+<span class="sd">            contours (`boolean &lt;bool&gt;`, optional): Include contour levels.</span>
+<span class="sd">                (default: `True`)</span>
+<span class="sd">            defaults (`boolean &lt;bool&gt;`, optional): Include all factory defaults</span>
+<span class="sd">                used by the current style. (default: `False`)</span>
+<span class="sd">            relative_paths (`boolean &lt;bool&gt;`, optional): Use relative paths.</span>
+<span class="sd">                (default: `True`)</span>
+<span class="sd">            compress (`boolean &lt;bool&gt;`, optional): Compress the output of the</span>
+<span class="sd">                style. (default: `False`)</span>
+
+<span class="sd">        .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">            Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">            relative to the current working directory of the parent process.</span>
+<span class="sd">            This is different when running the PyTecplot script in batch mode</span>
+<span class="sd">            and when running in connected mode with</span>
+<span class="sd">            `tecplot.session.connect()`. In batch mode, paths will be relative</span>
+<span class="sd">            to Python&#39;s current working directory as obtained by</span>
+<span class="sd">            :func:`os.getcwd()`. When connected to an instance of Tecplot 360,</span>
+<span class="sd">            paths will be relative to Tecplot 360&#39;s&#39; start-up folder which is</span>
+<span class="sd">            typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame.save_stylesheet(&#39;my_style.sty&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+                <span class="n">arglist</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">FNAME</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">filename</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">INCLUDEPLOTSTYLE</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">plot_style</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">INCLUDEAUXDATA</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">aux_data</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">INCLUDETEXT</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">text</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">INCLUDEGEOM</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">geom</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">INCLUDESTREAMPOSITIONS</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">streams</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">INCLUDECONTOURLEVELS</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">contours</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">INCLUDEFACTORYDEFAULTS</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">defaults</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">USERELATIVEPATHS</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">relative_paths</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">COMPRESS</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">compress</span><span class="p">)))</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">WriteStylesheetX</span><span class="p">(</span><span class="n">arglist</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns or sets the name.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        This is the name used when searching for `Frame` objects in</span>
+<span class="sd">        `Page.frames` and `Page.frame`. It does not have to be unique,</span>
+<span class="sd">        even for multiple frames in a single `Page`.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame.name = &#39;3D Data View&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(&#39;this frame:&#39;, frame.name)</span>
+<span class="sd">            this frame: 3D Data View</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetName</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="nd">@name.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameSetName</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">active</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks if this `Frame` is active.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `bool`: `True` if this `Frame` is the active `Frame`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetActiveID</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">current</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetUniqueID</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Frame.activate"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.activate">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">activate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Causes this `Frame` to become active.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`</span>
+
+<span class="sd">        The parent `Page` is implicitly &quot;activated&quot; as a side-effect of this</span>
+<span class="sd">        operation::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; page1 = tecplot.active_page()</span>
+<span class="sd">            &gt;&gt;&gt; frame1 = page1.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; page2 = tecplot.add_page()</span>
+<span class="sd">            &gt;&gt;&gt; frame2 = page2.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame1.active and page1.active</span>
+<span class="sd">            False</span>
+<span class="sd">            &gt;&gt;&gt; frame2.active and page2.active</span>
+<span class="sd">            True</span>
+<span class="sd">            &gt;&gt;&gt; frame1.activate()</span>
+<span class="sd">            &gt;&gt;&gt; frame2.active or page2.active</span>
+<span class="sd">            False</span>
+<span class="sd">            &gt;&gt;&gt; frame1.active and page1.active</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">active</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">page</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">page</span><span class="o">.</span><span class="n">activate</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameActivateByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">):</span>
+                <span class="n">err</span> <span class="o">=</span> <span class="s1">&#39;could not activate frame with uid {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">(</span><span class="n">err</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">plot_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns or sets the current plot type.</span>
+
+<span class="sd">        :type: `constant.PlotType`</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`</span>
+
+<span class="sd">        A `Frame` can have only one active plot type at any given time. The</span>
+<span class="sd">        types are enumerated by `constant.PlotType`::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import PlotType</span>
+
+<span class="sd">            &gt;&gt;&gt; tecplot.load_layout(&#39;mylayout.lay&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type</span>
+<span class="sd">            &lt;PlotType.Sketch: 4&gt;</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type = PlotType.Cartesian3D</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type</span>
+<span class="sd">            &lt;PlotType.Cartesian3D: 1&gt;</span>
+
+<span class="sd">        .. note:: Plot type cannot be set to `constant.PlotType.Automatic`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameGetPlotTypeForFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@plot_type.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">plot_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">plot_type</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">SetValueReturnCode</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameSetPlotType</span><span class="p">(</span><span class="n">plot_type</span><span class="o">.</span><span class="n">value</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">res</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="n">SetValueReturnCode</span><span class="o">.</span><span class="n">Ok</span><span class="p">,</span>
+                           <span class="n">SetValueReturnCode</span><span class="o">.</span><span class="n">DuplicateValue</span><span class="p">]:</span>
+                <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="n">SetValueReturnCode</span><span class="o">.</span><span class="n">ContextError1</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">(</span><span class="s1">&#39;no Dataset attached to Frame&#39;</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Frame.plot"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.plot">[docs]</a>    <span class="k">def</span> <span class="nf">plot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">plot_type</span><span class="o">=</span><span class="n">PlotType</span><span class="o">.</span><span class="n">Active</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a `Plot` style-control object.</span>
+
+<span class="sd">        :type:</span>
+<span class="sd">            `Plot`:</span>
+<span class="sd">                One of the possible `Plot` classes, depending on the</span>
+<span class="sd">                ``plot_type`` specified. By default, the active plot</span>
+<span class="sd">                type, obtained from `Frame.plot_type`, is used.</span>
+
+<span class="sd">        The `Plot` object is the handle through which one can manipulate the</span>
+<span class="sd">        style and visual representation of the `Dataset`. Possible return types</span>
+<span class="sd">        are: `SketchPlot`, `Cartesian2DFieldPlot`, `Cartesian3DFieldPlot`,</span>
+<span class="sd">        `PolarLinePlot` and `XYLinePlot`. Each of these have their own specific</span>
+<span class="sd">        set of attributes and methods.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame.plot_type</span>
+<span class="sd">            &lt;PlotType.Cartesian3D: 1&gt;</span>
+<span class="sd">            &gt;&gt;&gt; plot3d = frame.plot()</span>
+<span class="sd">            &gt;&gt;&gt; plot3d.show_contour = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">plot_type</span> <span class="ow">is</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">Active</span><span class="p">:</span>
+            <span class="n">plot_type</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">PlotType</span><span class="o">.</span><span class="n">Cartesian2D</span><span class="p">:</span> <span class="n">plot</span><span class="o">.</span><span class="n">Cartesian2DFieldPlot</span><span class="p">,</span>
+            <span class="n">PlotType</span><span class="o">.</span><span class="n">Cartesian3D</span><span class="p">:</span> <span class="n">plot</span><span class="o">.</span><span class="n">Cartesian3DFieldPlot</span><span class="p">,</span>
+            <span class="n">PlotType</span><span class="o">.</span><span class="n">XYLine</span><span class="p">:</span> <span class="n">plot</span><span class="o">.</span><span class="n">XYLinePlot</span><span class="p">,</span>
+            <span class="n">PlotType</span><span class="o">.</span><span class="n">PolarLine</span><span class="p">:</span> <span class="n">plot</span><span class="o">.</span><span class="n">PolarLinePlot</span><span class="p">,</span>
+            <span class="n">PlotType</span><span class="o">.</span><span class="n">Sketch</span><span class="p">:</span> <span class="n">plot</span><span class="o">.</span><span class="n">SketchPlot</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">_dispatch</span><span class="p">[</span><span class="n">plot_type</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">plot_type</span><span class="p">](</span><span class="bp">self</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Frame.move_to_bottom"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.move_to_bottom">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">move_to_bottom</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Moves `Frame` behind all others in `Page`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameMoveToBottomByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Frame.move_to_top"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.move_to_top">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">move_to_top</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Moves `Frame` in front of all others in `Page`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_tecutil</span><span class="o">.</span><span class="n">FrameMoveToTopByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Frame.active_zones"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.active_zones">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">active_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">zones</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns or sets the active `Zones &lt;data_access&gt;`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            zones (`Zones &lt;data_access&gt;`, optional): The `Zone &lt;data_access&gt;`</span>
+<span class="sd">                objects, which must be in the `Dataset` attached to this</span>
+<span class="sd">                `Frame`, that will be activated. All other `Zones</span>
+<span class="sd">                &lt;data_access&gt;` will be deactivated.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Zones &lt;data_access&gt;`:</span>
+<span class="sd">                This will return a generator of active `Zones &lt;data_access&gt;` in</span>
+<span class="sd">                this `Frame`.</span>
+
+<span class="sd">        This should only be used on frames with an active plot type that</span>
+<span class="sd">        contains a dataset with at least one zone.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">plot_type</span> <span class="ow">is</span> <span class="n">PlotType</span><span class="o">.</span><span class="n">Sketch</span><span class="p">:</span>
+                <span class="n">err</span> <span class="o">=</span> <span class="s1">&#39;Active plot type is Sketch which has no active zones.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">has_dataset</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="s1">&#39;Frame has no dataset.&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="s1">&#39;Dataset has no zones.&#39;</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">zones</span><span class="p">:</span>
+                <span class="k">with</span> <span class="n">IndexSet</span><span class="p">(</span><span class="o">*</span><span class="n">zones</span><span class="p">)</span> <span class="k">as</span> <span class="n">zoneset</span><span class="p">:</span>
+                    <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneSetActive</span><span class="p">(</span><span class="n">zoneset</span><span class="p">,</span> <span class="n">AssignOp</span><span class="o">.</span><span class="n">Equals</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">zoneset</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetActiveForFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+                <span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">zoneset</span><span class="p">]</span>
+                <span class="n">zoneset</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">zones</span></div>
+
+<div class="viewcode-block" id="Frame.delete_text"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.delete_text">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">delete_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Delete a `text &lt;annotation.Text&gt;` object from a frame.</span>
+
+<span class="sd">        When deleted, the text object is no longer displayed in the frame and is</span>
+<span class="sd">        permanently invalid. To display the text in the frame again,</span>
+<span class="sd">        a new text object must be created by calling `add_text`.</span>
+
+<span class="sd">        .. warning::</span>
+<span class="sd">            Use this method with care.</span>
+<span class="sd">            After a text object has been deleted by calling this method,</span>
+<span class="sd">            it is no longer valid, and all properties of the deleted text</span>
+<span class="sd">            object will throw `TecplotLogicError` when accessed.</span>
+
+<span class="sd">        Example usage</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">            &gt;&gt;&gt; text = tp.active_frame().add_text(&quot;abc&quot;) # Add a text</span>
+<span class="sd">            &gt;&gt;&gt; tp.active_frame().delete_text(text) # Delete the text</span>
+<span class="sd">            &gt;&gt;&gt; # &#39;text&#39; is no longer valid and any property access</span>
+<span class="sd">            &gt;&gt;&gt; # will throw TecplotLogicError</span>
+
+<span class="sd">        .. seealso:: `add_text`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">text</span><span class="o">.</span><span class="n">_delete</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Frame.add_text"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.add_text">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">add_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">,</span> <span class="n">position</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">coord_sys</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">typeface</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">bold</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">italic</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">size_units</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">color</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">angle</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">line_spacing</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">anchor</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">box_type</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">line_thickness</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">box_color</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">fill_color</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">margin</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">zone</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds a `text &lt;annotation.Text&gt;` to a `Frame`.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            text (`string &lt;str&gt;`): The text to add to the `Frame`.</span>
+<span class="sd">                The text string must have a non-zero length.</span>
+<span class="sd">            position (`tuple` of `floats &lt;float&gt;` (x,y), optional): The</span>
+<span class="sd">                position of the anchor as a percentage of the</span>
+<span class="sd">                specified coordinates. (default: (0,0))</span>
+<span class="sd">            coord_sys (`CoordSys`, optional): Coordinate system used to</span>
+<span class="sd">                position the anchor of the text object. The possible values</span>
+<span class="sd">                are: `CoordSys.Grid` or `CoordSys.Frame`. (default:</span>
+<span class="sd">                `CoordSys.Frame`)</span>
+<span class="sd">            typeface (`string &lt;str&gt;`, optional): The typeface name. For</span>
+<span class="sd">                consistency across various platforms, Tecplot guarantees that</span>
+<span class="sd">                the following standard typeface names are available:</span>
+<span class="sd">                &quot;Helvetica&quot;, &quot;Times&quot;, &quot;Courier&quot;, &quot;Greek&quot;, &quot;Math&quot;, and &quot;User</span>
+<span class="sd">                Defined&quot;. Other typefaces may or may not be available depending</span>
+<span class="sd">                on the TrueType fonts available. If the typeface name or style</span>
+<span class="sd">                is not available, a suitable replacement will be selected.</span>
+<span class="sd">                (default: &quot;Helvetica&quot;)</span>
+<span class="sd">            bold (`boolean &lt;bool&gt;`, optional): Use the bold variation of the</span>
+<span class="sd">                specified typeface. (default: `True`)</span>
+<span class="sd">            italic (`boolean &lt;bool&gt;`, optional): Use the italic variation of</span>
+<span class="sd">                the specified typeface. (default: `False`)</span>
+<span class="sd">            size_units (`Units`, optional): Text sizing units. Possible</span>
+<span class="sd">                values are: `Units.Grid`, `Units.Frame` or `Units.Point`.</span>
+<span class="sd">                (default: `Units.Point`)</span>
+<span class="sd">            size (`float`, optional): Text height in the specified units.</span>
+<span class="sd">                (default: 14)</span>
+<span class="sd">            color (`Color`, optional): Color of the text</span>
+<span class="sd">                   (default: `Color.Black`)</span>
+<span class="sd">            angle (`float`, optional): Angle of the text baseline in degrees</span>
+<span class="sd">                from -360 to 360. (default: 0)</span>
+<span class="sd">            line_spacing (`float`, optional): Line spacing in units of line</span>
+<span class="sd">                size. Can take values from 0 to 50. (default: 1)</span>
+<span class="sd">            anchor (`TextAnchor`, optional): Anchor position with respect to</span>
+<span class="sd">                the text box. Possible values are: `TextAnchor.Left`,</span>
+<span class="sd">                `TextAnchor.Center`, `TextAnchor.Right`,</span>
+<span class="sd">                `TextAnchor.MidLeft`, `TextAnchor.MidCenter`,</span>
+<span class="sd">                `TextAnchor.MidRight`, `TextAnchor.HeadLeft`,</span>
+<span class="sd">                `TextAnchor.HeadCenter`, `TextAnchor.HeadRight`,</span>
+<span class="sd">                `TextAnchor.OnSide` (default: `TextAnchor.Left`)</span>
+<span class="sd">            box_type (`constant.TextBox`, optional): Type of text box can be one</span>
+<span class="sd">                of: `constant.TextBox.None_`, `constant.TextBox.Filled` or `constant.TextBox.Hollow`.</span>
+<span class="sd">                (default: `constant.TextBox.None_`)</span>
+<span class="sd">            line_thickness (`float`, optional): Text box boarder line</span>
+<span class="sd">                thickness may be a value in the range from 0.0001 to 100.</span>
+<span class="sd">                (default: 0.1)</span>
+<span class="sd">            box_color (`Color`, optional): Text box border line color. See</span>
+<span class="sd">                `Color` for possible values. (default: `Color.Black`)</span>
+<span class="sd">            fill_color (`Color`, optional): Text box fill color. See `Color`</span>
+<span class="sd">                for possible values. (default: `White`)</span>
+<span class="sd">            margin (`float`, optional): Margin between the text and text</span>
+<span class="sd">                box. May be in the range from 0 to 2000. (default: 20)</span>
+<span class="sd">            zone (`Zone &lt;data_access&gt;`, optional): `Zone &lt;data_access&gt;` or</span>
+<span class="sd">                `XYLinemap` to which the text will be attached. (default: None)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `annotation.Text`: The resulting `text box &lt;annotation.Text&gt;`</span>
+<span class="sd">            object.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot</span>
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; frame = tecplot.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; frame.add_text(&#39;Hello, World!&#39;, position=(35, 50),</span>
+<span class="sd">            ...   bold=True, italic=False, text_color=Color.Blue)</span>
+
+<span class="sd">        .. seealso:: `delete_text`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+                    <span class="n">check_arglist_argtypes</span><span class="p">(</span>
+                        <span class="s1">&#39;frame.add_text&#39;</span><span class="p">,</span>
+                        <span class="p">([</span><span class="nb">tuple</span><span class="p">],</span> <span class="p">[</span><span class="n">position</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;position&#39;</span><span class="p">]),</span>
+                        <span class="p">([</span><span class="n">CoordSys</span><span class="p">],</span> <span class="p">[</span><span class="n">coord_sys</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;coord_sys&#39;</span><span class="p">]),</span>
+                        <span class="p">(</span><span class="n">string_types</span><span class="p">,</span> <span class="p">[</span><span class="n">typeface</span><span class="p">,</span> <span class="n">text</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;typeface&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">]),</span>
+                        <span class="p">([</span><span class="nb">bool</span><span class="p">],</span> <span class="p">[</span><span class="n">bold</span><span class="p">,</span> <span class="n">italic</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;bold&#39;</span><span class="p">,</span> <span class="s1">&#39;italic&#39;</span><span class="p">]),</span>
+                        <span class="p">([</span><span class="n">Units</span><span class="p">],</span> <span class="p">[</span><span class="n">size_units</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;size_units&#39;</span><span class="p">]),</span>
+                        <span class="p">([</span><span class="n">Number</span><span class="p">],</span> <span class="p">[</span><span class="n">size</span><span class="p">,</span> <span class="n">angle</span><span class="p">,</span> <span class="n">line_thickness</span><span class="p">,</span> <span class="n">margin</span><span class="p">,</span>
+                                    <span class="n">line_spacing</span><span class="p">],</span>
+                            <span class="p">[</span><span class="s1">&#39;size&#39;</span><span class="p">,</span> <span class="s1">&#39;angle&#39;</span><span class="p">,</span> <span class="s1">&#39;line_thickness&#39;</span><span class="p">,</span> <span class="s1">&#39;margin&#39;</span><span class="p">,</span>
+                             <span class="s1">&#39;line_spacing&#39;</span><span class="p">]),</span>
+                        <span class="p">([</span><span class="n">Color</span><span class="p">],</span> <span class="p">[</span><span class="n">color</span><span class="p">,</span> <span class="n">box_color</span><span class="p">,</span> <span class="n">fill_color</span><span class="p">],</span>
+                            <span class="p">[</span><span class="s1">&#39;color&#39;</span><span class="p">,</span> <span class="s1">&#39;text_color&#39;</span><span class="p">,</span> <span class="s1">&#39;fill_color&#39;</span><span class="p">]),</span>
+                        <span class="p">([</span><span class="n">TextAnchor</span><span class="p">],</span> <span class="p">[</span><span class="n">anchor</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;anchor&#39;</span><span class="p">]),</span>
+                        <span class="p">([</span><span class="n">TextBox</span><span class="p">],</span> <span class="p">[</span><span class="n">box_type</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;box_type&#39;</span><span class="p">]),</span>
+                    <span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">zone</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ATTACHTOZONE</span><span class="p">]</span> <span class="o">=</span> <span class="bp">True</span>
+                    <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ZONE</span><span class="p">]</span> <span class="o">=</span> <span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span>
+
+                <span class="c1"># Note that TecUtil calls SV_TEXTCOLOR the color of the text,</span>
+                <span class="c1"># and SV_COLOR as the text *box* color. These names correspond</span>
+                <span class="c1"># to the &#39;color&#39; and &#39;box_color&#39; parameters.</span>
+                <span class="n">arglist</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span> <span class="n">text</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">XPOS</span><span class="p">,</span> <span class="n">position</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">position</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span> <span class="k">else</span> <span class="bp">None</span><span class="p">,</span>
+                     <span class="nb">float</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">YPOS</span><span class="p">,</span> <span class="n">position</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">position</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span> <span class="k">else</span> <span class="bp">None</span><span class="p">,</span>
+                     <span class="nb">float</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">POSITIONCOORDSYS</span><span class="p">,</span> <span class="n">coord_sys</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">ISBOLD</span><span class="p">,</span> <span class="n">bold</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">ISITALIC</span><span class="p">,</span> <span class="n">italic</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">SIZEUNITS</span><span class="p">,</span> <span class="n">size_units</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">HEIGHT</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">ANGLE</span><span class="p">,</span> <span class="n">angle</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">,</span> <span class="n">line_thickness</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">MARGIN</span><span class="p">,</span> <span class="n">margin</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">ANCHOR</span><span class="p">,</span> <span class="n">anchor</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">LINESPACING</span><span class="p">,</span> <span class="n">line_spacing</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">,</span> <span class="n">box_color</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">TEXTCOLOR</span><span class="p">,</span> <span class="n">color</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">FILLCOLOR</span><span class="p">,</span> <span class="n">fill_color</span><span class="p">),</span>
+                    <span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">BOXTYPE</span><span class="p">,</span> <span class="n">box_type</span><span class="p">))</span>
+
+                <span class="k">return</span> <span class="n">annotation</span><span class="o">.</span><span class="n">Text</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">TextCreateX</span><span class="p">(</span><span class="n">arglist</span><span class="p">),</span> <span class="bp">self</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Frame.create_dataset"><a class="viewcode-back" href="../../../api/tecplot.layout.html#tecplot.layout.Frame.create_dataset">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">create_dataset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">var_names</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">reset_style</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create an empty `Dataset`.</span>
+
+<span class="sd">        This will create a new `Dataset` and replace the existing one,</span>
+<span class="sd">        destroying all data associated with it.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            name (`string &lt;str&gt;`): Title of the new `Dataset`. This does not</span>
+<span class="sd">                have to be unique.</span>
+<span class="sd">            var_names (`list` of `strings &lt;str&gt;`, optional): `Variable`</span>
+<span class="sd">                names. This only sets the names and not the data type or</span>
+<span class="sd">                location. See `add_variable`. (default: `None`)</span>
+<span class="sd">            reset_style (`boolean &lt;bool&gt;`): Reset style of the active `Frame`</span>
+<span class="sd">                before loading the `Dataset`. (default: `False`)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Dataset`: The newly created `Dataset`.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">var_names</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">var_names</span> <span class="o">=</span> <span class="n">StringList</span><span class="p">(</span><span class="o">*</span><span class="n">var_names</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataSetCreate</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">var_names</span><span class="p">,</span> <span class="n">reset_style</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">var_names</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">var_names</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_style</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rettype</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">):</span>
+        <span class="n">svargs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sv</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">svargs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">get_style</span><span class="p">(</span><span class="n">rettype</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">,</span> <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_set_style</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">):</span>
+        <span class="n">svargs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sv</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">svargs</span><span class="p">)</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">set_style</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="o">*</span><span class="n">svargs</span><span class="p">,</span> <span class="n">uniqueid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">background_color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Color of the background.</span>
+
+<span class="sd">        :type: `Color`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">constant</span><span class="o">.</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">BACKGROUNDCOLOR</span><span class="p">)</span>
+
+    <span class="nd">@background_color.setter</span>
+    <span class="k">def</span> <span class="nf">background_color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">constant</span><span class="o">.</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">BACKGROUNDCOLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">border_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The border thickness in units of `Frame.size_pos_units`.</span>
+
+<span class="sd">        :type: `float`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">BORDERTHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@border_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">border_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">BORDERTHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">height</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The height in units of `Frame.size_pos_units`.</span>
+
+<span class="sd">        :type: `float`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">HEIGHT</span><span class="p">)</span>
+
+    <span class="nd">@height.setter</span>
+    <span class="k">def</span> <span class="nf">height</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">HEIGHT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_border</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show or hide the `Frame`&#39;s border.</span>
+
+<span class="sd">        :type: `bool`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWBORDER</span><span class="p">)</span>
+
+    <span class="nd">@show_border.setter</span>
+    <span class="k">def</span> <span class="nf">show_border</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWBORDER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_header</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Show or hide the `Frame`&#39;s header in the border.</span>
+
+<span class="sd">        :type: `bool`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWHEADER</span><span class="p">)</span>
+
+    <span class="nd">@show_header.setter</span>
+    <span class="k">def</span> <span class="nf">show_header</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWHEADER</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">header_background_color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The header&#39;s background color.</span>
+
+<span class="sd">        :type: `Color`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">constant</span><span class="o">.</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">HEADERCOLOR</span><span class="p">)</span>
+
+    <span class="nd">@header_background_color.setter</span>
+    <span class="k">def</span> <span class="nf">header_background_color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">constant</span><span class="o">.</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">HEADERCOLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">size_pos_units</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The units used for size properties.</span>
+
+<span class="sd">        :type: `FrameSizePosUnits`</span>
+
+<span class="sd">        Possible values: `Paper`, `Workspace &lt;FrameSizePosUnits.Workspace&gt;`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">constant</span><span class="o">.</span><span class="n">FrameSizePosUnits</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">FRAMESIZEPOSUNITS</span><span class="p">)</span>
+
+    <span class="nd">@size_pos_units.setter</span>
+    <span class="k">def</span> <span class="nf">size_pos_units</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">constant</span><span class="o">.</span><span class="n">FrameSizePosUnits</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">FRAMESIZEPOSUNITS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">transparent</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Use transparency within this `Frame`.</span>
+
+<span class="sd">        :type: `bool`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISTRANSPARENT</span><span class="p">)</span>
+
+    <span class="nd">@transparent.setter</span>
+    <span class="k">def</span> <span class="nf">transparent</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISTRANSPARENT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">width</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The width in units of `Frame.size_pos_units`.</span>
+
+<span class="sd">        :type: `float`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">WIDTH</span><span class="p">)</span>
+
+    <span class="nd">@width.setter</span>
+    <span class="k">def</span> <span class="nf">width</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">WIDTH</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.export.image &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.export.image</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">sv</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">layout</span><span class="p">,</span> <span class="n">session</span>
+
+<span class="kn">from</span> <span class="nn">.export_setup</span> <span class="kn">import</span> <span class="n">ExportSetup</span>
+<span class="kn">from</span> <span class="nn">.print_setup</span> <span class="kn">import</span> <span class="n">PrintSetup</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">_do_export</span><span class="p">(</span><span class="n">region</span><span class="p">):</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">region</span><span class="p">,</span> <span class="n">layout</span><span class="o">.</span><span class="n">Frame</span><span class="p">):</span>
+        <span class="n">ExportSetup</span><span class="p">()</span><span class="o">.</span><span class="n">region</span> <span class="o">=</span> <span class="n">ExportRegion</span><span class="o">.</span><span class="n">CurrentFrame</span>
+        <span class="k">with</span> <span class="n">region</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">success</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">Export</span><span class="p">(</span><span class="n">append</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">ExportSetup</span><span class="p">()</span><span class="o">.</span><span class="n">region</span> <span class="o">=</span> <span class="n">region</span>
+        <span class="n">success</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">Export</span><span class="p">(</span><span class="n">append</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">success</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="save_jpeg"><a class="viewcode-back" href="../../../api/tecplot.exporting.html#tecplot.export.save_jpeg">[docs]</a><span class="k">def</span> <span class="nf">save_jpeg</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span>
+              <span class="n">width</span><span class="o">=</span><span class="mi">800</span><span class="p">,</span>
+              <span class="n">region</span><span class="o">=</span><span class="n">ExportRegion</span><span class="o">.</span><span class="n">CurrentFrame</span><span class="p">,</span>
+              <span class="n">supersample</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+              <span class="n">encoding</span><span class="o">=</span><span class="n">JPEGEncoding</span><span class="o">.</span><span class="n">Standard</span><span class="p">,</span>
+              <span class="n">quality</span><span class="o">=</span><span class="mi">75</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Save a `JPEG image</span>
+<span class="sd">    &lt;https://en.wikipedia.org/wiki/JPEG&gt;`_.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filename (`string &lt;str&gt;`): |export_filename_description| (See note</span>
+<span class="sd">            below conerning absolute and relative paths.)</span>
+<span class="sd">        width (`integer &lt;int&gt;`): |export_width_description|</span>
+<span class="sd">        region (`frame &lt;Frame&gt;` or `ExportRegion`, optional): |export_region_description|</span>
+<span class="sd">        supersample (`integer &lt;int&gt;`, optional): |export_supersample_description|</span>
+<span class="sd">        quality (`integer &lt;int&gt;` 1-100, optional)</span>
+<span class="sd">            Select the quality of JPEG image.</span>
+<span class="sd">            Higher quality settings produce larger files and better</span>
+<span class="sd">            looking export images. Lower quality settings produce smaller files.</span>
+<span class="sd">            For best results, use a quality setting of **75** or higher.</span>
+<span class="sd">            (default: **75**)</span>
+<span class="sd">        encoding (`JPEGEncoding`, optional)</span>
+<span class="sd">            Encoding method for the JPEG file which may be one of the following:</span>
+<span class="sd">                * `JPEGEncoding.Standard`</span>
+<span class="sd">                    Creates a JPEG which downloads one line at a time,</span>
+<span class="sd">                    starting at the top line.</span>
+<span class="sd">                * `JPEGEncoding.Progressive`</span>
+<span class="sd">                    Creates a JPEG image that can be displayed with</span>
+<span class="sd">                    a &quot;fade in&quot; effect in a browser.</span>
+<span class="sd">                    This is sometimes useful when viewing the JPEG in a</span>
+<span class="sd">                    browser with a slow connection, since it allows</span>
+<span class="sd">                    an approximation of the JPEG to be drawn immediately,</span>
+<span class="sd">                    and the browser does not have to wait for the entire</span>
+<span class="sd">                    image to download.</span>
+
+<span class="sd">                (default: `JPEGEncoding.Standard`)</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: The image could not be saved due to a</span>
+<span class="sd">            file I/O error or invalid attribute.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        |export_general_info|</span>
+
+<span class="sd">    Create a new `frame &lt;Frame&gt;` and save a JPEG image of the frame</span>
+<span class="sd">    with quality **50** and supersampling::</span>
+
+<span class="sd">        &gt;&gt;&gt; frame = tecplot.active_page().add_frame()</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.load_layout(&#39;mylayout.lay&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.export.save_jpeg(&#39;image.jpeg&#39;, width=600, supersample=3,</span>
+<span class="sd">        ...                         region=frame, quality=50)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">setup</span> <span class="o">=</span> <span class="n">ExportSetup</span><span class="p">()</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">format</span> <span class="o">=</span> <span class="n">ExportFormat</span><span class="o">.</span><span class="n">JPEG</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">width</span> <span class="o">=</span> <span class="n">width</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">supersample</span> <span class="o">=</span> <span class="n">supersample</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">quality</span> <span class="o">=</span> <span class="n">quality</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">jpeg_encoding</span> <span class="o">=</span> <span class="n">encoding</span>
+
+    <span class="n">_do_export</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;JPEG image file created: &#39;</span> <span class="o">+</span> <span class="n">filename</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="save_tiff"><a class="viewcode-back" href="../../../api/tecplot.exporting.html#tecplot.export.save_tiff">[docs]</a><span class="k">def</span> <span class="nf">save_tiff</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span>
+              <span class="n">width</span><span class="o">=</span><span class="mi">800</span><span class="p">,</span>
+              <span class="n">region</span><span class="o">=</span><span class="n">ExportRegion</span><span class="o">.</span><span class="n">CurrentFrame</span><span class="p">,</span>
+              <span class="n">supersample</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+              <span class="n">convert_to_256_colors</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span>
+              <span class="n">gray_scale_depth</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+              <span class="n">byte_order</span><span class="o">=</span><span class="n">TIFFByteOrder</span><span class="o">.</span><span class="n">Intel</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Save a `TIFF image</span>
+<span class="sd">    &lt;https://en.wikipedia.org/wiki/TIFF&gt;`_.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filename (`string &lt;str&gt;`): |export_filename_description| (See note</span>
+<span class="sd">            below conerning absolute and relative paths.)</span>
+<span class="sd">        width (`integer &lt;int&gt;`): |export_width_description|</span>
+<span class="sd">        region (`frame &lt;Frame&gt;` or `ExportRegion`, optional): |export_region_description|</span>
+<span class="sd">        supersample (`integer &lt;int&gt;`, optional): |export_supersample_description|</span>
+<span class="sd">        convert_to_256_colors (`Boolean &lt;bool&gt;`, optional): |export_convert256_description|</span>
+<span class="sd">        gray_scale_depth (`integer &lt;int&gt;`, optional)</span>
+<span class="sd">            Export a gray-scale TIFF.</span>
+<span class="sd">            The ``gray_scale_depth`` parameter may be</span>
+<span class="sd">            set to a depth of **1-8**</span>
+
+<span class="sd">            ``gray_scale_depth`` specifies the</span>
+<span class="sd">            number of shades of gray by how many bits of gray scale</span>
+<span class="sd">            information is used per pixel.</span>
+<span class="sd">            The larger the number of bits per pixel, the larger the</span>
+<span class="sd">            resulting file.</span>
+
+<span class="sd">            Options are:</span>
+<span class="sd">                * **0**: On/Off</span>
+<span class="sd">                    One bit per pixel using an on/off strategy.</span>
+<span class="sd">                    All background pixels are made white (on),</span>
+<span class="sd">                    and all foreground pixels, black (off).</span>
+<span class="sd">                    This setting creates small files and is</span>
+<span class="sd">                    good for images with lots of background, such as line</span>
+<span class="sd">                    plots and contour lines.</span>
+<span class="sd">                * **1**: 1 Bit per Pixel</span>
+<span class="sd">                    One bit per pixel using gray scale values of</span>
+<span class="sd">                    pixels to determine black or white.</span>
+<span class="sd">                    Those pixels that are more than 50 percent gray are</span>
+<span class="sd">                    black; the rest are white. This setting creates small</span>
+<span class="sd">                    files that might be useful for a rough draft</span>
+<span class="sd">                    or a preview image.</span>
+<span class="sd">                * **4**: 4 Bits per Pixel</span>
+<span class="sd">                    Four bits per pixel resulting</span>
+<span class="sd">                    in sixteen levels of gray scale. This setting</span>
+<span class="sd">                    generates fairly small image files with a</span>
+<span class="sd">                    fair number of gray levels.</span>
+<span class="sd">                    This setting works well for most preview image purposes.</span>
+<span class="sd">                * **8**:  8 Bits per Pixel</span>
+<span class="sd">                    Eight bits per pixel resulting in 256 levels of gray.</span>
+<span class="sd">                    This setting is useful for full image</span>
+<span class="sd">                    representation, but the files generated by this</span>
+<span class="sd">                    setting can be large.</span>
+
+<span class="sd">                (default: `None`)</span>
+
+<span class="sd">        byte_order (`TIFFByteOrder`, optional)</span>
+<span class="sd">            Specify the byte order (Intel or Motorola) of the TIFF image.</span>
+<span class="sd">            (Default: `TIFFByteOrder.Intel`)</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: The image could not be saved due to a</span>
+<span class="sd">            file I/O error or invalid attribute.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        |export_general_info|</span>
+
+<span class="sd">    Save a 4-bit gray scale TIFF image of the entire workspace with supersampling::</span>
+
+<span class="sd">        &gt;&gt;&gt; from tecplot.constant import ExportRegion</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.load_layout(&#39;mylayout.lay&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.export.save_tiff(&#39;image.tiff&#39;, width=600, supersample=2,</span>
+<span class="sd">        &gt;&gt;&gt;                         region=ExportRegion.WorkArea,</span>
+<span class="sd">        &gt;&gt;&gt;                         gray_scale_depth=4)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">print_setup</span> <span class="o">=</span> <span class="n">PrintSetup</span><span class="p">()</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">palette</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">Palette</span><span class="o">.</span><span class="n">Color</span> <span class="k">if</span> <span class="n">gray_scale_depth</span> <span class="ow">is</span> <span class="bp">None</span> <span class="k">else</span> <span class="n">Palette</span><span class="o">.</span><span class="n">Monochrome</span><span class="p">)</span>
+
+    <span class="n">setup</span> <span class="o">=</span> <span class="n">ExportSetup</span><span class="p">()</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">format</span> <span class="o">=</span> <span class="n">ExportFormat</span><span class="o">.</span><span class="n">TIFF</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">width</span> <span class="o">=</span> <span class="n">width</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">supersample</span> <span class="o">=</span> <span class="n">supersample</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">convert_to_256_colors</span> <span class="o">=</span> <span class="n">convert_to_256_colors</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">gray_scale_depth</span> <span class="o">=</span> <span class="n">gray_scale_depth</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">tiff_byte_order</span> <span class="o">=</span> <span class="n">byte_order</span>
+
+    <span class="n">_do_export</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;TIFF image file created: &#39;</span> <span class="o">+</span> <span class="n">filename</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="save_png"><a class="viewcode-back" href="../../../api/tecplot.exporting.html#tecplot.export.save_png">[docs]</a><span class="k">def</span> <span class="nf">save_png</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span>
+             <span class="n">width</span><span class="o">=</span><span class="mi">800</span><span class="p">,</span>
+             <span class="n">region</span><span class="o">=</span><span class="n">ExportRegion</span><span class="o">.</span><span class="n">CurrentFrame</span><span class="p">,</span>
+             <span class="n">supersample</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+             <span class="n">convert_to_256_colors</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Save a `PNG image</span>
+<span class="sd">    &lt;https://en.wikipedia.org/wiki/Portable_Network_Graphics&gt;`_.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filename (`string &lt;str&gt;`): |export_filename_description| (See note</span>
+<span class="sd">            below conerning absolute and relative paths.)</span>
+<span class="sd">        width (`integer &lt;int&gt;`):  |export_width_description|</span>
+<span class="sd">        region (`frame &lt;Frame&gt;` or `ExportRegion`, optional): |export_region_description|</span>
+<span class="sd">        supersample (`integer &lt;int&gt;`, optional): |export_supersample_description|</span>
+<span class="sd">        convert_to_256_colors (`Boolean &lt;bool&gt;`, optional): |export_convert256_description|</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: The image could not be saved due to a</span>
+<span class="sd">            file I/O error or invalid attribute.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        |export_general_info|</span>
+
+<span class="sd">    Save a PNG image of the entire workspace with supersampling::</span>
+
+<span class="sd">        &gt;&gt;&gt; from tecplot.constant import ExportRegion</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.load_layout(&#39;mylayout.lay&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.export.save_png(&#39;image.png&#39;, width=600, supersample=3,</span>
+<span class="sd">        ...                         region=ExportRegion.WorkArea)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">setup</span> <span class="o">=</span> <span class="n">ExportSetup</span><span class="p">()</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">format</span> <span class="o">=</span> <span class="n">ExportFormat</span><span class="o">.</span><span class="n">PNG</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">width</span> <span class="o">=</span> <span class="n">width</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">supersample</span> <span class="o">=</span> <span class="n">supersample</span>
+    <span class="n">setup</span><span class="o">.</span><span class="n">convert_to_256_colors</span> <span class="o">=</span> <span class="n">convert_to_256_colors</span>
+
+    <span class="n">_do_export</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;PNG image file created: &#39;</span> <span class="o">+</span> <span class="n">filename</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="save_wmf"><a class="viewcode-back" href="../../../api/tecplot.exporting.html#tecplot.export.save_wmf">[docs]</a><span class="k">def</span> <span class="nf">save_wmf</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span>
+             <span class="n">palette</span><span class="o">=</span><span class="n">Palette</span><span class="o">.</span><span class="n">Color</span><span class="p">,</span>
+             <span class="n">region</span><span class="o">=</span><span class="n">ExportRegion</span><span class="o">.</span><span class="n">CurrentFrame</span><span class="p">,</span>
+             <span class="n">force_extra_3d_sorting</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Save a Windows Metafile image</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filename (`string &lt;str&gt;`): |export_filename_description| (See note</span>
+<span class="sd">            below conerning absolute and relative paths.)</span>
+<span class="sd">        palette (`Palette`, optional): Export color image. (default:</span>
+<span class="sd">            `Palette.Color`) Note: `Palette.PenPlotter` cannot be used.</span>
+<span class="sd">        region (`frame &lt;Frame&gt;` or `ExportRegion`, optional): |export_region_description|</span>
+<span class="sd">        force_extra_3d_sorting (`bool`, optional): Force extra sorting for all</span>
+<span class="sd">            3D frames. (default: `False`)</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: The image could not be saved due to a</span>
+<span class="sd">            file I/O error or invalid attribute.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        WMF (Windows Metafile) is a Microsoft vector graphics format widely</span>
+<span class="sd">        accepted by Windows applications. Since WMFs are vector graphics, they</span>
+<span class="sd">        can be easily resized by the importing application without the</span>
+<span class="sd">        introduction of visual artifacts, but they cannot accurately represent</span>
+<span class="sd">        plots with translucency or smooth color gradations</span>
+
+<span class="sd">    Save a WMF image of the active frame::</span>
+
+<span class="sd">        &gt;&gt;&gt; tecplot.load_layout(&#39;mylayout.lay&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.export.save_wmf(&#39;image.wmf&#39;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">print_setup</span> <span class="o">=</span> <span class="n">PrintSetup</span><span class="p">()</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">palette</span> <span class="o">=</span> <span class="n">palette</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">force_extra_3d_sorting</span> <span class="o">=</span> <span class="n">force_extra_3d_sorting</span>
+
+    <span class="n">export_setup</span> <span class="o">=</span> <span class="n">ExportSetup</span><span class="p">()</span>
+    <span class="n">export_setup</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">export_setup</span><span class="o">.</span><span class="n">format</span> <span class="o">=</span> <span class="n">ExportFormat</span><span class="o">.</span><span class="n">WindowsMetafile</span>
+    <span class="n">export_setup</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span>
+
+    <span class="n">_do_export</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Windows metafile image created: &#39;</span> <span class="o">+</span> <span class="n">filename</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="save_ps"><a class="viewcode-back" href="../../../api/tecplot.exporting.html#tecplot.export.save_ps">[docs]</a><span class="k">def</span> <span class="nf">save_ps</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span>
+            <span class="n">palette</span><span class="o">=</span><span class="n">Palette</span><span class="o">.</span><span class="n">Color</span><span class="p">,</span>
+            <span class="n">region</span><span class="o">=</span><span class="n">ExportRegion</span><span class="o">.</span><span class="n">CurrentFrame</span><span class="p">,</span>
+            <span class="n">force_extra_3d_sorting</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span>
+            <span class="n">extra_precision</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="n">render_type</span><span class="o">=</span><span class="n">PrintRenderType</span><span class="o">.</span><span class="n">Vector</span><span class="p">,</span>
+            <span class="n">resolution</span><span class="o">=</span><span class="mi">150</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Save a `PostScript image &lt;https://en.wikipedia.org/wiki/PostScript&gt;`_.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filename (`string &lt;str&gt;`): |export_filename_description| (See note</span>
+<span class="sd">            below conerning absolute and relative paths.)</span>
+<span class="sd">        palette (`Palette`, optional): Export color image. (default: `Palette.Color`)</span>
+<span class="sd">        region (`frame &lt;Frame&gt;` or `ExportRegion`, optional): |export_region_description|</span>
+<span class="sd">        force_extra_3d_sorting (`bool`, optional): Force extra sorting for all</span>
+<span class="sd">            3D frames. (default: `False`)</span>
+<span class="sd">        extra_precision (`int`, optional): Additional digits for all numbers</span>
+<span class="sd">            written to postscript file. (default: 0)</span>
+<span class="sd">        render_type (`PrintRenderType`, optional): Whether to render the</span>
+<span class="sd">            postscript as a rasterized or vector image. (default:</span>
+<span class="sd">            `PrintRenderType.Vector`)</span>
+<span class="sd">        resolution (`integer &lt;int&gt;`): Resolution of the image in dots per inch.</span>
+<span class="sd">            Larger values create more accurate plots, but result in larger file</span>
+<span class="sd">            sizes. Note: this value is ignored if `PrintRenderType` is</span>
+<span class="sd">            `PrintRenderType.Vector` (default: **150**)</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`: The image could not be saved due to a</span>
+<span class="sd">            file I/O error or invalid attribute.</span>
+
+<span class="sd">    .. note:: **Absolute and relative paths with PyTecplot**</span>
+
+<span class="sd">        Unless file paths are absolute, saving and loading files will be</span>
+<span class="sd">        relative to the current working directory of the parent process. This</span>
+<span class="sd">        is different when running the PyTecplot script in batch mode and when</span>
+<span class="sd">        running in connected mode with `tecplot.session.connect()`. In batch</span>
+<span class="sd">        mode, paths will be relative to Python&#39;s current working directory as</span>
+<span class="sd">        obtained by :func:`os.getcwd()`. When connected to an instance of</span>
+<span class="sd">        Tecplot 360, paths will be relative to Tecplot 360&#39;s&#39; start-up folder</span>
+<span class="sd">        which is typically the Tecplot 360 installation &quot;bin&quot; folder.</span>
+
+<span class="sd">    Save a PostScript image of the active frame::</span>
+
+<span class="sd">        &gt;&gt;&gt; tecplot.load_layout(&#39;mylayout.lay&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; tecplot.export.save_ps(&#39;image.ps&#39;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">print_setup</span> <span class="o">=</span> <span class="n">PrintSetup</span><span class="p">()</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">palette</span> <span class="o">=</span> <span class="n">palette</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">force_extra_3d_sorting</span> <span class="o">=</span> <span class="n">force_extra_3d_sorting</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">extra_precision</span> <span class="o">=</span> <span class="n">extra_precision</span>
+    <span class="n">print_setup</span><span class="o">.</span><span class="n">resolution</span> <span class="o">=</span> <span class="n">resolution</span>
+
+    <span class="n">export_setup</span> <span class="o">=</span> <span class="n">ExportSetup</span><span class="p">()</span>
+    <span class="n">export_setup</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">export_setup</span><span class="o">.</span><span class="n">format</span> <span class="o">=</span> <span class="n">ExportFormat</span><span class="o">.</span><span class="n">PS</span>
+    <span class="n">export_setup</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span>
+    <span class="n">export_setup</span><span class="o">.</span><span class="n">render_type</span> <span class="o">=</span> <span class="n">render_type</span>
+
+    <span class="n">_do_export</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Postscript file created: &#39;</span> <span class="o">+</span> <span class="n">filename</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

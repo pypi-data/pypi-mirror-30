@@ -1,0 +1,1573 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.plot.axis &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.plot.axis</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">super</span><span class="p">,</span> <span class="nb">bytes</span>
+
+<span class="kn">import</span> <span class="nn">ctypes</span>
+
+<span class="kn">from</span> <span class="nn">six</span> <span class="kn">import</span> <span class="n">string_types</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">ArgList</span><span class="p">,</span> <span class="n">lock</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">macro</span><span class="p">,</span> <span class="n">session</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">Index</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span><span class="p">,</span> <span class="n">sv</span>
+<span class="kn">from</span> <span class="nn">.grid</span> <span class="kn">import</span> <span class="p">(</span><span class="n">GridLines</span><span class="p">,</span> <span class="n">GridLines2D</span><span class="p">,</span> <span class="n">MarkerGridLine</span><span class="p">,</span> <span class="n">MarkerGridLine2D</span><span class="p">,</span>
+                   <span class="n">MinorGridLines</span><span class="p">,</span> <span class="n">MinorGridLines2D</span><span class="p">,</span> <span class="n">PolarAngleGridLines</span><span class="p">,</span>
+                   <span class="n">PolarAngleMarkerGridLine</span><span class="p">,</span> <span class="n">PolarAngleMinorGridLines</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">.ticks</span> <span class="kn">import</span> <span class="p">(</span><span class="n">RadialTicks</span><span class="p">,</span> <span class="n">RadialTickLabels</span><span class="p">,</span> <span class="n">TickLabels2D</span><span class="p">,</span> <span class="n">TickLabels3D</span><span class="p">,</span>
+                    <span class="n">Ticks2D</span><span class="p">,</span> <span class="n">Ticks3D</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">.title</span> <span class="kn">import</span> <span class="p">(</span><span class="n">Axis2DTitle</span><span class="p">,</span> <span class="n">DataAxis2DTitle</span><span class="p">,</span> <span class="n">DataAxis3DTitle</span><span class="p">,</span>
+                    <span class="n">RadialAxisTitle</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">_NonCartesianPlotTypeAxis</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Axes for non-cartesian plot types do not have a &#39;consider_blanking&#39;</span>
+<span class="sd">       parameter for fit_range() and fit_range_to_nice()&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">fit_range</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set range of axis to variable minimum and maximum.</span>
+
+<span class="sd">        .. note:: If the axis dependency is not `Independent`, then this action</span>
+<span class="sd">            may also affect the range on another axis.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`: Internal error.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.fit_range()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_view_action</span><span class="p">(</span><span class="n">View</span><span class="o">.</span><span class="n">AxisFit</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">fit_range_to_nice</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set range of axis to nice values near variable minimum and maximum.</span>
+
+<span class="sd">        This method resets the range to equal the minimum and maximum of the</span>
+<span class="sd">        data being plotted, but makes the axis values &quot;nice&quot; by setting labels</span>
+<span class="sd">        to have the smallest number of significant digits possible,</span>
+
+<span class="sd">        .. note:: If the axis dependency is not independent then this method</span>
+<span class="sd">            may also affect the range on another axis.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`: Internal error.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.fit_range_to_nice()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_view_action</span><span class="p">(</span><span class="n">View</span><span class="o">.</span><span class="n">AxisNiceFit</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">Axis</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">axes</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">axes</span> <span class="o">=</span> <span class="n">axes</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sv_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sv_detail</span> <span class="o">=</span> <span class="n">Axis</span><span class="o">.</span><span class="n">_sv_axis_detail</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">kw</span> <span class="o">=</span> <span class="n">axes</span><span class="o">.</span><span class="n">_style_attrs</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">kw</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">axes</span><span class="o">.</span><span class="n">_sv</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sv_detail</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_sv_axis_detail</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+            <span class="n">svname</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">sv</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+            <span class="n">svdetail</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">sv</span><span class="p">,</span> <span class="n">name</span><span class="o">+</span><span class="s1">&#39;DETAIL&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">_tr</span> <span class="o">=</span> <span class="p">{</span><span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">:</span> <span class="s1">&#39;X&#39;</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">:</span> <span class="s1">&#39;Y&#39;</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Z</span><span class="p">:</span> <span class="s1">&#39;Z&#39;</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">R</span><span class="p">:</span> <span class="s1">&#39;R&#39;</span><span class="p">,</span>
+                   <span class="n">sv</span><span class="o">.</span><span class="n">THETA</span><span class="p">:</span> <span class="s1">&#39;THETA&#39;</span><span class="p">}</span>
+            <span class="n">_tr_detail</span> <span class="o">=</span> <span class="p">{</span><span class="n">sv</span><span class="o">.</span><span class="n">X</span><span class="p">:</span> <span class="n">sv</span><span class="o">.</span><span class="n">XDETAIL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Y</span><span class="p">:</span> <span class="n">sv</span><span class="o">.</span><span class="n">YDETAIL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">Z</span><span class="p">:</span> <span class="n">sv</span><span class="o">.</span><span class="n">ZDETAIL</span><span class="p">,</span>
+                          <span class="n">sv</span><span class="o">.</span><span class="n">R</span><span class="p">:</span> <span class="n">sv</span><span class="o">.</span><span class="n">RDETAIL</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">THETA</span><span class="p">:</span> <span class="n">sv</span><span class="o">.</span><span class="n">THETADETAIL</span><span class="p">}</span>
+            <span class="n">svdetail</span> <span class="o">=</span> <span class="n">_tr_detail</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+            <span class="n">svname</span> <span class="o">=</span> <span class="n">name</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">_tr</span><span class="p">[</span><span class="n">svname</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">name</span><span class="p">,</span> <span class="n">svname</span><span class="p">,</span> <span class="n">svdetail</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">that</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">name</span> <span class="ow">and</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">axes</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">axes</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">that</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_view_action</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">,</span> <span class="n">consider_blanking</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Internal implementation for all view actions which take a single</span>
+<span class="sd">        consider blanking parameter.&quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arg_list</span><span class="p">:</span>
+                <span class="n">arg_list</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VIEWOP</span><span class="p">]</span> <span class="o">=</span> <span class="n">action</span>
+                <span class="n">arg_list</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">AXIS</span><span class="p">]</span> <span class="o">=</span> <span class="nb">ord</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="n">arg_list</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">AXISNUM</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="n">consider_blanking</span><span class="p">:</span>
+                    <span class="n">arg_list</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">CONSIDERBLANKING</span><span class="p">]</span> <span class="o">=</span> <span class="bp">True</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ViewX</span><span class="p">(</span><span class="n">arg_list</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable drawing of this axis.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWAXIS</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWAXIS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">min</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Lower bound of this axis&#39; range.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.min = 0.0</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">RANGEMIN</span><span class="p">)</span>
+
+    <span class="nd">@min.setter</span>
+    <span class="k">def</span> <span class="nf">min</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">RANGEMIN</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">max</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Upper bound of this axis&#39; range.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.max = 1.0</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">RANGEMAX</span><span class="p">)</span>
+
+    <span class="nd">@max.setter</span>
+    <span class="k">def</span> <span class="nf">max</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">RANGEMAX</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">ticks</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis major and minor ticks style control.</span>
+
+<span class="sd">        :type: `Ticks2D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.ticks.line_thickness = 0.8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Ticks2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">tick_labels</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis ticks labels style control.</span>
+
+<span class="sd">        :type: `TickLabels2D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.tick_labels.show = False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">TickLabels2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">grid_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Major grid lines style control.</span>
+
+<span class="sd">        :type: `GridLines2D`</span>
+
+<span class="sd">        Major grid lines are attached to the locations of the major ticks. See</span>
+<span class="sd">        `minor_grid_lines &lt;XYLineAxis.minor_grid_lines&gt;` for lines attached to</span>
+<span class="sd">        minor ticks. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.grid_lines.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">GridLines2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">minor_grid_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Minor grid lines style control.</span>
+
+<span class="sd">        :type: `MinorGridLines2D`</span>
+
+<span class="sd">        Minor grid lines are attached to the locations of the minor ticks.</span>
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.minor_grid_lines.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">MinorGridLines2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">title</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis title.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        This is the primary label for the axis and usually includes units::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.title.text = &#39;distance (m)&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Axis2DTitle</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line style control.</span>
+
+<span class="sd">        :type: `Cartesian2DAxisLine`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.line_thickness = 0.6</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Cartesian2DAxisLine</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">adjust_range_to_nice</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Rounds the axis range to the nearest major axis increment.</span>
+
+<span class="sd">        This method resets the axis-line label values such that all</span>
+<span class="sd">        currently displayed label values are set to have the smallest number</span>
+<span class="sd">        of significant digits possible.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`: Internal error.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.adjust_range_to_nice()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_view_action</span><span class="p">(</span><span class="n">View</span><span class="o">.</span><span class="n">AxisMakeCurrentValuesNice</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">marker_grid_line</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Marker line to indicate a particular position along an axis.</span>
+
+<span class="sd">        :type: `MarkerGridLine2D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.marker_grid_line.show = True</span>
+<span class="sd">            &gt;&gt;&gt; axis.marker_grid_line.position = 0.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">MarkerGridLine2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">ReversibleAxis</span><span class="p">(</span><span class="n">Axis</span><span class="p">):</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">reverse</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reverse the direction of the axis scale.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.reverse = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISREVERSED</span><span class="p">)</span>
+
+    <span class="nd">@reverse.setter</span>
+    <span class="k">def</span> <span class="nf">reverse</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ISREVERSED</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">Cartesian2DAxis</span><span class="p">(</span><span class="n">Axis</span><span class="p">):</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">log_scale</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Use logarithmic scale for this axis.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.r_axis&quot; for the radial axis in polar plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.log_scale = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">CoordScale</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COORDSCALE</span><span class="p">)</span> <span class="ow">is</span> <span class="n">CoordScale</span><span class="o">.</span><span class="n">Log</span>
+
+    <span class="nd">@log_scale.setter</span>
+    <span class="k">def</span> <span class="nf">log_scale</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="n">cscale</span> <span class="o">=</span> <span class="n">CoordScale</span><span class="o">.</span><span class="n">Log</span> <span class="k">if</span> <span class="n">value</span> <span class="k">else</span> <span class="n">CoordScale</span><span class="o">.</span><span class="n">Linear</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">cscale</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COORDSCALE</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">DataAxis</span><span class="p">(</span><span class="n">Axis</span><span class="p">):</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">title</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis title.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        This is the primary label for the axis and usually includes units::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.title.text = &#39;distance (m)&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">DataAxis2DTitle</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">FieldAxis</span><span class="p">(</span><span class="n">DataAxis</span><span class="p">):</span>
+    <span class="c1"># Axes for Cartesian plot types (2D, 3D) have a consider_blanking</span>
+    <span class="c1"># parameter for fit_range()</span>
+    <span class="k">def</span> <span class="nf">fit_range</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">consider_blanking</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set range of axis to variable minimum and maximum.</span>
+
+<span class="sd">        .. note:: If the axis dependency is not `Independent`, then this action</span>
+<span class="sd">            may also affect the range on another axis.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            consider_blanking (`Boolean &lt;bool&gt;`, optional): If `True` and</span>
+<span class="sd">                blanking is enabled, the resulting view excludes blanked cells</span>
+<span class="sd">                at the edges of the plot. If `False`, then</span>
+<span class="sd">                the resulting view will ignore blanked cells at the edges of the</span>
+<span class="sd">                plot. (default: `True`)</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`: Internal error.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.fit_range()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_view_action</span><span class="p">(</span><span class="n">View</span><span class="o">.</span><span class="n">AxisFit</span><span class="p">,</span> <span class="n">consider_blanking</span><span class="p">)</span>
+
+    <span class="c1"># Axes for Cartesian plot types (2D, 3D) have a consider_blanking</span>
+    <span class="c1"># parameter for fit_range_to_nice().</span>
+    <span class="k">def</span> <span class="nf">fit_range_to_nice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">consider_blanking</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set range of axis to nice values near variable minimum and maximum.</span>
+
+<span class="sd">        This method resets the range to equal the minimum and maximum of the</span>
+<span class="sd">        data being plotted, but makes the axis values &quot;nice&quot; by setting labels</span>
+<span class="sd">        to have the smallest number of significant digits possible,</span>
+
+<span class="sd">        .. note:: If the axis dependency is not independent then this method</span>
+<span class="sd">            may also affect the range on another axis.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            consider_blanking (`Boolean &lt;bool&gt;`, optional): If `True` and</span>
+<span class="sd">                blanking is enabled, the resulting view excludes blanked cells</span>
+<span class="sd">                at the edges of the plot. If `False`, then</span>
+<span class="sd">                the resulting view will ignore blanked cells at the edges of the</span>
+<span class="sd">                plot. (default: `True`)</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`: Internal error.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.fit_range_to_nice()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_view_action</span><span class="p">(</span><span class="n">View</span><span class="o">.</span><span class="n">AxisNiceFit</span><span class="p">,</span> <span class="n">consider_blanking</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">variable</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `Variable` assigned to this axis.</span>
+
+<span class="sd">        :type: `Variable`</span>
+
+<span class="sd">        This is the spatial variable associated with this axis</span>
+<span class="sd">        and is usually one of ``(X, Y, Z)``. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">            &gt;&gt;&gt; fr = tp.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; ds = fr.dataset</span>
+<span class="sd">            &gt;&gt;&gt; axes = fr.plot().axes</span>
+<span class="sd">            &gt;&gt;&gt; axes.x_axis.variable.name, axes.y_axis.variable.name</span>
+<span class="sd">            (&#39;X&#39;, &#39;Y&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; axes.x_axis.variable = ds.variable(&#39;U&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; axes.y_axis.variable = ds.variable(&#39;V&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; axes.x_axis.variable.name, axes.y_axis.variable.name</span>
+<span class="sd">            (&#39;U&#39;, &#39;V&#39;)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">ds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span>
+        <span class="k">return</span> <span class="n">ds</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">variable_index</span><span class="p">)</span>
+
+    <span class="nd">@variable.setter</span>
+    <span class="k">def</span> <span class="nf">variable</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">v</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">variable_index</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">index</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">variable_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Index of the `Variable` assigned to this axis.</span>
+
+<span class="sd">        :type: `Index` (zero-based)</span>
+
+<span class="sd">        Example usage, interchanging the (x, y) axes::</span>
+
+<span class="sd">            &gt;&gt;&gt; v0 = plot.axes.x_axis.variable_index</span>
+<span class="sd">            &gt;&gt;&gt; v1 = plot.axes.y_axis.variable_index</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.variable_index = v1</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.y_axis.variable_index = v0</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Index</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VARNUM</span><span class="p">)</span>
+
+    <span class="nd">@variable_index.setter</span>
+    <span class="k">def</span> <span class="nf">variable_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Index</span><span class="p">(</span><span class="n">i</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">VARNUM</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">IndexedLineAxis</span><span class="p">(</span><span class="n">DataAxis</span><span class="p">,</span> <span class="n">Cartesian2DAxis</span><span class="p">,</span> <span class="n">ReversibleAxis</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">axes</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">Index</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">axes</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">offset1</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">that</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">index</span> <span class="ow">and</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">name</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">axes</span> <span class="o">==</span> <span class="n">that</span><span class="o">.</span><span class="n">axes</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">that</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">that</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">PolarLineAxis</span><span class="p">(</span><span class="n">DataAxis</span><span class="p">,</span> <span class="n">ReversibleAxis</span><span class="p">,</span> <span class="n">_NonCartesianPlotTypeAxis</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">reset_to_entire_circle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the range of Theta to encompass an entire circle.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.r_axis.reset_to_entire_circle()</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            `TecplotSystemError`: Internal error.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_view_action</span><span class="p">(</span><span class="n">View</span><span class="o">.</span><span class="n">AxisResetToEntireCircle</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line style control.</span>
+
+<span class="sd">        :type: `AxisLine2D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.r_axis.line.line_thickness = 0.6</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.line.line_thickness = 0.6</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">AxisLine2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">origin</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Value at the origin of the axis.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            # value at center of plot equal to 10</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.r_axis.origin = 10</span>
+<span class="sd">            # rotate theta axis 45 degrees clockwise</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.origin = 45</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">VALUEATORIGIN</span><span class="p">)</span>
+
+    <span class="nd">@origin.setter</span>
+    <span class="k">def</span> <span class="nf">origin</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">VALUEATORIGIN</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">clip_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Do not show data outside the axes area.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.clip_data = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">CLIPDATA</span><span class="p">)</span>
+
+    <span class="nd">@clip_data.setter</span>
+    <span class="k">def</span> <span class="nf">clip_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">CLIPDATA</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Cartesian2DFieldAxis"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.Cartesian2DFieldAxis">[docs]</a><span class="k">class</span> <span class="nc">Cartesian2DFieldAxis</span><span class="p">(</span><span class="n">FieldAxis</span><span class="p">,</span> <span class="n">Cartesian2DAxis</span><span class="p">,</span> <span class="n">ReversibleAxis</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;X or Y axis for 2D field plots.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 18-24,26-33</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, AxisMode, AxisTitleMode</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;HeatExchanger.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        plot = frame.plot(PlotType.Cartesian2D)</span>
+
+<span class="sd">        plot.show_contour = True</span>
+
+<span class="sd">        plot.axes.axis_mode = AxisMode.Independent</span>
+<span class="sd">        plot.axes.viewport.right = 75</span>
+<span class="sd">        plot.axes.preserve_scale = False</span>
+
+<span class="sd">        xaxis = plot.axes.x_axis</span>
+<span class="sd">        xaxis.title.text = &#39;Longitudinal (m)&#39;</span>
+<span class="sd">        xaxis.title.title_mode = AxisTitleMode.UseText</span>
+<span class="sd">        xaxis.min = 3.8</span>
+<span class="sd">        xaxis.max = 5.3</span>
+<span class="sd">        xaxis.grid_lines.show = True</span>
+<span class="sd">        xaxis.grid_lines.draw_last = True</span>
+
+<span class="sd">        yaxis = plot.axes.y_axis</span>
+<span class="sd">        yaxis.title.text = &#39;Transverse (m)&#39;</span>
+<span class="sd">        yaxis.title.title_mode = AxisTitleMode.UseText</span>
+<span class="sd">        yaxis.min = 2.8</span>
+<span class="sd">        yaxis.max = 4.3</span>
+<span class="sd">        yaxis.grid_lines.show = True</span>
+<span class="sd">        yaxis.minor_grid_lines.show = True</span>
+<span class="sd">        yaxis.minor_grid_lines.draw_last = True</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_2d.png&#39;,600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_2d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="Cartesian3DFieldAxis"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.Cartesian3DFieldAxis">[docs]</a><span class="k">class</span> <span class="nc">Cartesian3DFieldAxis</span><span class="p">(</span><span class="n">FieldAxis</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;X, Y or Z axis on 3D field plots.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 18,24-36</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, Color, AxisLine3DAssignment</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;RainierElevation.lay&#39;)</span>
+<span class="sd">        tp.load_layout(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        dataset = frame.dataset</span>
+<span class="sd">        plot = frame.plot(PlotType.Cartesian3D)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        plot.show_contour = True</span>
+
+<span class="sd">        plot.axes.grid_area.filled = False</span>
+
+<span class="sd">        axes = [plot.axes.x_axis, plot.axes.y_axis, plot.axes.z_axis]</span>
+<span class="sd">        assignments = [AxisLine3DAssignment.YMinZMax,</span>
+<span class="sd">                       AxisLine3DAssignment.ZMaxXMin,</span>
+<span class="sd">                       AxisLine3DAssignment.XMaxYMin]</span>
+
+<span class="sd">        for ax, asgn in zip(axes, assignments):</span>
+<span class="sd">            ax.show = True</span>
+<span class="sd">            ax.grid_lines.show = False</span>
+<span class="sd">            ax.title.show = False</span>
+<span class="sd">            ax.line.show = False</span>
+<span class="sd">            ax.line.edge_assignment = asgn</span>
+
+<span class="sd">        plot.axes.z_axis.grid_lines.show = True</span>
+<span class="sd">        plot.axes.y_axis.min=-2000</span>
+<span class="sd">        plot.axes.y_axis.max=1000</span>
+<span class="sd">        plot.axes.x_axis.min=-9500</span>
+<span class="sd">        plot.axes.x_axis.max=-7200</span>
+<span class="sd">        plot.axes.z_axis.min=0</span>
+<span class="sd">        plot.axes.x_axis.scale_factor=1.9</span>
+
+<span class="sd">        plot.view.width = 7830</span>
+<span class="sd">        plot.view.alpha = 0</span>
+<span class="sd">        plot.view.theta = -147.5</span>
+<span class="sd">        plot.view.psi   = 70</span>
+<span class="sd">        plot.view.position = (1975, 15620, 115930)</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_3d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_3d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">title</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis title.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        This is the primary label for the axis and usually includes units::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.title.text = &#39;distance (m)&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">DataAxis3DTitle</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line style control.</span>
+
+<span class="sd">        :type: `AxisLine3D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.line.line_thickness = 0.6</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">AxisLine3D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">ticks</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis major and minor ticks style control.</span>
+
+<span class="sd">        :type: `Ticks3D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.ticks.line_thickness = 0.8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Ticks3D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">tick_labels</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis ticks labels style control.</span>
+
+<span class="sd">        :type: `TickLabels3D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.tick_labels.show = False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">TickLabels3D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">scale_factor</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Factor used for axis scaling.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        This will automatically scale the other axes if axis mode dependent. Setting the axis mode to independent allows each axis to have their own scale factor::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import AxisMode</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.axis_mode = AxisMode.Independent</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.scale_factor = 1</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.y_axis.scale_factor = 2</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.z_axis.scale_factor = 3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">style</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">GLOBALTHREED</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">AXISSCALEFACT</span><span class="p">,</span>
+                              <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_style_attrs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">style</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sv_name</span><span class="p">)</span>
+
+    <span class="nd">@scale_factor.setter</span>
+    <span class="k">def</span> <span class="nf">scale_factor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="n">style</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">(</span><span class="n">sv</span><span class="o">.</span><span class="n">GLOBALTHREED</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">AXISSCALEFACT</span><span class="p">,</span>
+                              <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_style_attrs</span><span class="p">)</span>
+        <span class="n">style</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sv_name</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">grid_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Major grid lines style control.</span>
+
+<span class="sd">        :type: `GridLines`</span>
+
+<span class="sd">        Major grid lines are attached to the locations of the major ticks. See</span>
+<span class="sd">        `minor_grid_lines &lt;Cartesian3DFieldAxis.minor_grid_lines&gt;` for lines</span>
+<span class="sd">        attached to minor ticks. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.grid_lines.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">GridLines</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">minor_grid_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Minor grid lines style control.</span>
+
+<span class="sd">        :type: `MinorGridLines`</span>
+
+<span class="sd">        Minor grid lines are attached to the locations of the minor ticks.</span>
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.minor_grid_lines.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">MinorGridLines</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">marker_grid_line</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Marker line to indicate a particular position along an axis.</span>
+
+<span class="sd">        :type: `MarkerGridLine`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.marker_grid_line.show = True</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.marker_grid_line.position = 0.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">MarkerGridLine</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="PolarAngleLineAxis"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.PolarAngleLineAxis">[docs]</a><span class="k">class</span> <span class="nc">PolarAngleLineAxis</span><span class="p">(</span><span class="n">PolarLineAxis</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Theta axis for polar plots.</span>
+
+<span class="sd">    This example manipulates both the theta and radial axes to produce a star</span>
+<span class="sd">    plot. Custom labels are created for each data point::</span>
+
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, ThetaMode, NumberFormat, AxisAlignment</span>
+
+<span class="sd">        np.random.seed(2)</span>
+<span class="sd">        npoints = 7</span>
+<span class="sd">        theta = np.linspace(0, npoints, npoints+1)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        dataset = frame.create_dataset(&#39;Data&#39;, [&#39;Magnitude&#39;, &#39;Property&#39;])</span>
+
+<span class="sd">        for i in range(3):</span>
+<span class="sd">            r = list(np.random.uniform(0.01, 0.99, npoints))</span>
+<span class="sd">            r.append(r[0])</span>
+<span class="sd">            zone = dataset.add_ordered_zone(&#39;Zone {}&#39;.format(i), (npoints+1,))</span>
+<span class="sd">            zone.values(&#39;Magnitude&#39;)[:] = r</span>
+<span class="sd">            zone.values(&#39;Property&#39;)[:] = theta</span>
+
+<span class="sd">        plot = frame.plot(PlotType.PolarLine)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.delete_linemaps()</span>
+
+<span class="sd">        for i, zone in enumerate(dataset.zones()):</span>
+<span class="sd">            lmap = plot.add_linemap(&#39;Linemap {}&#39;.format(i), zone,</span>
+<span class="sd">                                    dataset.variable(&#39;Magnitude&#39;),</span>
+<span class="sd">                                    dataset.variable(&#39;Property&#39;))</span>
+<span class="sd">            lmap.line.line_thickness = 0.8</span>
+
+<span class="sd">        r_axis = plot.axes.r_axis</span>
+<span class="sd">        r_axis.max = 1</span>
+<span class="sd">        r_axis.line.show = False</span>
+<span class="sd">        r_axis.title.position = 85</span>
+<span class="sd">        r_axis.line.alignment = AxisAlignment.WithOpposingAxisValue</span>
+<span class="sd">        r_axis.line.opposing_axis_value = 1</span>
+
+<span class="sd">        theta_axis = plot.axes.theta_axis</span>
+<span class="sd">        theta_axis.origin = 1</span>
+<span class="sd">        theta_axis.mode = ThetaMode.Arbitrary</span>
+<span class="sd">        theta_axis.min = 0</span>
+<span class="sd">        theta_axis.max = theta.max()</span>
+<span class="sd">        theta_axis.period = npoints</span>
+<span class="sd">        theta_axis.ticks.auto_spacing = False</span>
+<span class="sd">        theta_axis.ticks.spacing = 1</span>
+<span class="sd">        theta_axis.ticks.minor_num_ticks = 0</span>
+<span class="sd">        theta_axis.title.show = False</span>
+
+<span class="sd">        theta_labels = theta_axis.tick_labels.format</span>
+<span class="sd">        theta_labels.format_type = NumberFormat.CustomLabel</span>
+<span class="sd">        theta_labels.add_custom_labels(&#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;D&#39;, &#39;E&#39;, &#39;F&#39;, &#39;G&#39;)</span>
+<span class="sd">        theta_labels.custom_labels_index = 0</span>
+
+<span class="sd">        plot.view.fit()</span>
+
+<span class="sd">        tp.export.save_png(&#39;star_plot.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/star_plot.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">axes</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">axes</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">THETA</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">grid_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Theta angle major grid lines.</span>
+
+<span class="sd">        :type: `PolarAngleGridLines`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.grid_lines.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">PolarAngleGridLines</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">minor_grid_lines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Theta angle minor grid lines.</span>
+
+<span class="sd">        :type: `PolarAngleMinorGridLines`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.minor_grid_lines.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">PolarAngleMinorGridLines</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">marker_grid_line</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Theta angle marker grid line.</span>
+
+<span class="sd">        :type: `PolarAngleMarkerGridLine`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.marker_grid_line.show = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">PolarAngleMarkerGridLine</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">mode</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Units or scale used for the theta axis.</span>
+
+<span class="sd">        :type: `ThetaMode`</span>
+
+<span class="sd">        Possible values: `ThetaMode.Degrees`, `ThetaMode.Radians`,</span>
+<span class="sd">        `ThetaMode.Arbitrary`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import ThetaMode</span>
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.mode = ThetaMode.Radians</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">ThetaMode</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">THETAMODE</span><span class="p">)</span>
+
+    <span class="nd">@mode.setter</span>
+    <span class="k">def</span> <span class="nf">mode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">ThetaMode</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">THETAMODE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">period</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of (min, max) cycles to include in 360 degrees.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.period = 2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">THETAPERIOD</span><span class="p">)</span>
+
+    <span class="nd">@period.setter</span>
+    <span class="k">def</span> <span class="nf">period</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">THETAPERIOD</span><span class="p">)</span>
+
+<div class="viewcode-block" id="PolarAngleLineAxis.set_range_to_entire_circle"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.PolarAngleLineAxis.set_range_to_entire_circle">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">set_range_to_entire_circle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set theta range to entire circle.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.theta_axis.set_range_to_entire_circle()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">axis_num</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">&#39;index&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ViewAxisFitToEntireCircle</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_char</span><span class="p">(</span><span class="nb">bytes</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s1">&#39;utf-8&#39;</span><span class="p">)),</span> <span class="n">axis_num</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div></div>
+
+
+<div class="viewcode-block" id="RadialLineAxis"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.RadialLineAxis">[docs]</a><span class="k">class</span> <span class="nc">RadialLineAxis</span><span class="p">(</span><span class="n">PolarLineAxis</span><span class="p">,</span> <span class="n">Cartesian2DAxis</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The R axis for polar plots</span>
+
+<span class="sd">    See the example shown for the `theta axis &lt;PolarAngleLineAxis&gt;`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">axes</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">axes</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">R</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">title</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis title.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        This is the primary label for the axis and usually includes units::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.r_axis.title.text = &#39;distance (m)&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">RadialAxisTitle</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Radial axis line style control.</span>
+
+<span class="sd">        :type: `RadialAxisLine2D`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.r_axis.line.line_thickness = 0.6</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">RadialAxisLine2D</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">ticks</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis major and minor ticks style control.</span>
+
+<span class="sd">        :type: `RadialTicks`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.r_axis.ticks.line_thickness = 0.8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">RadialTicks</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">tick_labels</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis ticks labels style control.</span>
+
+<span class="sd">        :type: `RadialTickLabels`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.r_axis.tick_labels.show = False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">RadialTickLabels</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SketchAxis"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.SketchAxis">[docs]</a><span class="k">class</span> <span class="nc">SketchAxis</span><span class="p">(</span><span class="n">Cartesian2DAxis</span><span class="p">,</span> <span class="n">_NonCartesianPlotTypeAxis</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;X or Y axis for sketch plots.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 11-15,17-18</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType</span>
+
+<span class="sd">        plot = tp.active_frame().plot(PlotType.Sketch)</span>
+
+<span class="sd">        viewport = plot.axes.viewport</span>
+<span class="sd">        viewport.left = 10</span>
+<span class="sd">        viewport.right = 90</span>
+<span class="sd">        viewport.bottom = 10</span>
+
+<span class="sd">        xaxis = plot.axes.x_axis</span>
+<span class="sd">        xaxis.show = True</span>
+<span class="sd">        xaxis.min = 0</span>
+<span class="sd">        xaxis.max = 360</span>
+<span class="sd">        xaxis.title.text = &#39;Angle (Degrees)&#39;</span>
+
+<span class="sd">        xaxis.ticks.auto_spacing = False</span>
+<span class="sd">        xaxis.ticks.spacing = 60</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_sketch.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_sketch.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="XYLineAxis"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.XYLineAxis">[docs]</a><span class="k">class</span> <span class="nc">XYLineAxis</span><span class="p">(</span><span class="n">IndexedLineAxis</span><span class="p">,</span> <span class="n">_NonCartesianPlotTypeAxis</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;X or Y axis for line plots.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 18-22,24,25,27,28</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;Rainfall.dat&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        plot = tp.active_frame().plot(PlotType.XYLine)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        for i in range(2):</span>
+<span class="sd">            lmap = plot.linemap(i)</span>
+<span class="sd">            lmap.show = True</span>
+<span class="sd">            lmap.line.line_thickness = 0.6</span>
+<span class="sd">            lmap.y_axis_index = i</span>
+
+<span class="sd">            yax = plot.axes.y_axis(i)</span>
+<span class="sd">            yax.line.color = lmap.line.color</span>
+<span class="sd">            yax.title.color = lmap.line.color</span>
+<span class="sd">            yax.tick_labels.color = lmap.line.color</span>
+<span class="sd">            yax.line.line_thickness = 0.6</span>
+<span class="sd">            if i == 0:</span>
+<span class="sd">                yax.grid_lines.show = True</span>
+<span class="sd">                yax.grid_lines.color = lmap.line.color</span>
+<span class="sd">            elif i == 1:</span>
+<span class="sd">                yax.minor_grid_lines.show = True</span>
+<span class="sd">                yax.minor_grid_lines.color = lmap.line.color</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_line.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_line.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span></div>
+
+
+<span class="k">class</span> <span class="nc">AxisLine</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">axis</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">axis</span> <span class="o">=</span> <span class="n">axis</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">axis</span><span class="o">.</span><span class="n">_sv</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">AXISLINE</span><span class="p">,</span> <span class="o">**</span><span class="n">axis</span><span class="o">.</span><span class="n">_style_attrs</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Draw the primary axis line on the plot.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.show = False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@show.setter</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">show</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">show</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOW</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Color of the axis line.</span>
+
+<span class="sd">        :type: `Color`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import Color</span>
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.color = Color.Blue</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">Color</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@color.setter</span>
+    <span class="k">def</span> <span class="nf">color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">Color</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">COLOR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Width of the axis line to be drawn.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.line_thickness = 0.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+    <span class="nd">@line_thickness.setter</span>
+    <span class="k">def</span> <span class="nf">line_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">LINETHICKNESS</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="AxisLine2D"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.AxisLine2D">[docs]</a><span class="k">class</span> <span class="nc">AxisLine2D</span><span class="p">(</span><span class="n">AxisLine</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Graduated axis line for 2D plots.</span>
+
+<span class="sd">    Cartesian *(x, y)* plots use an extension of this class</span>
+<span class="sd">    (`Cartesian2DAxisLine`). Polar plots use this class directly.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 20-23, 38</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.tecutil import sv</span>
+<span class="sd">        from tecplot.constant import PlotType, Color, AxisAlignment</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;CircularContour.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        plot = tp.active_frame().plot(PlotType.Cartesian2D)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.contour(0).colormap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+
+<span class="sd">        plot.axes.preserve_scale = True</span>
+<span class="sd">        plot.axes.x_axis.fit_range()</span>
+
+<span class="sd">        for ax in plot.axes:</span>
+<span class="sd">            line = ax.line</span>
+<span class="sd">            line.color = Color.DeepRed</span>
+<span class="sd">            line.alignment = AxisAlignment.WithOpposingAxisValue</span>
+<span class="sd">            line.opposing_axis_value = 0</span>
+
+<span class="sd">            ax.title.position = 85</span>
+
+
+<span class="sd">        fr = tp.active_page().add_frame()</span>
+<span class="sd">        polar_plot = fr.plot(PlotType.PolarLine)</span>
+<span class="sd">        polar_plot.activate()</span>
+
+<span class="sd">        fr.transparent = True</span>
+<span class="sd">        polar_plot.delete_linemaps()</span>
+
+<span class="sd">        polar_plot.axes.r_axis.show = False</span>
+<span class="sd">        polar_plot.axes.r_axis.min = 0.83</span>
+<span class="sd">        t_line = polar_plot.axes.theta_axis.line</span>
+<span class="sd">        t_line.line_thickness = 0.6</span>
+
+<span class="sd">        # these values obtained using 360 EX &amp; Save stylesheet</span>
+<span class="sd">        polar_plot.view.magnification = .232</span>
+<span class="sd">        polar_plot.view.extents = (-2.30,  -2.14, 2.57, 2.17)</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_line_2d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_line_2d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">offset</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line placement with respect to the grid border.</span>
+
+<span class="sd">        :type: `float` (percent of frame height)</span>
+
+<span class="sd">        This is the offset from the grid border-aligned position dictated by</span>
+<span class="sd">        properties such as `AxisLine2D.alignment`. The example moves the axis</span>
+<span class="sd">        line into the plot by 5% of the frame height::</span>
+
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.offset = -5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">OFFSET</span><span class="p">)</span>
+
+    <span class="nd">@offset.setter</span>
+    <span class="k">def</span> <span class="nf">offset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">OFFSET</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">opposing_axis_value</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line placement with respect to the opposing axis.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        The axis alignment must be set to `AxisAlignment.WithOpposingAxisValue`</span>
+<span class="sd">        to make this property relevant::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import AxisAlignment</span>
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.alignment = AxisAlignment.WithOpposingAxisValue</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.opposing_axis_value = 0.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">OPPOSINGAXISVALUE</span><span class="p">)</span>
+
+    <span class="nd">@opposing_axis_value.setter</span>
+    <span class="k">def</span> <span class="nf">opposing_axis_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">OPPOSINGAXISVALUE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">alignment</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line placement.</span>
+
+<span class="sd">        :type: `AxisAlignment`</span>
+
+<span class="sd">        Possible values: `WithViewport`, `WithOpposingAxisValue`,</span>
+<span class="sd">        `WithGridMin`, `WithGridMax`, `WithGridAreaTop`, `WithGridAreaBottom`,</span>
+<span class="sd">        `WithGridAreaLeft` or `WithGridAreaRight`.</span>
+
+<span class="sd">        Not all values will be available for every plot type. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import AxisAlignment</span>
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.alignment = AxisAlignment.WithGridMin</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">AxisAlignment</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">AXISALIGNMENT</span><span class="p">)</span>
+
+    <span class="nd">@alignment.setter</span>
+    <span class="k">def</span> <span class="nf">alignment</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">AxisAlignment</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">AXISALIGNMENT</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Cartesian2DAxisLine"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.Cartesian2DAxisLine">[docs]</a><span class="k">class</span> <span class="nc">Cartesian2DAxisLine</span><span class="p">(</span><span class="n">AxisLine2D</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Axis line for 2D field plots.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 20-23</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.tecutil import sv</span>
+<span class="sd">        from tecplot.constant import PlotType, Color, AxisAlignment</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;CircularContour.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(infile)</span>
+
+<span class="sd">        plot = tp.active_frame().plot(PlotType.Cartesian2D)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.contour(0).colormap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+
+<span class="sd">        plot.axes.preserve_scale = True</span>
+<span class="sd">        plot.axes.x_axis.fit_range()</span>
+
+<span class="sd">        for ax in plot.axes:</span>
+<span class="sd">            line = ax.line</span>
+<span class="sd">            line.color = Color.DeepRed</span>
+<span class="sd">            line.alignment = AxisAlignment.WithOpposingAxisValue</span>
+<span class="sd">            line.opposing_axis_value = 0</span>
+
+<span class="sd">            ax.title.position = 85</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_line_cartesian2d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_line_cartesian2d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line placement with respect to the viewport.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        The axis alignment must be set to `AxisAlignment.WithViewport`</span>
+<span class="sd">        to make this property relevant::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import AxisAlignment</span>
+<span class="sd">            &gt;&gt;&gt; # get axis via &quot;plot.axes.x_axis(0)&quot; for line plots</span>
+<span class="sd">            &gt;&gt;&gt; # or &quot;plot.axes.x_axis&quot; for field or sketch plots</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.alignment = AxisAlignment.WithViewport</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.position = 0.5</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">POSITION</span><span class="p">)</span>
+
+    <span class="nd">@position.setter</span>
+    <span class="k">def</span> <span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">POSITION</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AxisLine3D"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.AxisLine3D">[docs]</a><span class="k">class</span> <span class="nc">AxisLine3D</span><span class="p">(</span><span class="n">AxisLine</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;X, Y or Z axis for 3D field plots.</span>
+
+<span class="sd">    This represents the line along which ticks and labels are drawn. The color</span>
+<span class="sd">    affects the line itself and the associated tick marks but not labels or</span>
+<span class="sd">    axis titles::</span>
+
+<span class="sd">        from os import path</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, Color</span>
+
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        infile = path.join(examples_dir, &#39;SimpleData&#39;, &#39;Sphere.lpk&#39;)</span>
+<span class="sd">        dataset = tp.load_layout(infile)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        plot = frame.plot()</span>
+
+<span class="sd">        plot.show_mesh = False</span>
+<span class="sd">        plot.axes.grid_area.fill_color = Color.Grey</span>
+
+<span class="sd">        for ax in [plot.axes.x_axis, plot.axes.y_axis, plot.axes.z_axis]:</span>
+<span class="sd">            ax.show = True</span>
+<span class="sd">            ax.grid_lines.show = False</span>
+<span class="sd">            ax.line.color = Color.Cyan</span>
+<span class="sd">            ax.line.line_thickness = 0.2</span>
+<span class="sd">            ax.line.show_on_opposite_edge = True</span>
+
+<span class="sd">        plot.view.fit()</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_line_3d.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_line_3d.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_on_opposite_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Draw axis line on opposite edge of axes box.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; plot.axes.x_axis.line.show_on_opposite_edge = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWOPPOSITEEDGE</span><span class="p">)</span>
+
+    <span class="nd">@show_on_opposite_edge.setter</span>
+    <span class="k">def</span> <span class="nf">show_on_opposite_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWOPPOSITEEDGE</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">edge_assignment</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Edge to use when drawing the primary axis line.</span>
+
+<span class="sd">        :type: `AxisLine3DAssignment` or `None`</span>
+
+<span class="sd">        Possible values: `AxisLine3DAssignment.Automatic` (aliased to `None`),</span>
+<span class="sd">        `YMinZMin`, `YMaxZMin`, `YMinZMax`, `YMaxZMax`.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import AxisLine3DAssignment</span>
+<span class="sd">            &gt;&gt;&gt; axis.line.edge_assignment = AxisLine3DAssignment.YMinZMin</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">style</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_style_attrs</span><span class="p">)</span>
+        <span class="n">auto_reset</span> <span class="o">=</span> <span class="n">style</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">THREEDAXIS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGEAUTORESET</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">auto_reset</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">AxisLine3DAssignment</span><span class="o">.</span><span class="n">Automatic</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">AxisLine3DAssignment</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGE</span><span class="p">)</span>
+
+    <span class="nd">@edge_assignment.setter</span>
+    <span class="k">def</span> <span class="nf">edge_assignment</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="n">style</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">Style</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_style_attrs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">None</span><span class="p">,</span> <span class="n">AxisLine3DAssignment</span><span class="o">.</span><span class="n">Automatic</span><span class="p">):</span>
+            <span class="n">style</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="bp">True</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">THREEDAXIS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGEAUTORESET</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">style</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="bp">False</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">THREEDAXIS</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGEAUTORESET</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">AxisLine3DAssignment</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">EDGE</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="RadialAxisLine2D"><a class="viewcode-back" href="../../../api/tecplot.axes.html#tecplot.plot.RadialAxisLine2D">[docs]</a><span class="k">class</span> <span class="nc">RadialAxisLine2D</span><span class="p">(</span><span class="n">AxisLine2D</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Radial axis line for polar plots.</span>
+
+<span class="sd">    .. code-block:: python</span>
+<span class="sd">        :emphasize-lines: 26-27</span>
+
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import PlotType, Color</span>
+
+<span class="sd">        npoints = 300</span>
+<span class="sd">        r = np.linspace(0, 2000, npoints)</span>
+<span class="sd">        theta = np.linspace(0, 700, npoints)</span>
+
+<span class="sd">        frame = tp.active_frame()</span>
+<span class="sd">        dataset = frame.create_dataset(&#39;Data&#39;, [&#39;R&#39;, &#39;Theta&#39;])</span>
+<span class="sd">        zone = dataset.add_ordered_zone(&#39;Zone&#39;, (300,))</span>
+<span class="sd">        zone.values(&#39;R&#39;)[:] = r</span>
+<span class="sd">        zone.values(&#39;Theta&#39;)[:] = theta</span>
+
+<span class="sd">        plot = frame.plot(PlotType.PolarLine)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        plot.axes.r_axis.max = np.max(r)</span>
+
+<span class="sd">        plot.delete_linemaps()</span>
+<span class="sd">        lmap = plot.add_linemap(&#39;Linemap&#39;, zone, dataset.variable(&#39;R&#39;),</span>
+<span class="sd">                                dataset.variable(&#39;Theta&#39;))</span>
+<span class="sd">        lmap.line.line_thickness = 0.8</span>
+
+<span class="sd">        raxis = plot.axes.r_axis</span>
+<span class="sd">        raxis.line.show_both_directions = True</span>
+<span class="sd">        raxis.line.show_perpendicular = True</span>
+
+<span class="sd">        plot.view.fit()</span>
+
+<span class="sd">        tp.export.save_png(&#39;axis_line_radial.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/axis_line_radial.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_both_directions</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mirror the radial axis 180 degrees from the primary line.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        If `RadialAxisLine2D.show_perpendicular` is `True`, this will mirror</span>
+<span class="sd">        that axis line as well resulting in four axis lines, 90 degrees apart.</span>
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; r_axis.line.show_both_directions = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWBOTHDIRECTIONS</span><span class="p">)</span>
+
+    <span class="nd">@show_both_directions.setter</span>
+    <span class="k">def</span> <span class="nf">show_both_directions</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWBOTHDIRECTIONS</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">show_perpendicular</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mirror the radial axis 90 degrees from the primary line.</span>
+
+<span class="sd">        :type: `boolean &lt;bool&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; r_axis.line.show_perpendicular = True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWPERPENDICULAR</span><span class="p">)</span>
+
+    <span class="nd">@show_perpendicular.setter</span>
+    <span class="k">def</span> <span class="nf">show_perpendicular</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">SHOWPERPENDICULAR</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">alignment</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Axis line placement.</span>
+
+<span class="sd">        :type: `AxisAlignment`</span>
+
+<span class="sd">        Possible values: `WithOpposingAxisValue`, `WithGridMin`, `WithGridMax`,</span>
+<span class="sd">        `WithSpecificAngle`, `WithGridAreaTop`, `WithGridAreaBottom`,</span>
+<span class="sd">        `WithGridAreaLeft` or `WithGridAreaRight`.</span>
+
+<span class="sd">        Not all values will be available for every plot type. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import AxisAlignment</span>
+<span class="sd">            &gt;&gt;&gt; plot.r_axis.line.alignment = AxisAlignment.WithOpposingAxisValue</span>
+<span class="sd">            &gt;&gt;&gt; plot.r_axis.line.opposing_axis_value = 45</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="n">AxisAlignment</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">AXISALIGNMENT</span><span class="p">)</span>
+
+    <span class="nd">@alignment.setter</span>
+    <span class="k">def</span> <span class="nf">alignment</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="n">AxisAlignment</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">AXISALIGNMENT</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">angle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Specific angle to place the radial axis line.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        The alignment must be set to `AxisAlignment.WithSpecificAngle`::</span>
+
+<span class="sd">            &gt;&gt;&gt; from tecplot.constant import AxisAlignment</span>
+<span class="sd">            &gt;&gt;&gt; plot.r_axis.line.alignment = AxisAlignment.WithSpecificAngle</span>
+<span class="sd">            &gt;&gt;&gt; plot.r_axis.line.angle = 45</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_style</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">sv</span><span class="o">.</span><span class="n">ANGLE</span><span class="p">)</span>
+
+    <span class="nd">@angle.setter</span>
+    <span class="k">def</span> <span class="nf">angle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_style</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">sv</span><span class="o">.</span><span class="n">ANGLE</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

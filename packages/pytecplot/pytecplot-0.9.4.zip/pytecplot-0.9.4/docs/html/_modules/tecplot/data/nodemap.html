@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.nodemap &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.nodemap</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">itertools</span> <span class="kn">as</span> <span class="nn">it</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span>  <span class="nn">contextlib</span> <span class="kn">import</span> <span class="n">contextmanager</span>
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="n">addressof</span><span class="p">,</span> <span class="n">cast</span><span class="p">,</span> <span class="n">c_int32</span><span class="p">,</span> <span class="n">c_int64</span><span class="p">,</span> <span class="n">c_void_p</span><span class="p">,</span> <span class="n">POINTER</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">_tecutil_connector</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">session</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">array_to_str</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span><span class="p">,</span> <span class="n">filled_slice</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">Elementmap</span><span class="p">(</span><span class="n">c_void_p</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Nodemap reverse look-up.&quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">zone</span> <span class="o">=</span> <span class="n">zone</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">())</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_native_reference</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeToElemMapGetReadableRef</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">num_elements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeToElemMapGetNumElems</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">offset</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeToElemMapGetElem</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">offset</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+
+
+<div class="viewcode-block" id="Nodemap"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Nodemap">[docs]</a><span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Nodemap</span><span class="p">(</span><span class="n">c_void_p</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Connectivity list definition and control for classic FE zones.</span>
+
+<span class="sd">    A nodemap holds the connectivity between nodes and elements for classic</span>
+<span class="sd">    finite-element zones. It is nominally a two-dimensionaly array of shape</span>
+<span class="sd">    :math:`(N_e, N_{npe})` where :math:`N_e` is the number of elements and</span>
+<span class="sd">    :math:`N_{npe}` is the number of nodes per element. The nodemap interface</span>
+<span class="sd">    has flat-array access through the `Nodemap.array` property as well as</span>
+<span class="sd">    reverse look-up with `Nodemap.num_elements()` and `Nodemap.element()`.</span>
+
+<span class="sd">    The nodemap behaves mostly like a two-dimensional array and can be treated</span>
+<span class="sd">    as such::</span>
+
+<span class="sd">        &gt;&gt;&gt; nodemap = dataset.zone(&#39;My Zone&#39;).nodemap</span>
+<span class="sd">        &gt;&gt;&gt; print(&#39;nodes in the first element:&#39;, nodemap[0])</span>
+<span class="sd">        nodes in the first element: [0, 1, 2, 3]</span>
+<span class="sd">        &gt;&gt;&gt; print(nodemap[:3])</span>
+<span class="sd">        [[0, 1, 2, 3], [2, 3, 4, 5], [4, 5, 6, 7]]</span>
+<span class="sd">        &gt;&gt;&gt; nodemap[0] = [6, 7, 8, 9]</span>
+<span class="sd">        &gt;&gt;&gt; print(nodemap[0])</span>
+<span class="sd">        [6, 7, 8, 9]</span>
+
+<span class="sd">    Just for clarity, the nodemap indexing is by element first, then offset</span>
+<span class="sd">    within that element::</span>
+
+<span class="sd">        &gt;&gt;&gt; element = 6</span>
+<span class="sd">        &gt;&gt;&gt; offset = 2</span>
+<span class="sd">        &gt;&gt;&gt; node = nodemap[element][offset]</span>
+<span class="sd">        &gt;&gt;&gt; print(node)</span>
+<span class="sd">        21</span>
+
+<span class="sd">    Setting node indices must be done for an entire element because getting</span>
+<span class="sd">    values out of the nodemap and into Python always creates a copy. For</span>
+<span class="sd">    example, **this will not work**::</span>
+
+<span class="sd">        &gt;&gt;&gt; nodemap = dataset.zone(&#39;My Zone&#39;).nodemap</span>
+<span class="sd">        &gt;&gt;&gt; # Trying to set the 3rd node of the element 10</span>
+<span class="sd">        &gt;&gt;&gt; nodemap[10][2] = 5  # Error: nodemap[10] returns a copy</span>
+
+<span class="sd">    To modify a single node in a nodemap, it is neccessary to do a round trip</span>
+<span class="sd">    like so::</span>
+
+<span class="sd">        nodemap = dataset.zone(&#39;My Zone&#39;).nodemap</span>
+<span class="sd">        &gt;&gt;&gt; nodes = nodemap[10]</span>
+<span class="sd">        &gt;&gt;&gt; nodes[2] = 5</span>
+<span class="sd">        &gt;&gt;&gt; nodemap[10] = nodes  # OK: setting whole element at a time</span>
+<span class="sd">        &gt;&gt;&gt; print(nodemap[10])</span>
+<span class="sd">        [20, 21, 5, 22]</span>
+
+<span class="sd">    The following script creates a quad of two triangles from scratch using the</span>
+<span class="sd">    PyTecplot low-level data creation interface. The general steps are:</span>
+
+<span class="sd">    1. Setup the data</span>
+<span class="sd">    2. Create the tecplot dataset and variables</span>
+<span class="sd">    3. Create the zone</span>
+<span class="sd">    4. Set the node locations and connectivity lists</span>
+<span class="sd">    5. Set the (scalar) data</span>
+<span class="sd">    6. Write out data file</span>
+<span class="sd">    7. Adjust plot style and export image</span>
+
+<span class="sd">    The data created looks like this:</span>
+
+<span class="sd">    .. code-block:: none</span>
+
+<span class="sd">        Node positions (x,y,z):</span>
+
+<span class="sd">                       (1,1,1)</span>
+<span class="sd">                      3</span>
+<span class="sd">                     / \</span>
+<span class="sd">                    /   \</span>
+<span class="sd">         (0,1,.5)  2-----1  (1,0,.5)</span>
+<span class="sd">                    \   /</span>
+<span class="sd">                     \ /</span>
+<span class="sd">                      0</span>
+<span class="sd">                       (0,0,0)</span>
+
+<span class="sd">    Breaking up the two triangular elements, the faces look like this. Notice the</span>
+<span class="sd">    first element (index: 0) is on the bottom:</span>
+
+<span class="sd">    .. code-block:: none</span>
+
+<span class="sd">        Element 1 Faces:</span>
+<span class="sd">                           *</span>
+<span class="sd">           (nodes 3-2)  1 / \ 0  (nodes 1-3)</span>
+<span class="sd">                         /   \</span>
+<span class="sd">                        *-----*</span>
+<span class="sd">                           2</span>
+<span class="sd">                            (nodes 2-1)</span>
+
+<span class="sd">        Element 0 Faces:</span>
+<span class="sd">                            (nodes 1-2)</span>
+<span class="sd">                           1</span>
+<span class="sd">                        *-----*</span>
+<span class="sd">                         \   /</span>
+<span class="sd">           (nodes 2-0)  2 \ / 0  (nodes 0-1)</span>
+<span class="sd">                           *</span>
+
+<span class="sd">    The nodes are created as a list of :math:`(x, y, z)` positions::</span>
+
+<span class="sd">        [(x0, y0, z0), (x1, y1, z1)...]</span>
+
+<span class="sd">    which are transposed to lists of :math:`x`, :math:`y` and :math:`z`-positions::</span>
+
+<span class="sd">        [(x0, x1, x2...), (y0, y1, y2...)...]</span>
+
+<span class="sd">    and passed to the :math:`(x, y, z)` arrays. The nodemap, or connectivity list,</span>
+<span class="sd">    is given as an array of dimensions :math:`(N, D)` where :math:`N` is the number</span>
+<span class="sd">    of elements and :math:`D` is the number of nodes per element. The order of the</span>
+<span class="sd">    node locations determines the indices used when specifying the connectivity</span>
+<span class="sd">    list. The Nodemap can be set individually and separately or all at once as</span>
+<span class="sd">    shown here.</span>
+
+<span class="sd">    .. code-block:: python</span>
+
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        # (x, y, z) locations of nodes</span>
+<span class="sd">        nodes = (</span>
+<span class="sd">            (0, 0, 0  ), # node 0</span>
+<span class="sd">            (1, 0, 0.5), # node 1</span>
+<span class="sd">            (0, 1, 0.5), # ...</span>
+<span class="sd">            (1, 1, 1  ),</span>
+<span class="sd">            )</span>
+
+<span class="sd">        scalar_data = [0, 1, 2, 3]</span>
+
+<span class="sd">        # Connectivity list</span>
+<span class="sd">        # (n0, n1, n2) node indexes which make up the triangles</span>
+<span class="sd">        conn = (</span>
+<span class="sd">            (0, 1, 2), # element 0 consisting of faces</span>
+<span class="sd">                       #     node connections: 0-1, 1-2, 2-0</span>
+<span class="sd">            (1, 3, 2), # element 1</span>
+<span class="sd">            )</span>
+
+<span class="sd">        # Setup dataset and zone</span>
+<span class="sd">        ds = tp.active_frame().create_dataset(&#39;Data&#39;, [&#39;x&#39;,&#39;y&#39;,&#39;z&#39;,&#39;s&#39;])</span>
+<span class="sd">        z = ds.add_fe_zone(ZoneType.FETriangle,</span>
+<span class="sd">                           name=&#39;FE Triangle Float (4,2) Nodal&#39;,</span>
+<span class="sd">                           num_points=len(nodes), num_elements=len(conn))</span>
+
+<span class="sd">        # Fill in node locations</span>
+<span class="sd">        z.values(&#39;x&#39;)[:] = [n[0] for n in nodes]</span>
+<span class="sd">        z.values(&#39;y&#39;)[:] = [n[1] for n in nodes]</span>
+<span class="sd">        z.values(&#39;z&#39;)[:] = [n[2] for n in nodes]</span>
+
+<span class="sd">        # Set the nodemap</span>
+<span class="sd">        z.nodemap[:] = conn</span>
+
+<span class="sd">        # Set the scalar data</span>
+<span class="sd">        z.values(&#39;s&#39;)[:] = scalar_data</span>
+
+<span class="sd">        ### Now we setup a nice view of the data</span>
+<span class="sd">        plot = tp.active_frame().plot(PlotType.Cartesian3D)</span>
+<span class="sd">        plot.activate()</span>
+
+<span class="sd">        plot.contour(0).colormap_name = &#39;Sequential - Yellow/Green/Blue&#39;</span>
+<span class="sd">        plot.contour(0).colormap_filter.distribution = ColorMapDistribution.Continuous</span>
+
+<span class="sd">        for ax in plot.axes:</span>
+<span class="sd">            ax.show = True</span>
+
+<span class="sd">        plot.show_mesh = False</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.show_edge = True</span>
+<span class="sd">        plot.use_translucency = True</span>
+
+<span class="sd">        fmap = plot.fieldmap(z)</span>
+<span class="sd">        fmap.surfaces.surfaces_to_plot = SurfacesToPlot.All</span>
+<span class="sd">        fmap.effects.surface_translucency = 40</span>
+
+<span class="sd">        # View parameters obtained interactively from Tecplot 360</span>
+<span class="sd">        plot.view.distance = 10</span>
+<span class="sd">        plot.view.width = 2</span>
+<span class="sd">        plot.view.psi = 80</span>
+<span class="sd">        plot.view.theta = 30</span>
+<span class="sd">        plot.view.alpha = 0</span>
+<span class="sd">        plot.view.position = (-4.2, -8.0, 2.3)</span>
+
+<span class="sd">        # Showing mesh, we can see all the individual triangles</span>
+<span class="sd">        plot.show_mesh = True</span>
+<span class="sd">        plot.fieldmap(z).mesh.line_pattern = LinePattern.Dashed</span>
+
+<span class="sd">        tp.export.save_png(&#39;fe_triangles1.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    ..  figure:: /_static/images/fe_triangles1.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">zone</span> <span class="o">=</span> <span class="n">zone</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">())</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_native_reference</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">writable</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="bp">True</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetWritableRef</span><span class="p">,</span>
+            <span class="bp">False</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetReadableRef</span><span class="p">}</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_dispatch</span><span class="p">[</span><span class="n">writable</span><span class="p">](</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_raw_pointer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">writable</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">_tecutil_connector</span><span class="o">.</span><span class="n">connected</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;raw pointer access only available in batch-mode&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="bp">True</span><span class="p">:</span> <span class="p">{</span>
+                <span class="n">c_int32</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetWritableRawPtrByRef</span><span class="p">,</span>
+                <span class="n">c_int64</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetWritableRawPtrByRef64</span><span class="p">},</span>
+            <span class="bp">False</span><span class="p">:</span> <span class="p">{</span>
+                <span class="n">c_int32</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetReadableRawPtrByRef</span><span class="p">,</span>
+                <span class="n">c_int64</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetReadableRawPtrByRef64</span><span class="p">}</span>
+            <span class="p">}</span>
+        <span class="k">return</span> <span class="n">_dispatch</span><span class="p">[</span><span class="n">writable</span><span class="p">][</span><span class="bp">self</span><span class="o">.</span><span class="n">c_type</span><span class="p">](</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_raw_array</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">writable</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="n">ptr</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_raw_pointer</span><span class="p">(</span><span class="n">writable</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">cast</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">c_type</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">size</span><span class="p">))</span><span class="o">.</span><span class="n">contents</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">array</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Flattened array accessor for this nodemap.</span>
+
+<span class="sd">        :type: 1D view of the nodemap.</span>
+
+<span class="sd">        The nodemap is normally dimensioned by :math:`(N_e, N_{npe})` where</span>
+<span class="sd">        :math:`N_e` is the number of elements and :math:`N_{npe}` is the number</span>
+<span class="sd">        of nodes per element. This property represents a flattened view into</span>
+<span class="sd">        the array which is of length :math:`N_e \times N_{npe}`. This may be</span>
+<span class="sd">        more convenient than flattening the array in your script using a</span>
+<span class="sd">        looping construct.</span>
+
+<span class="sd">        Standard Python list slicing works for both fetching values and assignments. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; nmap = dataset.zone(&#39;My Zone&#39;).nodemap</span>
+<span class="sd">            &gt;&gt;&gt; nmap.array[:] = mydata</span>
+<span class="sd">            &gt;&gt;&gt; print(nmap.array[:10])</span>
+<span class="sd">            [1, 10, 8, 0, 5, 18, 6, 12, 18, 11]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">NodemapArray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">alloc</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Allocates the internal space needed to store the Nodemap.</span>
+
+<span class="sd">        This method is used in conjunction with deferred nodemap creation and</span>
+<span class="sd">        is not needed with load-on-demand or normal zone creation methods.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeAlloc</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="n">self_addr</span> <span class="o">=</span> <span class="n">addressof</span><span class="p">(</span><span class="n">cast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">(</span><span class="n">c_int64</span><span class="p">))</span><span class="o">.</span><span class="n">contents</span><span class="p">)</span>
+        <span class="n">other_addr</span> <span class="o">=</span> <span class="n">addressof</span><span class="p">(</span><span class="n">cast</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">(</span><span class="n">c_int64</span><span class="p">))</span><span class="o">.</span><span class="n">contents</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">self_addr</span> <span class="o">==</span> <span class="n">other_addr</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_elements</span>
+
+    <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_current_index</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_current_length</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">__next__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_current_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_index</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_index</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_length</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_current_index</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_index</span>
+            <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_length</span>
+            <span class="k">raise</span> <span class="ne">StopIteration</span>
+
+    <span class="k">def</span> <span class="nf">next</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># if sys.version_info &lt; (3,)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__next__</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Nodemap.assignment"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Nodemap.assignment">[docs]</a>    <span class="nd">@contextmanager</span>
+    <span class="k">def</span> <span class="nf">assignment</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Context manager for assigning to the nodemap.</span>
+
+<span class="sd">        When setting values to the nodemap, a state change is emitted to the</span>
+<span class="sd">        engine after every statement. This can degrade performance if in the</span>
+<span class="sd">        script the nodemap is being set many times. This context provides a way</span>
+<span class="sd">        to suspend the state change notification until all assignments have</span>
+<span class="sd">        been completed. In the following example, the state change is emitted</span>
+<span class="sd">        only after the ``nodemap.assignment()`` context exits::</span>
+
+<span class="sd">            &gt;&gt;&gt; nodemap = dataset.zone(&#39;My Zone&#39;).nodemap</span>
+<span class="sd">            &gt;&gt;&gt; with nodemap.assignment():</span>
+<span class="sd">            ...     for elem, nodes in enumerate(mydata):</span>
+<span class="sd">            ...         nodemap[elem] = nodes</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">opts</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">what</span><span class="o">=</span><span class="n">StateChange</span><span class="o">.</span><span class="n">NodeMapsAltered</span><span class="p">,</span> <span class="n">zones</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">,</span>
+                    <span class="n">dataset</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">session</span><span class="o">.</span><span class="n">state_change</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">opts</span><span class="p">):</span>
+            <span class="k">yield</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shape</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Shape of the nodemap array.</span>
+
+<span class="sd">        :type: `tuple` of `integers &lt;int&gt;`</span>
+
+<span class="sd">        .. note:: This property is read-only.</span>
+
+<span class="sd">        This is defined by the zone type and is equal to :math:`(N_e, N_{npe})`</span>
+<span class="sd">        where :math:`N_e` is the number of elements and :math:`N_{npe}` is the</span>
+<span class="sd">        number of nodes per element. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(0).nodemap.shape)</span>
+<span class="sd">            (1024, 4)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_elements</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_points_per_element</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">size</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Total number of nodes stored in the nodemap array.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        .. note:: This property is read-only.</span>
+
+<span class="sd">        This is defined by the zone type and is equal to :math:`N_e \times</span>
+<span class="sd">        N_{npe}` where :math:`N_e` is the number of elements and</span>
+<span class="sd">        :math:`N_{npe}` is the number of nodes per element. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(0).nodemap.shape)</span>
+<span class="sd">            (1024, 4)</span>
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(0).nodemap.size)</span>
+<span class="sd">            4096</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_elements</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_points_per_element</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">c_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The underlying data type for this nodemap.</span>
+
+<span class="sd">        :type: One of: `ctypes.c_int32`, `ctypes.c_int64`</span>
+
+<span class="sd">        .. note:: This property is read-only.</span>
+
+<span class="sd">        This is the `ctypes` integer type used by the Tecplot Engine to store</span>
+<span class="sd">        the nodemap data. This is used internally and is not normally needed</span>
+<span class="sd">        for simple nodemap access.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_ctypes</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">OffsetDataType</span><span class="o">.</span><span class="n">OffsetDataType_32Bit</span><span class="p">:</span> <span class="n">c_int32</span><span class="p">,</span>
+            <span class="n">OffsetDataType</span><span class="o">.</span><span class="n">OffsetDataType_64Bit</span><span class="p">:</span> <span class="n">c_int64</span><span class="p">}</span>
+        <span class="n">data_type</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetRawItemType</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_ctypes</span><span class="p">[</span><span class="n">data_type</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_points_per_element</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Points per element for classic finite-element zones.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        .. note:: This property is read-only.</span>
+
+<span class="sd">        The number of points (also known as nodes) per finite-element is</span>
+<span class="sd">        determined from the ``zone_type`` parameter. The following table shows</span>
+<span class="sd">        the number of points per element for the available zone types along</span>
+<span class="sd">        with the resulting shape of the nodemap based on the number of points</span>
+<span class="sd">        specified (:math:`N`):</span>
+
+<span class="sd">            ============== ============== ================</span>
+<span class="sd">            Zone Type      Points/Element Nodemap Shape</span>
+<span class="sd">            ============== ============== ================</span>
+<span class="sd">            ``FELineSeg``  2              :math:`(N, 2 N)`</span>
+<span class="sd">            ``FETriangle`` 3              :math:`(N, 3 N)`</span>
+<span class="sd">            ``FEQuad``     4              :math:`(N, 4 N)`</span>
+<span class="sd">            ``FETetra``    4              :math:`(N, 4 N)`</span>
+<span class="sd">            ``FEBrick``    8              :math:`(N, 8 N)`</span>
+<span class="sd">            ============== ============== ================</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.zone_type)</span>
+<span class="sd">            ZoneType.FETriangle</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.nodemap.num_points_per_element)</span>
+<span class="sd">            3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetNodesPerElem</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Access the nodemap by elements.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            i (`integer &lt;int&gt;` or `slice`): Element(s) to fetch from the</span>
+<span class="sd">                nodemap.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">ppe</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_points_per_element</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">filled_slice</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+            <span class="n">nelems</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">start</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">)</span>
+            <span class="n">stop</span> <span class="o">=</span> <span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">)</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">array</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">stop</span><span class="p">]</span>
+            <span class="n">elems</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">nelems</span><span class="p">))[::</span><span class="n">s</span><span class="o">.</span><span class="n">step</span><span class="p">]</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">arr</span><span class="p">[</span><span class="n">e</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">:(</span><span class="n">e</span>  <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">]</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">elems</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">array</span><span class="p">[</span><span class="n">i</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">:(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">nodes</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Modify the nodemap by elements.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            i (`integer &lt;int&gt;` or `slice`): Element(s) to modify in the</span>
+<span class="sd">                nodemap.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">ppe</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_points_per_element</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">filled_slice</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">step</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">a</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span> <span class="o">*</span> <span class="n">ppe</span>
+                <span class="n">b</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="o">*</span> <span class="n">ppe</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">array</span><span class="p">[</span><span class="n">a</span><span class="p">:</span><span class="n">b</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">sublist</span> <span class="ow">in</span> <span class="n">nodes</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">sublist</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">assignment</span><span class="p">():</span>
+                    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">step</span><span class="p">),</span> <span class="n">nodes</span><span class="p">):</span>
+                        <span class="bp">self</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">n</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">array</span><span class="p">[</span><span class="n">i</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">:(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">ppe</span><span class="p">]</span> <span class="o">=</span> <span class="n">nodes</span>
+
+<div class="viewcode-block" id="Nodemap.num_elements"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Nodemap.num_elements">[docs]</a>    <span class="k">def</span> <span class="nf">num_elements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The number of elements that use a given node.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            node: (`integer &lt;int&gt;`): Zero-based index of a node.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;` - The number of elements that use this node.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; nodemap = dataset.zone(&#39;My Zone&#39;).nodemap</span>
+<span class="sd">            &gt;&gt;&gt; nodemap.num_elements(3)</span>
+<span class="sd">            8</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Elementmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">)</span><span class="o">.</span><span class="n">num_elements</span><span class="p">(</span><span class="n">node</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Nodemap.element"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Nodemap.element">[docs]</a>    <span class="k">def</span> <span class="nf">element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">offset</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The element containing a given node.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            node (`integer &lt;int&gt;`): Zero-based index of a node.</span>
+<span class="sd">            offset (`integer &lt;int&gt;`): Zero-based index of the element that uses</span>
+<span class="sd">                the given node.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `integer &lt;int&gt;` - Zero-based index of the element.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; nodemap = dataset.zone(&#39;My Zone&#39;).nodemap</span>
+<span class="sd">            &gt;&gt;&gt; print(nodemap.element(3, 7))</span>
+<span class="sd">            324</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Elementmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">)</span><span class="o">.</span><span class="n">element</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span></div></div>
+
+
+<span class="k">class</span> <span class="nc">NodemapArray</span><span class="p">(</span><span class="n">Nodemap</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">size</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shape</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">),)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Access the underlying nodemap as 1D array.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">filled_slice</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+            <span class="n">n</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">c_type</span> <span class="o">*</span> <span class="n">n</span><span class="p">)()</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeArrayGetByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">arr</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">arr</span><span class="p">)):</span>
+                <span class="n">arr</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-=</span> <span class="mi">1</span>
+            <span class="k">return</span> <span class="n">arr</span><span class="p">[::</span><span class="n">s</span><span class="o">.</span><span class="n">step</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">elem</span><span class="p">,</span> <span class="n">node</span> <span class="o">=</span> <span class="nb">divmod</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_points_per_element</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeGetByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">elem</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">node</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">nodes</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Modify the underlying nodemap as 1D array.&quot;&quot;&quot;</span>
+        <span class="n">_dispatch</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">c_int32</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeArraySetByRef</span><span class="p">,</span>
+            <span class="n">c_int64</span><span class="p">:</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeArraySetByRef64</span><span class="p">}</span>
+        <span class="n">data_ctype</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">c_type</span>
+        <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">assignment</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+                <span class="n">s</span> <span class="o">=</span> <span class="n">filled_slice</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+                <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">step</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">n</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span>
+                    <span class="n">arr</span> <span class="o">=</span> <span class="p">(</span><span class="n">data_ctype</span> <span class="o">*</span> <span class="n">n</span><span class="p">)(</span><span class="o">*</span><span class="p">[</span><span class="n">nd</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">nd</span> <span class="ow">in</span> <span class="n">nodes</span><span class="p">])</span>
+
+                    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="nb">min</span><span class="p">(</span><span class="n">arr</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_points</span> <span class="o">&lt;</span> <span class="nb">max</span><span class="p">(</span><span class="n">arr</span><span class="p">):</span>
+                            <span class="k">raise</span> <span class="n">TecplotIndexError</span>
+                        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">                            Nodemap Assignment:</span>
+<span class="s1">                                offset: {}</span>
+<span class="s1">                                array({}): {}&#39;&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">start</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span>
+                                                         <span class="n">array_to_str</span><span class="p">(</span><span class="n">arr</span><span class="p">)))</span>
+                    <span class="n">_dispatch</span><span class="p">[</span><span class="n">data_ctype</span><span class="p">](</span><span class="n">ref</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">arr</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">ppe</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_points_per_element</span>
+                    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">step</span><span class="p">),</span> <span class="n">nodes</span><span class="p">):</span>
+                        <span class="n">elem</span><span class="p">,</span> <span class="n">node</span> <span class="o">=</span> <span class="nb">divmod</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">ppe</span><span class="p">)</span>
+                        <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeSetByRef</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">elem</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">node</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                                  <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">ppe</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_points_per_element</span>
+                <span class="n">elem</span><span class="p">,</span> <span class="n">node</span> <span class="o">=</span> <span class="nb">divmod</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">ppe</span><span class="p">)</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataNodeSetByRef</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">elem</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">node</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">nodes</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

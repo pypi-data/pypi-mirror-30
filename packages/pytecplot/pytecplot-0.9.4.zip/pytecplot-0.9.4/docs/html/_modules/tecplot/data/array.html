@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.array &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.array</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">range</span><span class="p">,</span> <span class="nb">super</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="p">(</span><span class="n">addressof</span><span class="p">,</span> <span class="n">byref</span><span class="p">,</span> <span class="n">cast</span><span class="p">,</span> <span class="n">c_double</span><span class="p">,</span> <span class="n">c_float</span><span class="p">,</span> <span class="n">c_int8</span><span class="p">,</span> <span class="n">c_int16</span><span class="p">,</span>
+                    <span class="n">c_int32</span><span class="p">,</span> <span class="n">c_int64</span><span class="p">,</span> <span class="n">c_void_p</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">)</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">_tecutil_connector</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">session</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Array"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Array">[docs]</a><span class="k">class</span> <span class="nc">Array</span><span class="p">(</span><span class="n">c_void_p</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Low-level accessor for underlying data within a `Dataset`.</span>
+
+<span class="sd">    .. note::</span>
+
+<span class="sd">        The data manipulation context referred to below is currently being</span>
+<span class="sd">        developed and should show up in an up-coming revision.</span>
+
+<span class="sd">    This object exposes a list-like interface to the underlying data array.</span>
+<span class="sd">    Using it, values can be directly queried and modified. After any</span>
+<span class="sd">    modification to the data, the Tecplot Engine will have to be notified of</span>
+<span class="sd">    the change. This notification will happen automatically in most cases, but</span>
+<span class="sd">    can be turned off using the data manipulation context for a significant</span>
+<span class="sd">    performance increase on large datasets.</span>
+
+<span class="sd">    Accessing values within an `Array` is done through the standard ``[]``</span>
+<span class="sd">    syntax::</span>
+
+<span class="sd">        &gt;&gt;&gt; print(array[3])</span>
+<span class="sd">        3.1415</span>
+
+<span class="sd">    The numbers passed are interpreted just like Python&#39;s built-in</span>
+<span class="sd">    :py:class:`slice` object::</span>
+
+<span class="sd">        &gt;&gt;&gt; # print the values at indices: 5, 7, 9</span>
+<span class="sd">        &gt;&gt;&gt; print(array[5:10:2])</span>
+<span class="sd">        [1.0, 1.0, 1.0]</span>
+
+<span class="sd">    Elements within an array can be manipulated in-place with the assignment</span>
+<span class="sd">    operator::</span>
+
+<span class="sd">        &gt;&gt;&gt; array[3] = 5.0</span>
+<span class="sd">        &gt;&gt;&gt; print(array[3])</span>
+<span class="sd">        5.0</span>
+
+<span class="sd">    Element-by-element access is *not* guaranteed to be performant and users</span>
+<span class="sd">    should avoid writing loops over indices in Python. Instead, whole arrays</span>
+<span class="sd">    should be used. This will effectively push the loop down to the underlying</span>
+<span class="sd">    native library and will be much faster in virtually all cases.</span>
+
+<span class="sd">    Consider this array of 10k elements::</span>
+
+<span class="sd">        &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">        &gt;&gt;&gt; ds = tp.active_frame().create_dataset(&#39;Dataset&#39;, [&#39;x&#39;])</span>
+<span class="sd">        &gt;&gt;&gt; zn = ds.add_ordered_zone(&#39;Zone&#39;, 10000)</span>
+<span class="sd">        &gt;&gt;&gt; array = zn.values(&#39;x&#39;)</span>
+
+<span class="sd">    The following loop, which takes the sine of all values in the array will</span>
+<span class="sd">    require several Python function calls per element which is a tremendous</span>
+<span class="sd">    overhead::</span>
+
+<span class="sd">        &gt;&gt;&gt; import math</span>
+<span class="sd">        &gt;&gt;&gt; for i in range(len(ar)):</span>
+<span class="sd">        ...     ar[i] = math.sin(ar[i])</span>
+
+<span class="sd">    An immediate improvement on this can be made by looping over the elements</span>
+<span class="sd">    in Python only when reading the values, but assigning them using the</span>
+<span class="sd">    whole array. This will be several times faster for even modest arrays::</span>
+
+<span class="sd">        &gt;&gt;&gt; ar[:] = [math.sin(x) for x in ar]</span>
+
+<span class="sd">    But there is still a large performance penalty for looping over elements</span>
+<span class="sd">    directly in Python and PyTecplot supports two solutions for large arrays:</span>
+<span class="sd">    `tecplot.data.operate.execute_equation` and `tecplot.extension.numpy`.</span>
+<span class="sd">    Please refer to these for details. Continuing with the example above, we</span>
+<span class="sd">    could accomplish the same thing with either of the following using</span>
+<span class="sd">    `execute_equation` (assuming the array is identified by the first zone,</span>
+<span class="sd">    first variable)::</span>
+
+<span class="sd">        &gt;&gt;&gt; from tecplot.data.operate import execute_equation</span>
+<span class="sd">        &gt;&gt;&gt; execute_equation(&#39;V1 = SIN(V1)&#39;, zones=[dataset.zone(0)])</span>
+
+<span class="sd">    or by using the `numpy` library::</span>
+
+<span class="sd">        &gt;&gt;&gt; import numpy as np</span>
+<span class="sd">        &gt;&gt;&gt; ar[:] = np.sin(ar[:])</span>
+
+<span class="sd">    In both of these cases, the calculation of the sine and loop over elements</span>
+<span class="sd">    is pushed to the low level library and is much faster.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">zone</span><span class="p">,</span> <span class="n">variable</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">zone</span> <span class="o">=</span> <span class="n">zone</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">variable</span> <span class="o">=</span> <span class="n">variable</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">())</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_native_reference</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">writable</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">writable</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetWritableNativeRefByUniqueID</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetReadableNativeRefByUniqueID</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">_raw_pointer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">writable</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">_tecutil_connector</span><span class="o">.</span><span class="n">connected</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;raw pointer access only available in batch-mode&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">writable</span><span class="p">:</span>
+            <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">handle</span><span class="o">.</span><span class="n">tecUtilDataValueGetWritableRawPtrByRef</span><span class="o">.</span><span class="n">restype</span> <span class="o">=</span> \
+                <span class="n">POINTER</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">c_type</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetWritableRawPtrByRef</span><span class="p">(</span><span class="n">ref</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">handle</span><span class="o">.</span><span class="n">tecUtilDataValueGetReadableRawPtrByRef</span><span class="o">.</span><span class="n">restype</span> <span class="o">=</span> \
+                <span class="n">POINTER</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">c_type</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetReadableRawPtrByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="n">self_addr</span> <span class="o">=</span> <span class="n">addressof</span><span class="p">(</span><span class="n">cast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">(</span><span class="n">c_int64</span><span class="p">))</span><span class="o">.</span><span class="n">contents</span><span class="p">)</span>
+        <span class="n">other_addr</span> <span class="o">=</span> <span class="n">addressof</span><span class="p">(</span><span class="n">cast</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">POINTER</span><span class="p">(</span><span class="n">c_int64</span><span class="p">))</span><span class="o">.</span><span class="n">contents</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">self_addr</span> <span class="o">==</span> <span class="n">other_addr</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The number of values in this array.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example showing size of ordered data::</span>
+
+<span class="sd">            &gt;&gt;&gt; x = dataset.zone(&#39;Zone&#39;).values(&#39;X&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(x.shape)</span>
+<span class="sd">            (10, 10, 10)</span>
+<span class="sd">            &gt;&gt;&gt; print(len(x))</span>
+<span class="sd">            1000</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetCountByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">location</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The location of the data points with respect to the elements.</span>
+
+<span class="sd">        :type: `ValueLocation`</span>
+
+<span class="sd">        Possible values are `ValueLocation.CellCentered` and</span>
+<span class="sd">        `ValueLocation.Nodal`. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(0).values(&#39;X&#39;).location)</span>
+<span class="sd">            ValueLocation.Nodal</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetLocation</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                             <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shape</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;``(i, j, k)`` shape for this array.</span>
+
+<span class="sd">        :type: `tuple` of `floats &lt;float&gt;`</span>
+
+<span class="sd">        This is defined by the parent zone and can be used to reshape arrays.</span>
+<span class="sd">        The following example assumes 32-bit floating point array and copies</span>
+<span class="sd">        the Tecplot-owned ``data`` into the `numpy`-owned ``array``::</span>
+
+<span class="sd">            &gt;&gt;&gt; import numpy as np</span>
+<span class="sd">            &gt;&gt;&gt; data = dataset.zone(&#39;Zone&#39;).values(&#39;X&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; array = np.empty(data.shape, dtype=np.float32)</span>
+<span class="sd">            &gt;&gt;&gt; arr_ptr = array.ctypes.data_as(POINTER(data.c_type))</span>
+<span class="sd">            &gt;&gt;&gt; memmove(arr_ptr, data.copy(), sizeof(data.c_type) * len(data))</span>
+
+<span class="sd">        The data array presented is normally one-dimensional. For ordered data,</span>
+<span class="sd">        you may wish to reshape the array indexing according to the</span>
+<span class="sd">        dimensionality given by the ``shape`` attribute:</span>
+
+<span class="sd">        .. code-block:: python</span>
+<span class="sd">            :emphasize-lines: 10</span>
+
+<span class="sd">            &gt;&gt;&gt; import numpy as np</span>
+<span class="sd">            &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">            &gt;&gt;&gt; frame = tp.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; dataset = frame.create_dataset(&#39;Dataset&#39;, [&#39;x&#39;])</span>
+<span class="sd">            &gt;&gt;&gt; zone = dataset.add_ordered_zone(&#39;Zone&#39;, shape=(3,3,3))</span>
+<span class="sd">            &gt;&gt;&gt; x = np.array(zone.values(&#39;X&#39;)[:])</span>
+<span class="sd">            &gt;&gt;&gt; print(x)</span>
+<span class="sd">            [ 0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.</span>
+<span class="sd">              0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.]</span>
+<span class="sd">            &gt;&gt;&gt; x.shape = zone.values(&#39;X&#39;).shape</span>
+<span class="sd">            &gt;&gt;&gt; print(x)</span>
+<span class="sd">            [[[ 0.  0.  0.]</span>
+<span class="sd">              [ 0.  0.  0.]</span>
+<span class="sd">              [ 0.  0.  0.]]</span>
+
+<span class="sd">             [[ 0.  0.  0.]</span>
+<span class="sd">              [ 0.  0.  0.]</span>
+<span class="sd">              [ 0.  0.  0.]]</span>
+
+<span class="sd">             [[ 0.  0.  0.]</span>
+<span class="sd">              [ 0.  0.  0.]</span>
+<span class="sd">              [ 0.  0.  0.]]]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">zone_type</span> <span class="ow">is</span> <span class="n">ZoneType</span><span class="o">.</span><span class="n">Ordered</span><span class="p">:</span>
+            <span class="n">array_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">_shape</span> <span class="k">if</span> <span class="n">i</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">array_shape</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">num_points</span><span class="p">,)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">location</span> <span class="ow">is</span> <span class="n">ValueLocation</span><span class="o">.</span><span class="n">CellCentered</span><span class="p">:</span>
+            <span class="n">array_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">array_shape</span> <span class="k">if</span> <span class="n">i</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">array_shape</span><span class="p">:</span>
+            <span class="n">array_shape</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span><span class="p">,)</span>
+        <span class="k">return</span> <span class="n">array_shape</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">c_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`ctypes` compatible data type of this array.</span>
+
+<span class="sd">        This is the `ctypes` equivalent of `Array.data_type` and will return</span>
+<span class="sd">        one of the following:</span>
+
+<span class="sd">            * `ctypes.c_float`</span>
+<span class="sd">            * `ctypes.c_double`</span>
+<span class="sd">            * `ctypes.c_int`</span>
+<span class="sd">            * `ctypes.c_int16`</span>
+<span class="sd">            * `ctypes.c_int8`</span>
+
+<span class="sd">        and can be used to create a `ctypes` array to store a copy of the</span>
+<span class="sd">        data::</span>
+
+<span class="sd">            import tecplot as tp</span>
+<span class="sd">            frame = tp.active_frame()</span>
+<span class="sd">            dataset = frame.create_dataset(&#39;Dataset&#39;, [&#39;x&#39;])</span>
+<span class="sd">            dataset.add_ordered_zone(&#39;Zone&#39;, (3,3,3))</span>
+<span class="sd">            x = dataset.zone(&#39;Zone&#39;).values(&#39;x&#39;)</span>
+<span class="sd">            # allocate array using Python&#39;s ctypes</span>
+<span class="sd">            x_array = (x.c_type * len(x))()</span>
+<span class="sd">            # copy values from Dataset into ctypes array</span>
+<span class="sd">            x_array[:] = x[:]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_ctypes</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">FieldDataType</span><span class="o">.</span><span class="n">Float</span><span class="p">:</span> <span class="n">c_float</span><span class="p">,</span>
+            <span class="n">FieldDataType</span><span class="o">.</span><span class="n">Double</span><span class="p">:</span> <span class="n">c_double</span><span class="p">,</span>
+            <span class="n">FieldDataType</span><span class="o">.</span><span class="n">Int32</span><span class="p">:</span> <span class="n">c_int32</span><span class="p">,</span>
+            <span class="n">FieldDataType</span><span class="o">.</span><span class="n">Int16</span><span class="p">:</span> <span class="n">c_int16</span><span class="p">,</span>
+            <span class="n">FieldDataType</span><span class="o">.</span><span class="n">Byte</span><span class="p">:</span> <span class="n">c_int8</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">_ctypes</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">data_type</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">data_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`FieldDataType` indicating the underlying value type of this array.</span>
+
+<span class="sd">        :type: `FieldDataType`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;Zone&#39;).values(&#39;X&#39;).data_type)</span>
+<span class="sd">            FieldDataType.Float</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetRefType</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Array.copy"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Array.copy">[docs]</a>    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Copy the whole or part of the array into a ctypes array.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            offset (`integer &lt;int&gt;`, optional): Zero-based offset for starting</span>
+<span class="sd">                index to copy. (default: 0)</span>
+<span class="sd">            size (`integer &lt;int&gt;`, optional): Number of values to copy into the</span>
+<span class="sd">                resulting array. A value of `None` will copy to the end of the</span>
+<span class="sd">                array. (default: `None`)</span>
+
+<span class="sd">        Here we will copy out chunks of the data, do some operation and set the</span>
+<span class="sd">        values back into the dataset::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">            &gt;&gt;&gt; tp.new_layout()</span>
+<span class="sd">            &gt;&gt;&gt; frame = tp.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; dataset = frame.create_dataset(&#39;Dataset&#39;, [&#39;x&#39;])</span>
+<span class="sd">            &gt;&gt;&gt; dataset.add_ordered_zone(&#39;Zone&#39;, (2, 2, 2))</span>
+<span class="sd">            &gt;&gt;&gt; x = dataset.zone(&#39;Zone&#39;).values(&#39;x&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; # loop over array copying out 4 values at a time</span>
+<span class="sd">            &gt;&gt;&gt; for i, offset in enumerate(range(0, len(x), 4)):</span>
+<span class="sd">            ...     x_array = x.copy(offset, 4)</span>
+<span class="sd">            ...     x_array[:] = [i] * 4</span>
+<span class="sd">            ...     x[offset:offset + 4] = x_array</span>
+<span class="sd">            &gt;&gt;&gt; print(x[:])</span>
+<span class="sd">            [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">size</span> <span class="o">=</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-</span> <span class="n">offset</span><span class="p">)</span> <span class="k">if</span> <span class="n">size</span> <span class="ow">is</span> <span class="bp">None</span> <span class="k">else</span> <span class="n">size</span>
+        <span class="n">arr</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">c_type</span> <span class="o">*</span> <span class="n">size</span><span class="p">)()</span>
+        <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueArrayGetByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">offset</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">arr</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">arr</span></div>
+
+    <span class="k">def</span> <span class="nf">_slice_range</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s</span><span class="p">):</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span> <span class="ow">or</span> <span class="mi">0</span>
+        <span class="n">stop</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="n">step</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">step</span> <span class="ow">or</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="nb">range</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">_tecutil_connector</span><span class="o">.</span><span class="n">connected</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+                <span class="n">s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_slice_range</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">step</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">n</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span>
+                    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">n</span><span class="p">)[:]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="p">[</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ii</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                            <span class="k">for</span> <span class="n">ii</span> <span class="ow">in</span> <span class="n">s</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_raw_pointer</span><span class="p">()</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">data</span><span class="p">[</span><span class="n">ii</span><span class="p">]</span> <span class="k">for</span> <span class="n">ii</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_slice_range</span><span class="p">(</span><span class="n">i</span><span class="p">)]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_raw_pointer</span><span class="p">()[</span><span class="n">i</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="n">state_change_opts</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+            <span class="n">variables</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="p">,</span>
+            <span class="n">zones</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="p">,</span>
+            <span class="n">dataset</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">_tecutil_connector</span><span class="o">.</span><span class="n">connected</span><span class="p">:</span>
+            <span class="n">ref</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_reference</span><span class="p">(</span><span class="n">writable</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+                <span class="n">s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_slice_range</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">step</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">n</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">stop</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span>
+                    <span class="n">arr</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">c_type</span> <span class="o">*</span> <span class="n">n</span><span class="p">)(</span><span class="o">*</span><span class="n">val</span><span class="p">)</span>
+                    <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueArraySetByRef</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">start</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">arr</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">ival</span><span class="p">,</span> <span class="n">ii</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+                        <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueSetByRef</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">ii</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">val</span><span class="p">[</span><span class="n">ival</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueSetByRef</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+                <span class="n">state_change_opts</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+                <span class="n">s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_slice_range</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">val</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="n">TecplotIndexError</span><span class="p">(</span><span class="s1">&#39;Array length mismatch&#39;</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_raw_pointer</span><span class="p">(</span><span class="bp">True</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">ival</span><span class="p">,</span> <span class="n">ii</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_slice_range</span><span class="p">(</span><span class="n">i</span><span class="p">)):</span>
+                    <span class="n">data</span><span class="p">[</span><span class="n">ii</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span><span class="p">[</span><span class="n">ival</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_raw_pointer</span><span class="p">(</span><span class="bp">True</span><span class="p">)[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+                <span class="n">state_change_opts</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">state_changed</span><span class="p">(</span><span class="n">StateChange</span><span class="o">.</span><span class="n">VarsAltered</span><span class="p">,</span> <span class="o">**</span><span class="n">state_change_opts</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_index</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_length</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">__next__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_index</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_index</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_length</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">current_index</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_index</span>
+            <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_length</span>
+            <span class="k">raise</span> <span class="ne">StopIteration</span>
+
+    <span class="k">def</span> <span class="nf">next</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># if sys.version_info &lt; (3,)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__next__</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Array.minmax"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Array.minmax">[docs]</a>    <span class="k">def</span> <span class="nf">minmax</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Limits of the values stored in this array.</span>
+
+<span class="sd">        :type: 2-tuple of `floats &lt;float&gt;`</span>
+
+<span class="sd">        This always returns `floats &lt;float&gt;` regardless of the underlying data</span>
+<span class="sd">        type::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;Zone&#39;).values(&#39;x&#39;).minmax())</span>
+<span class="sd">            (0, 10)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetMinMaxByRef</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Array.min"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Array.min">[docs]</a>    <span class="k">def</span> <span class="nf">min</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Lower bound of the values stored in this array.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        This always returns a `float` regardless of the underlying data type::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;Zone&#39;).values(&#39;x&#39;).min())</span>
+<span class="sd">            0</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">minmax</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="Array.max"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.Array.max">[docs]</a>    <span class="k">def</span> <span class="nf">max</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Upper bound of the values stored in this array.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        This always returns a `float` regardless of the underlying data type::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;Zone&#39;).values(&#39;x&#39;).max())</span>
+<span class="sd">            10</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">minmax</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shared_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`list` of all `Zones &lt;data_access&gt;` sharing this array.</span>
+
+<span class="sd">        :type: `list` of `Zones &lt;data_access&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset.zone(&#39;My Zone&#39;).copy(share_variables=True)</span>
+<span class="sd">            &gt;&gt;&gt; for z in dataset.zone(&#39;My Zone&#39;).values(0).shared_zones:</span>
+<span class="sd">            ...     print(z.index)</span>
+<span class="sd">            0</span>
+<span class="sd">            1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueGetShareZoneSet</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                                    <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">indices</span><span class="p">]</span>
+        <span class="n">indices</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">ret</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">passive</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`Boolean &lt;bool&gt;` indicating an unallocated zone-variable combination.</span>
+
+<span class="sd">        :type: `bool`</span>
+
+<span class="sd">        Passive variables are placeholders where no data is defined for a zone</span>
+<span class="sd">        variable combination. Passive variables will always return zero when</span>
+<span class="sd">        queried.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; import tecplot as tp</span>
+<span class="sd">            &gt;&gt;&gt; ds = tp.active_page().add_frame().create_dataset(&#39;D&#39;, [&#39;x&#39;,&#39;y&#39;])</span>
+<span class="sd">            &gt;&gt;&gt; z = ds.add_ordered_zone(&#39;Z1&#39;, (3,))</span>
+<span class="sd">            &gt;&gt;&gt; z.values(0).passive</span>
+<span class="sd">            False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataValueIsPassive</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                           <span class="bp">self</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.macro &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.macro</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span>
+
+<span class="kn">from</span> <span class="nn">.tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">lock</span>
+<span class="kn">from</span> <span class="nn">.exception</span> <span class="kn">import</span> <span class="n">TecplotLogicError</span><span class="p">,</span> <span class="n">TecplotSystemError</span><span class="p">,</span> <span class="n">TecplotMacroError</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="execute_function"><a class="viewcode-back" href="../../api/tecplot.macros.html#tecplot.macro.execute_function">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">execute_function</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">parameters</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Runs a macro function.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        name: (`string &lt;str&gt;`): Name of the macro function to run. This name</span>
+<span class="sd">            is not case sensitive. Must be a non-zero length `string &lt;str&gt;`.</span>
+
+<span class="sd">        parameters: (`string &lt;str&gt;`): Any parameters which the quick macro</span>
+<span class="sd">            requires. Pass `None` (default) for macro functions which require no</span>
+<span class="sd">            parameters. The parameters are passed as a string which includes</span>
+<span class="sd">            the parenthesis. For example, if the macro function takes a</span>
+<span class="sd">            string parameter and int parameter, pass</span>
+<span class="sd">            **&#39;(&quot;string_parameter_name&quot;, 2)&#39;** Default: `None`</span>
+
+<span class="sd">    Macro functions must be defined before they are used. Typically they</span>
+<span class="sd">    are defined in the &#39;tecplot.mcr&#39; configuration file which is read</span>
+<span class="sd">    when |Tecplot Engine| is initialized. Macro functions</span>
+<span class="sd">    may also be available in the Quick Macro Panel when the Tecplot 360 GUI</span>
+<span class="sd">    is running.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        See the |Tecplot Macro Scripting Guide| for more information about</span>
+<span class="sd">        macro functions.</span>
+
+<span class="sd">    Run the &quot;Tile Frames&quot; macro functions. This macro function is defined in</span>
+<span class="sd">    the file &quot;tecplot.mcr&quot;, which is located in the Tecplot 360</span>
+<span class="sd">    installation directory::</span>
+
+<span class="sd">        &gt;&gt;&gt; tecplot.macro.execute_function(&#39;Tile Frames&#39;)</span>
+
+<span class="sd">    Run a macro function named &quot;Calculate&quot; which takes no parameters and</span>
+<span class="sd">    another macro function called &quot;Display&quot; which takes the name of a</span>
+<span class="sd">    layout file and an integer as parameters::</span>
+
+<span class="sd">        &gt;&gt;&gt; tp.macro.execute_function(&#39;Calculate&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; tp.macro.execute_function(&#39;Display&#39;, &#39;(&quot;contour.lay&quot;, 2)&#39;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">MacroRunFunction</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+                <span class="n">parameters</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="n">parameters</span> <span class="k">else</span> <span class="bp">None</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">TecplotLogicError</span><span class="p">,</span> <span class="n">TecplotSystemError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="execute_command"><a class="viewcode-back" href="../../api/tecplot.macros.html#tecplot.macro.execute_command">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">execute_command</span><span class="p">(</span><span class="n">command</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Runs a series of tecplot macro commands.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        command (`string &lt;str&gt;`): The macro commands to be run.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotMacroError`: Message will specify the command that failed.</span>
+
+<span class="sd">    .. warning:: Zero-based Indexing</span>
+
+<span class="sd">        It is important to know that all indexing in |PyTecplot| scripts are</span>
+<span class="sd">        zero-based. This is a departure from the macro language which is</span>
+<span class="sd">        one-based. This is to keep with the expectations when working in the</span>
+<span class="sd">        python language. However, |PyTecplot| does not modify strings that are</span>
+<span class="sd">        passed to the |Tecplot Engine|. This means that one-based indexing</span>
+<span class="sd">        should be used when running macro commands from python or when using</span>
+<span class="sd">        `execute_equation() &lt;tecplot.data.operate.execute_equation&gt;`.</span>
+
+<span class="sd">    This command splits the input into individual commands and runs them one</span>
+<span class="sd">    at a time. See the |Tecplot Macro Scripting Guide| for details about</span>
+<span class="sd">    |Tecplot 360|&#39;s macro language.</span>
+
+<span class="sd">    .. warning::</span>
+<span class="sd">        The $!VARSET command is not supported. Tecplot Macro variables should be</span>
+<span class="sd">        converted to Python variables.</span>
+
+<span class="sd">    .. warning::</span>
+<span class="sd">        Intrinsic variables (that is, variables with pipes such as</span>
+<span class="sd">        ``|DATASETFNAME|``) are not supported. If you need to use an intrinsic</span>
+<span class="sd">        variable in the macro command, add the macro command to a text file and</span>
+<span class="sd">        call `execute_file`.</span>
+
+<span class="sd">    See the |Tecplot Macro Scripting Guide| for more information about raw data</span>
+<span class="sd">    and intrinsic variables.</span>
+
+<span class="sd">    The following command will perform the same operations as the</span>
+<span class="sd">    `Hello, World! example &lt;hello_world&gt;`::</span>
+
+<span class="sd">        &gt;&gt;&gt; tecplot.macro.execute_command(r&#39;&#39;&#39;</span>
+<span class="sd">        ...   $!ATTACHTEXT</span>
+<span class="sd">        ...     ANCHORPOS { X = 35 Y = 50 }</span>
+<span class="sd">        ...     TEXTSHAPE { HEIGHT = 35 }</span>
+<span class="sd">        ...     TEXT = &#39;Hello, World!&#39;</span>
+<span class="sd">        ...   $!EXPORTSETUP EXPORTFNAME = &#39;hello_world.png&#39;</span>
+<span class="sd">        ...   $!EXPORT</span>
+<span class="sd">        ...     EXPORTREGION = CURRENTFRAME</span>
+<span class="sd">        ... &#39;&#39;&#39;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">comments</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;(?&lt;!</span><span class="se">\\</span><span class="s1">)(\&quot;.*?\&quot;|</span><span class="se">\&#39;</span><span class="s1">.*?</span><span class="se">\&#39;</span><span class="s1">)|(#[^\r\n]*$)&#39;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">MULTILINE</span><span class="p">)</span>
+    <span class="n">pattern</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;(\$!.*?)(?=\$!)|(\$!.*)&#39;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">MULTILINE</span> <span class="o">|</span> <span class="n">re</span><span class="o">.</span><span class="n">DOTALL</span><span class="p">)</span>
+    <span class="n">varset</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\$!VARSET.*&#39;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+    <span class="n">command</span> <span class="o">=</span> <span class="n">comments</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="k">lambda</span> <span class="n">m</span><span class="p">:</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">command</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">match</span> <span class="ow">in</span> <span class="n">pattern</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">command</span><span class="p">):</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="p">(</span><span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="ow">or</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">varset</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">c</span><span class="p">):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;The $!VARSET command is not supported in</span><span class="se">\n</span><span class="s1">&#39;</span>
+                       <span class="s1">&#39;execute_macro(). Python variables should be used</span><span class="se">\n</span><span class="s1">&#39;</span>
+                       <span class="s1">&#39;instead of macro variables. Alternatively, you can</span><span class="se">\n</span><span class="s1">&#39;</span>
+                       <span class="s1">&#39;execute a macro in a file with &#39;</span>
+                       <span class="s1">&#39;macro.execute_file().</span><span class="se">\n</span><span class="s1">&#39;</span>
+                       <span class="s1">&#39;$!VARSET is supported in execute_file()&#39;</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">(</span><span class="n">c</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">+</span> <span class="n">msg</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;executing command:</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">+</span> <span class="n">c</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">MacroExecuteCommand</span><span class="p">(</span><span class="n">c</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">(</span><span class="n">c</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">TecplotLogicError</span><span class="p">,</span> <span class="n">TecplotSystemError</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="execute_extended_command"><a class="viewcode-back" href="../../api/tecplot.macros.html#tecplot.macro.execute_extended_command">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">execute_extended_command</span><span class="p">(</span><span class="n">command_processor_id</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">raw_data</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Runs a tecplot macro command defined in an addon.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        command_processor_id (`string &lt;str&gt;`):  A unique string used to</span>
+<span class="sd">            determine the API to call when an extended macro command is</span>
+<span class="sd">            processed. API&#39;s are provided by add-ons or applications</span>
+<span class="sd">            that extend the Tecplot macro language.</span>
+
+<span class="sd">            Typically this will be the name of an add-on or application,</span>
+<span class="sd">            followed by a version number. For example: &#39;CFDAnalyzer4&#39;.</span>
+
+<span class="sd">            Each application or add-on may provide one or more unique</span>
+<span class="sd">            command processor ID strings corresponding to different API&#39;s,</span>
+<span class="sd">            or different versions of an API.</span>
+
+<span class="sd">            For example, a file converter add-on responsible</span>
+<span class="sd">            for converting DXF files for Tecplot might provide two versions</span>
+<span class="sd">            of an API:</span>
+<span class="sd">            &quot;DXFCONVERTTOOL-1.2&quot;, and &quot;DXFCONVERTTOOL-2.0&quot;.</span>
+<span class="sd">            In that case either of these strings would be passed in the</span>
+<span class="sd">            *command_processor_id* parameter to indicate the version of the</span>
+<span class="sd">            API to use.</span>
+
+<span class="sd">        command (`string &lt;str&gt;`): The command to run.</span>
+<span class="sd">        raw_data (`string &lt;str&gt;`): Raw data required for the command, if any</span>
+<span class="sd">            (default: `None`).</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotMacroError`</span>
+
+<span class="sd">    .. warning:: Zero-based Indexing</span>
+
+<span class="sd">        It is important to know that all indexing in |PyTecplot| scripts are</span>
+<span class="sd">        zero-based. This is a departure from the macro language which is</span>
+<span class="sd">        one-based. This is to keep with the expectations when working in the</span>
+<span class="sd">        python language. However, |PyTecplot| does not modify strings that are</span>
+<span class="sd">        passed to the |Tecplot Engine|. This means that one-based indexing</span>
+<span class="sd">        should be used when running macro commands from python or when using</span>
+<span class="sd">        `execute_equation() &lt;tecplot.data.operate.execute_equation&gt;`.</span>
+
+<span class="sd">    In general, the command string is formatted prior to being fed into the</span>
+<span class="sd">    |Tecplot Engine| so liberal use of whitespace, including new-lines, are</span>
+<span class="sd">    acceptable.</span>
+
+<span class="sd">    Example::</span>
+
+<span class="sd">        &gt;&gt;&gt; tecplot.macro.execute_extended_command(</span>
+<span class="sd">        ...     &#39;Multi Frame Manager&#39;,</span>
+<span class="sd">        ...     &#39;TILEFRAMESSQUARE&#39;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">MacroExecuteExtendedCommand</span><span class="p">(</span>
+                <span class="n">command_processor_id</span><span class="p">,</span> <span class="n">command</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39; &#39;</span><span class="p">),</span> <span class="n">raw_data</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+        <span class="n">command</span> <span class="o">=</span> <span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">                $!EXTENDEDCOMMAND</span>
+<span class="s1">                  COMMANDPROCESSORID = &#39;{procid}&#39;</span>
+<span class="s1">                  COMMAND = &#39;{cmd}&#39;</span>
+<span class="s1">            &#39;&#39;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">procid</span><span class="o">=</span><span class="n">command_processor_id</span><span class="p">,</span>
+                       <span class="n">cmd</span><span class="o">=</span><span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">command</span><span class="o">.</span> <span class="n">split</span><span class="p">())</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;&#39;&quot;</span><span class="p">,</span> <span class="sa">r</span><span class="s2">&quot;\&#39;&quot;</span><span class="p">)))</span>
+        <span class="n">execute_command</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">TecplotLogicError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="execute_file"><a class="viewcode-back" href="../../api/tecplot.macros.html#tecplot.macro.execute_file">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">execute_file</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Run a macro file.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        filename (`string &lt;str&gt;`): The file to be run.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotMacroError`</span>
+
+<span class="sd">    .. warning:: Zero-based Indexing</span>
+
+<span class="sd">        It is important to know that all indexing in |PyTecplot| scripts are</span>
+<span class="sd">        zero-based. This is a departure from the macro language which is</span>
+<span class="sd">        one-based. This is to keep with the expectations when working in the</span>
+<span class="sd">        python language. However, |PyTecplot| does not modify strings that are</span>
+<span class="sd">        passed to the |Tecplot Engine|. This means that one-based indexing</span>
+<span class="sd">        should be used when running macro commands from python or when using</span>
+<span class="sd">        `execute_equation() &lt;tecplot.data.operate.execute_equation&gt;`.</span>
+
+<span class="sd">    Example::</span>
+
+<span class="sd">        &gt;&gt;&gt; tecplot.macro.execute_file(&#39;/path/to/macro_file.mcr&#39;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">MacroRunFile</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">TecplotLogicError</span><span class="p">,</span> <span class="n">TecplotSystemError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TecplotMacroError</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../index.html">
+              <img class="logo" src="../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

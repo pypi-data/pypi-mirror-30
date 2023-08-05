@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.operate &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.operate</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">int</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">Iterable</span><span class="p">,</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="kn">import</span> <span class="n">contextmanager</span>
+
+<span class="kn">from</span> <span class="nn">six</span> <span class="kn">import</span> <span class="n">string_types</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">layout</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="p">(</span><span class="n">ArgList</span><span class="p">,</span> <span class="n">IndexSet</span><span class="p">,</span> <span class="n">Index</span><span class="p">,</span> <span class="n">flatten_args</span><span class="p">,</span> <span class="n">sv</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span>
+                       <span class="n">optional</span><span class="p">)</span>
+
+<span class="n">Range</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;Range&#39;</span><span class="p">,</span> <span class="s1">&#39;min max step&#39;</span><span class="p">)</span>
+<span class="sd">&quot;&quot;&quot;Limit the data altered by the `execute_equation` function.</span>
+
+<span class="sd">The Range specification of I,J,K range indices for `execute_equation`</span>
+<span class="sd">follow these rules:</span>
+
+<span class="sd">    * All indices start with 0 and go to some maximum index *m*.</span>
+<span class="sd">    * Negative values represent the indexes starting with the maximum at -1</span>
+<span class="sd">      and continuing back to the beginning of the range.</span>
+<span class="sd">    * A step of None, 0 and 1 are all equivalent and mean that no elements</span>
+<span class="sd">      are skipped.</span>
+<span class="sd">    * A negative step indicates a skip less than the maximum.</span>
+
+<span class="sd">Example:</span>
+
+<span class="sd">    Add one to variable &#39;X&#39; for a zone &#39;Rectangular&#39; for data points</span>
+<span class="sd">    in I Range 1 to max, skipping every three points::</span>
+
+<span class="sd">        &gt;&gt;&gt; execute_equation(&#39;{X} = {X}+1&#39;, i_range=Range(1, None, 3),</span>
+<span class="sd">        ...                  zone_set=&#39;Rectangular&#39;)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="n">Range</span><span class="o">.</span><span class="fm">__new__</span><span class="o">.</span><span class="vm">__defaults__</span> <span class="o">=</span> <span class="p">(</span><span class="bp">None</span><span class="p">,</span> <span class="bp">None</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="execute_equation"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.operate.execute_equation">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">execute_equation</span><span class="p">(</span><span class="n">equation</span><span class="p">,</span> <span class="n">zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">i_range</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">j_range</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">k_range</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">value_location</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">variable_data_type</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                     <span class="n">ignore_divide_by_zero</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The execute_equation function operates on a data set within the</span>
+<span class="sd">    |Tecplot Engine| using FORTRAN-like equations.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        equation (`string &lt;str&gt;`): String containing the equation.</span>
+<span class="sd">            Multiple equations can be processed by separating each equation</span>
+<span class="sd">            with a newline. See Section 20 - 1 &quot;Data Alteration through</span>
+<span class="sd">            Equations&quot; in the Tecplot User&#39;s Manual for more information on</span>
+<span class="sd">            using equations. Iterable container of `Zone &lt;data_access&gt;` objects</span>
+<span class="sd">            to operate on. May be a list, set, tuple, or any iterable</span>
+<span class="sd">            container. If `None`, the equation will be applied to all zones.</span>
+
+<span class="sd">            .. note:: In the equation string, variable names should be enclosed</span>
+<span class="sd">                in curly braces. For example, &#39;{X} = {X} + 1&#39;</span>
+
+<span class="sd">        zones: (Iterable container of `Zone &lt;data_access&gt;` objects, optional):</span>
+<span class="sd">            Iterable container of `Zone &lt;data_access&gt;` objects to operate on.</span>
+<span class="sd">            May be a list, set, tuple, or any iterable container. If `None`,</span>
+<span class="sd">            the equation will be applied to all zones.</span>
+<span class="sd">        i_range (`Range`, optional):</span>
+<span class="sd">            Tuple of integers for I:  (min, max, step). If `None`, then the</span>
+<span class="sd">            equation will operate on the entire range.</span>
+<span class="sd">            Not used for finite element nodal data.</span>
+<span class="sd">        j_range (`Range`, optional):</span>
+<span class="sd">            Tuple of integers for J:  (min, max, step). If `None`, then the</span>
+<span class="sd">            equation will operate on the entire range.</span>
+<span class="sd">            Not used for finite element nodal data.</span>
+<span class="sd">        k_range (`Range`, optional):</span>
+<span class="sd">            Tuple of integers for K:  (min, max, step). If `None`, then the</span>
+<span class="sd">            equation will operate on the entire range.</span>
+<span class="sd">            Not used for finite element nodal data.</span>
+<span class="sd">        value_location (`ValueLocation`, optional):</span>
+<span class="sd">            Variable `ValueLocation` for the variable on the left hand side.</span>
+<span class="sd">            This is used only if this variable is being created for the first</span>
+<span class="sd">            time.</span>
+<span class="sd">            If `None`, |Tecplot Engine| will choose the location for you.</span>
+<span class="sd">        variable_data_type (`FieldDataType`, optional):</span>
+<span class="sd">            Data type for the variable on the left hand side.</span>
+<span class="sd">            This is used only if this variable is being created for the first</span>
+<span class="sd">            time.</span>
+<span class="sd">            If `None`, |Tecplot Engine| will choose the type for you.</span>
+<span class="sd">        ignore_divide_by_zero (`bool`, optional):</span>
+<span class="sd">            `bool` value which instructs |Tecplot Engine| to ignore</span>
+<span class="sd">            divide by zero errors. The result is clamped</span>
+<span class="sd">            such that 0/0 is clamped to zero and (+/-N)/0</span>
+<span class="sd">            where N != 0 clamps to +/-maximum value for the given type.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        `TecplotSystemError`</span>
+
+<span class="sd">    .. warning:: Zero-based Indexing</span>
+
+<span class="sd">        It is important to know that all indexing in |PyTecplot| scripts are</span>
+<span class="sd">        zero-based. This is a departure from the macro language which is</span>
+<span class="sd">        one-based. This is to keep with the expectations when working in the</span>
+<span class="sd">        python language. However, |PyTecplot| does not modify strings that are</span>
+<span class="sd">        passed to the |Tecplot Engine|. This means that one-based indexing</span>
+<span class="sd">        should be used when running macro commands from python or when using</span>
+<span class="sd">        `execute_equation() &lt;tecplot.data.operate.execute_equation&gt;`.</span>
+
+<span class="sd">    Add one to variable &#39;X&#39; for zones &#39;Rectangular&#39; and &#39;Circular&#39; for every</span>
+<span class="sd">    data point:</span>
+<span class="sd">    &gt;&gt;&gt; import tecplot</span>
+<span class="sd">    &gt;&gt;&gt; dataset = tecplot.active_frame().dataset</span>
+<span class="sd">    &gt;&gt;&gt; execute_equation(&#39;{X} = {X} + 1&#39;, zones=[dataset.zone(&#39;Rectangular&#39;),</span>
+<span class="sd">    &gt;&gt;&gt;                  dataset.zone(&#39;Circular&#39;)])</span>
+
+<span class="sd">    Create a new, double precision variable called DIST:</span>
+
+<span class="sd">    &gt;&gt;&gt; execute_equation(&#39;{DIST} = SQRT({X}**2 + {Y}**2)&#39;,</span>
+<span class="sd">    ...                  variable_data_type=FieldDataType.Double)</span>
+
+<span class="sd">    Set a variable called **P** to zero along the boundary of an IJ-ordered</span>
+<span class="sd">    zone:</span>
+
+<span class="sd">    &gt;&gt;&gt; execute_equation(&#39;{P} = 0&#39;, i_range=Range(step=-1))</span>
+<span class="sd">    &gt;&gt;&gt; execute_equation(&#39;{P} = 0&#39;, j_range=Range(step=-1))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">equation</span><span class="p">,</span> <span class="n">string_types</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="s1">&#39;Equation must be a string&#39;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">equation</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span><span class="s1">&#39;Equation can not be empty&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value_location</span><span class="p">,</span> <span class="p">(</span><span class="n">ValueLocation</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">None</span><span class="p">))):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;value_location must be a ValueLocation&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variable_data_type</span><span class="p">,</span> <span class="p">(</span><span class="n">FieldDataType</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">None</span><span class="p">))):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;variable_data_type must be a FieldDataType&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ignore_divide_by_zero</span><span class="p">,</span> <span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">None</span><span class="p">))):</span>
+            <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="s1">&#39;ignore_divide_by_zero must be a bool&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Check that all zones belong to the active dataset</span>
+        <span class="c1"># (which is currently the only dataset option available)</span>
+        <span class="k">if</span> <span class="n">zones</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">current_dataset</span> <span class="o">=</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span><span class="o">.</span><span class="n">dataset</span>
+                <span class="n">parent_ids</span> <span class="o">=</span> <span class="p">{</span><span class="n">U</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span> <span class="k">for</span> <span class="n">U</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">}</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span>
+                    <span class="n">zones</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">)</span> <span class="k">else</span> <span class="p">{</span><span class="n">zones</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">}</span>
+
+                <span class="k">if</span> <span class="p">{</span><span class="n">current_dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">}</span> <span class="o">!=</span> <span class="n">parent_ids</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">TecplotValueError</span><span class="p">(</span>
+                        <span class="s1">&#39;All zones must have the same parent dataset&#39;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                <span class="k">pass</span>  <span class="c1"># integer indices do not care or know about parent dataset</span>
+
+    <span class="k">with</span> <span class="n">ArgList</span><span class="p">()</span> <span class="k">as</span> <span class="n">arglist</span><span class="p">:</span>
+        <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">EQUATION</span><span class="p">]</span> <span class="o">=</span> <span class="n">equation</span>
+        <span class="k">with</span> <span class="n">optional</span><span class="p">(</span><span class="n">IndexSet</span><span class="p">,</span> <span class="n">zones</span><span class="p">)</span> <span class="k">as</span> <span class="n">zoneset</span><span class="p">:</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">ZONESET</span><span class="p">]</span> <span class="o">=</span> <span class="n">zoneset</span>
+
+            <span class="k">for</span> <span class="n">dim</span><span class="p">,</span> <span class="n">rng</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">([</span><span class="s1">&#39;I&#39;</span><span class="p">,</span> <span class="s1">&#39;J&#39;</span><span class="p">,</span> <span class="s1">&#39;K&#39;</span><span class="p">],</span> <span class="p">[</span><span class="n">i_range</span><span class="p">,</span> <span class="n">j_range</span><span class="p">,</span> <span class="n">k_range</span><span class="p">]):</span>
+                <span class="k">if</span> <span class="n">rng</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rng</span><span class="p">,</span> <span class="n">Range</span><span class="p">):</span>
+                        <span class="n">rng</span> <span class="o">=</span> <span class="n">Range</span><span class="p">(</span><span class="o">*</span><span class="n">rng</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">rng</span><span class="o">.</span><span class="n">min</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                        <span class="n">arglist</span><span class="p">[</span><span class="n">dim</span> <span class="o">+</span> <span class="s1">&#39;MIN&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">Index</span><span class="p">(</span><span class="n">rng</span><span class="o">.</span><span class="n">min</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">rng</span><span class="o">.</span><span class="n">max</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                        <span class="n">arglist</span><span class="p">[</span><span class="n">dim</span> <span class="o">+</span> <span class="s1">&#39;MAX&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">Index</span><span class="p">(</span><span class="n">rng</span><span class="o">.</span><span class="n">max</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">rng</span><span class="o">.</span><span class="n">step</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                        <span class="n">step</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">rng</span><span class="o">.</span><span class="n">step</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">step</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                            <span class="n">arglist</span><span class="p">[</span><span class="n">dim</span> <span class="o">+</span> <span class="s1">&#39;SKIP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rng</span><span class="o">.</span><span class="n">step</span>
+
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VALUELOCATION</span><span class="p">]</span> <span class="o">=</span> <span class="n">value_location</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">VARDATATYPE</span><span class="p">]</span> <span class="o">=</span> <span class="n">variable_data_type</span>
+            <span class="n">arglist</span><span class="p">[</span><span class="n">sv</span><span class="o">.</span><span class="n">IGNOREDIVIDEBYZERO</span><span class="p">]</span> <span class="o">=</span> <span class="n">ignore_divide_by_zero</span>
+
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">DataAlterX</span><span class="p">(</span><span class="n">arglist</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+
+<span class="nd">@contextmanager</span>
+<span class="k">def</span> <span class="nf">_interpolate_process_args</span><span class="p">(</span><span class="n">dest_zone</span><span class="p">,</span> <span class="n">src_zones</span><span class="p">,</span> <span class="n">variables</span><span class="p">,</span> <span class="n">plot</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">plot</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="n">plot</span> <span class="o">=</span> <span class="n">layout</span><span class="o">.</span><span class="n">active_frame</span><span class="p">()</span><span class="o">.</span><span class="n">plot</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">dest_zone</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="n">dest_zone</span> <span class="o">=</span> <span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">dest_zone</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">src_zones</span><span class="p">,</span> <span class="p">(</span><span class="n">Iterable</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">None</span><span class="p">))):</span>
+        <span class="n">src_zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">src_zones</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variables</span><span class="p">,</span> <span class="p">(</span><span class="n">Iterable</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="bp">None</span><span class="p">))):</span>
+        <span class="n">variables</span> <span class="o">=</span> <span class="p">[</span><span class="n">variables</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span> <span class="o">!=</span> <span class="n">dest_zone</span><span class="o">.</span><span class="n">dataset</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Plot and destination zone do not share the same dataset.&#39;</span>
+            <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">src_zones</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">is_invalid_zone</span><span class="p">(</span><span class="n">z</span><span class="p">):</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">z</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+                    <span class="k">return</span> <span class="n">z</span> <span class="o">&gt;=</span> <span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">num_zones</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span> <span class="o">!=</span> <span class="n">z</span><span class="o">.</span><span class="n">dataset</span>
+            <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="n">is_invalid_zone</span><span class="p">,</span> <span class="n">src_zones</span><span class="p">)):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Source zones are not part of the same dataset.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">variables</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">is_invalid_variable</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+                    <span class="k">return</span> <span class="n">v</span> <span class="o">&gt;=</span> <span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">num_variables</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">plot</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">dataset</span> <span class="o">!=</span> <span class="n">v</span><span class="o">.</span><span class="n">dataset</span>
+            <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="n">is_invalid_variable</span><span class="p">,</span> <span class="n">variables</span><span class="p">)):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Variables are not part of the same dataset.&#39;</span>
+                <span class="k">raise</span> <span class="n">TecplotLogicError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">plot</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+        <span class="k">with</span> <span class="n">optional</span><span class="p">(</span><span class="n">IndexSet</span><span class="p">,</span> <span class="n">src_zones</span><span class="p">)</span> <span class="k">as</span> <span class="n">src</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">optional</span><span class="p">(</span><span class="n">IndexSet</span><span class="p">,</span> <span class="n">variables</span><span class="p">)</span> <span class="k">as</span> <span class="n">varset</span><span class="p">:</span>
+                <span class="n">dest</span> <span class="o">=</span> <span class="n">dest_zone</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span>
+                <span class="k">yield</span> <span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">varset</span>
+
+
+<div class="viewcode-block" id="interpolate_linear"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.operate.interpolate_linear">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">interpolate_linear</span><span class="p">(</span><span class="n">destination_zone</span><span class="p">,</span> <span class="n">source_zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                       <span class="n">fill_value</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">plot</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Linear interpolation onto a destination zone.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        destination_zone (`zone &lt;data_access&gt;` or `integer &lt;int&gt;`): The</span>
+<span class="sd">            destination zone (or zone index) for interpolation.</span>
+<span class="sd">        source_zones (`zones &lt;data_access&gt;` or `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            Zones (or zone indices) used to obtain the field values for</span>
+<span class="sd">            interpolation. By default, all zones except the *destination_zone*</span>
+<span class="sd">            will be used. All source zones must be FE-Tetra, FE-Brick or be</span>
+<span class="sd">            IJK-ordered when doing linear interpolation in 3D.</span>
+<span class="sd">        variables (`variables &lt;Variable&gt;` or `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            Variables (or variable indices) to interpolate. By default, all</span>
+<span class="sd">            variables except those assigned to the axes will be used and is in</span>
+<span class="sd">            general dependent on the active plot type of the frame.</span>
+<span class="sd">        fill_value (`float`, optional): Constant value to which all points</span>
+<span class="sd">            outside the data field are set. By default, the values outside</span>
+<span class="sd">            the field are preserved.</span>
+<span class="sd">        plot (:ref:`plot`, optional): The plot to use when interpolating which</span>
+<span class="sd">            determines the dimensionality and spatial variables. By default,</span>
+<span class="sd">            the active plot on the active frame will be used.</span>
+
+<span class="sd">    .. note:: Cartesian 2D and 3D plots only.</span>
+
+<span class="sd">        This interpolation method relies on the coordinates, :math:`(x, y)` for</span>
+<span class="sd">        2D or :math:`(x, y, z)` for 3D, set for the active (or given) plot</span>
+<span class="sd">        which must be either Cartesian2D or Cartesian3D.</span>
+
+<span class="sd">    The following example loads a 2D dataset and uses interpolation to merge information from two independent zones:</span>
+
+<span class="sd">    .. code-block:: python</span>
+
+<span class="sd">        import os</span>
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        # Use interpolation to merge information from two independent zones</span>
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;SimpleData&#39;, &#39;RainierElevation.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+<span class="sd">        # Get list of source zones to use later</span>
+<span class="sd">        srczones = list(dataset.zones())</span>
+
+<span class="sd">        fr = tp.active_frame()</span>
+<span class="sd">        plot = fr.plot(PlotType.Cartesian2D)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.show_edge = True</span>
+
+<span class="sd">        # Show two section of the plot independently</span>
+<span class="sd">        plot.contour(0).legend.show = False</span>
+<span class="sd">        plot.contour(1).legend.show = False</span>
+<span class="sd">        plot.contour(1).colormap_name = &#39;Diverging - Blue/Red&#39;</span>
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            plot.fieldmap(scrzone).edge.line_thickness = 0.4</span>
+<span class="sd">        plot.fieldmap(0).contour.flood_contour_group = plot.contour(1)</span>
+
+<span class="sd">        # export image of original data</span>
+<span class="sd">        tp.export.save_png(&#39;interpolate_2d_source.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        # use the first zone as the source, and get the range of (x, y)</span>
+<span class="sd">        xvar = plot.axes.x_axis.variable</span>
+<span class="sd">        yvar = plot.axes.y_axis.variable</span>
+<span class="sd">        ymin, xmin = 99999,99999</span>
+<span class="sd">        ymax, xmax = -99999,-99999</span>
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            curxmin, curxmax = scrzone.values(xvar.index).minmax()</span>
+<span class="sd">            curymin, curymax = scrzone.values(yvar.index).minmax()</span>
+<span class="sd">            ymin = min(curymin,ymin)</span>
+<span class="sd">            ymax = max(curymax,ymax)</span>
+<span class="sd">            xmin = min(curxmin,xmin)</span>
+<span class="sd">            xmax = max(curxmax,xmax)</span>
+
+<span class="sd">        # create new zone with a coarse grid</span>
+<span class="sd">        # onto which we will interpolate from the source zone</span>
+<span class="sd">        xpoints = 40</span>
+<span class="sd">        ypoints = 40</span>
+<span class="sd">        newzone = dataset.add_ordered_zone(&#39;Interpolated&#39;, (xpoints, ypoints))</span>
+
+<span class="sd">        # setup the (x, y) positions of the new grid</span>
+<span class="sd">        xx = np.linspace(xmin, xmax, xpoints)</span>
+<span class="sd">        yy = np.linspace(ymin, ymax, ypoints)</span>
+<span class="sd">        YY, XX = np.meshgrid(yy, xx, indexing=&#39;ij&#39;)</span>
+<span class="sd">        newzone.values(xvar.index)[:] = XX.ravel()</span>
+<span class="sd">        newzone.values(yvar.index)[:] = YY.ravel()</span>
+
+<span class="sd">        # perform linear interpolation from the source to the new zone</span>
+<span class="sd">        tp.data.operate.interpolate_linear(newzone, source_zones=srczones)</span>
+
+<span class="sd">        # show the new zone&#39;s data, hide the source</span>
+<span class="sd">        plot.fieldmap(newzone).show = True</span>
+<span class="sd">        plot.fieldmap(newzone).contour.show = True</span>
+<span class="sd">        plot.fieldmap(newzone).contour.flood_contour_group = plot.contour(0)</span>
+<span class="sd">        plot.fieldmap(newzone).edge.show = True</span>
+<span class="sd">        plot.fieldmap(newzone).edge.line_thickness = .4</span>
+<span class="sd">        plot.fieldmap(newzone).edge.color = Color.Orange</span>
+
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            plot.fieldmap(scrzone).show = False</span>
+
+<span class="sd">        # export image of interpolated data</span>
+<span class="sd">        tp.export.save_png(&#39;interpolate_linear_2d_dest.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/interpolate_2d_source.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+<span class="sd">        Source data.</span>
+
+<span class="sd">    .. figure:: /_static/images/interpolate_linear_2d_dest.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+<span class="sd">        Interpolated data.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="n">_interpolate_process_args</span><span class="p">(</span><span class="n">destination_zone</span><span class="p">,</span> <span class="n">source_zones</span><span class="p">,</span> <span class="n">variables</span><span class="p">,</span>
+                                   <span class="n">plot</span><span class="p">)</span> <span class="k">as</span> <span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">varset</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">fill_value</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">interp_const</span> <span class="o">=</span> <span class="mf">0.0</span>
+            <span class="n">interp_mode</span> <span class="o">=</span> <span class="n">LinearInterpMode</span><span class="o">.</span><span class="n">DontChange</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">interp_const</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">fill_value</span><span class="p">)</span>
+            <span class="n">interp_mode</span> <span class="o">=</span> <span class="n">LinearInterpMode</span><span class="o">.</span><span class="n">SetToConst</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">LinearInterpolate</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">varset</span><span class="p">,</span> <span class="n">interp_const</span><span class="p">,</span>
+                                          <span class="n">interp_mode</span><span class="o">.</span><span class="n">value</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="interpolate_kriging"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.operate.interpolate_kriging">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">interpolate_kriging</span><span class="p">(</span><span class="n">destination_zone</span><span class="p">,</span> <span class="n">source_zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                        <span class="n">krig_range</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span> <span class="n">zero_value</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">drift</span><span class="o">=</span><span class="n">Drift</span><span class="o">.</span><span class="n">Linear</span><span class="p">,</span>
+                        <span class="n">point_selection</span><span class="o">=</span><span class="n">PtSelection</span><span class="o">.</span><span class="n">OctantN</span><span class="p">,</span> <span class="n">num_points</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+                        <span class="n">plot</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Kriging interpolation onto a destination zone.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        destination_zone (`zone &lt;data_access&gt;` or `integer &lt;int&gt;`): The</span>
+<span class="sd">            destination zone (or zone index) for interpolation.</span>
+<span class="sd">        source_zones (`zones &lt;data_access&gt;` or `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            Zones (or zone indices) used to obtain the field values for</span>
+<span class="sd">            interpolation. By default, all zones except the *destination_zone*</span>
+<span class="sd">            will be used. All source zones must be FE-Tetra, FE-Brick or be</span>
+<span class="sd">            IJK-ordered when doing linear interpolation in 3D.</span>
+<span class="sd">        variables (`variables &lt;Variable&gt;` or `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            Variables (or variable indices) to interpolate. By default, all</span>
+<span class="sd">            variables except those assigned to the axes will be used and is in</span>
+<span class="sd">            general dependent on the active plot type of the frame.</span>
+<span class="sd">        krig_range (`float`, optional): Distance beyond which source points</span>
+<span class="sd">            become insignificant. Must be between zero and one, inclusive.</span>
+<span class="sd">            (default: 0.3)</span>
+<span class="sd">        zero_value (`float`, optional): Semi-variance at each source data point</span>
+<span class="sd">            on a normalized scale from zero to one. (default: 0.0)</span>
+<span class="sd">        drift (`Drift`, optional): Overall trend for the data. Possible values:</span>
+<span class="sd">            `Drift.None_` no trend, `Drift.Linear` (default) linear trend,</span>
+<span class="sd">            `Drift.Quad` quadratic trend.</span>
+<span class="sd">        point_selection (`PtSelection`, optional): Method for determining which</span>
+<span class="sd">            source points to consider for each destination data point. Possible</span>
+<span class="sd">            values: `PtSelection.OctantN` (default) closest *num_points*</span>
+<span class="sd">            selected by coordinate-system octants, `PtSelection.NearestN`</span>
+<span class="sd">            closest *num_points* to the destination point, `PtSelection.All`</span>
+<span class="sd">            all points in the source zone.</span>
+<span class="sd">        num_points (`integer &lt;int&gt;`, optional): Number of source points to</span>
+<span class="sd">            consider for each destination data point if *point_selection* is</span>
+<span class="sd">            `PtSelection.OctantN` or `PtSelection.NearestN`. (default: 8)</span>
+<span class="sd">        plot (:ref:`plot`, optional): The plot to use when interpolating which</span>
+<span class="sd">            determines the dimensionality and spatial variables. By default,</span>
+<span class="sd">            the active plot on the active frame will be used.</span>
+
+<span class="sd">    .. note:: Cartesian 2D and 3D plots only.</span>
+
+<span class="sd">        This interpolation method relies on the coordinates, :math:`(x, y)` for</span>
+<span class="sd">        2D or :math:`(x, y, z)` for 3D, set for the active (or given) plot</span>
+<span class="sd">        which must be either Cartesian2D or Cartesian3D.</span>
+
+<span class="sd">    The following example loads a 2D dataset and interpolates the first zone to</span>
+<span class="sd">    a new one with a larger grid spacing:</span>
+
+<span class="sd">    .. code-block:: python</span>
+
+<span class="sd">        import os</span>
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        # Use interpolation to merge information from two independent zones</span>
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;SimpleData&#39;,</span>
+<span class="sd">                                &#39;RainierElevation.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+<span class="sd">        # Get list of source zones to use later</span>
+<span class="sd">        srczones = list(dataset.zones())</span>
+
+<span class="sd">        fr = tp.active_frame()</span>
+<span class="sd">        plot = fr.plot(PlotType.Cartesian2D)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.show_edge = True</span>
+
+<span class="sd">        # Show two section of the plot independently</span>
+<span class="sd">        plot.contour(0).legend.show = False</span>
+<span class="sd">        plot.contour(1).legend.show = False</span>
+<span class="sd">        plot.contour(1).colormap_name = &#39;Diverging - Blue/Red&#39;</span>
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            plot.fieldmap(scrzone).edge.line_thickness = 0.4</span>
+<span class="sd">        plot.fieldmap(0).contour.flood_contour_group = plot.contour(1)</span>
+
+<span class="sd">        # export image of original data</span>
+<span class="sd">        tp.export.save_png(&#39;interpolate_2d_source.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        # use the first zone as the source, and get the range of (x, y)</span>
+<span class="sd">        xvar = plot.axes.x_axis.variable</span>
+<span class="sd">        yvar = plot.axes.y_axis.variable</span>
+<span class="sd">        ymin, xmin = 99999,99999</span>
+<span class="sd">        ymax, xmax = -99999,-99999</span>
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            curxmin, curxmax = scrzone.values(xvar.index).minmax()</span>
+<span class="sd">            curymin, curymax = scrzone.values(yvar.index).minmax()</span>
+<span class="sd">            ymin = min(curymin,ymin)</span>
+<span class="sd">            ymax = max(curymax,ymax)</span>
+<span class="sd">            xmin = min(curxmin,xmin)</span>
+<span class="sd">            xmax = max(curxmax,xmax)</span>
+
+<span class="sd">        # create new zone with a coarse grid</span>
+<span class="sd">        # onto which we will interpolate from the source zone</span>
+<span class="sd">        xpoints = 20</span>
+<span class="sd">        ypoints = 20</span>
+<span class="sd">        newzone = dataset.add_ordered_zone(&#39;Interpolated&#39;, (xpoints, ypoints))</span>
+
+<span class="sd">        # setup the (x, y) positions of the new grid</span>
+<span class="sd">        xx = np.linspace(xmin, xmax, xpoints)</span>
+<span class="sd">        yy = np.linspace(ymin, ymax, ypoints)</span>
+<span class="sd">        YY, XX = np.meshgrid(yy, xx, indexing=&#39;ij&#39;)</span>
+<span class="sd">        newzone.values(xvar.index)[:] = XX.ravel()</span>
+<span class="sd">        newzone.values(yvar.index)[:] = YY.ravel()</span>
+
+<span class="sd">        # perform linear interpolation from the source to the new zone</span>
+<span class="sd">        tp.data.operate.interpolate_kriging(newzone, source_zones=srczones,</span>
+<span class="sd">                                            drift=Drift.None_, num_points=1)</span>
+
+<span class="sd">        # show the new zone&#39;s data, hide the source</span>
+<span class="sd">        plot.fieldmap(newzone).show = True</span>
+<span class="sd">        plot.fieldmap(newzone).contour.show = True</span>
+<span class="sd">        plot.fieldmap(newzone).contour.flood_contour_group = plot.contour(0)</span>
+<span class="sd">        plot.fieldmap(newzone).edge.show = True</span>
+<span class="sd">        plot.fieldmap(newzone).edge.line_thickness = .4</span>
+<span class="sd">        plot.fieldmap(newzone).edge.color = Color.Orange</span>
+
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            plot.fieldmap(scrzone).show = False</span>
+
+<span class="sd">        # export image of interpolated data</span>
+<span class="sd">        tp.export.save_png(&#39;interpolate_krig_2d_dest.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/interpolate_2d_source.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+<span class="sd">        Source data.</span>
+
+<span class="sd">    .. figure:: /_static/images/interpolate_krig_2d_dest.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+<span class="sd">        Interpolated data.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="n">_interpolate_process_args</span><span class="p">(</span><span class="n">destination_zone</span><span class="p">,</span> <span class="n">source_zones</span><span class="p">,</span> <span class="n">variables</span><span class="p">,</span>
+                                   <span class="n">plot</span><span class="p">)</span> <span class="k">as</span> <span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">varset</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">Krig</span><span class="p">(</span>
+            <span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">varset</span><span class="p">,</span> <span class="n">krig_range</span><span class="p">,</span> <span class="n">zero_value</span><span class="p">,</span> <span class="n">Drift</span><span class="p">(</span><span class="n">drift</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                <span class="n">PtSelection</span><span class="p">(</span><span class="n">point_selection</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">num_points</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="interpolate_inverse_distance"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.operate.interpolate_inverse_distance">[docs]</a><span class="nd">@lock</span><span class="p">()</span>
+<span class="k">def</span> <span class="nf">interpolate_inverse_distance</span><span class="p">(</span><span class="n">destination_zone</span><span class="p">,</span> <span class="n">source_zones</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                                 <span class="n">variables</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">exponent</span><span class="o">=</span><span class="mf">3.5</span><span class="p">,</span> <span class="n">min_radius</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+                                 <span class="n">point_selection</span><span class="o">=</span><span class="n">PtSelection</span><span class="o">.</span><span class="n">OctantN</span><span class="p">,</span>
+                                 <span class="n">num_points</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">plot</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Inverse-Distance interpolation onto a destination zone.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">        destination_zone (`zone &lt;data_access&gt;` or `integer &lt;int&gt;`): The</span>
+<span class="sd">            destination zone (or zone index) for interpolation.</span>
+<span class="sd">        source_zones (`zones &lt;data_access&gt;` or `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            Zones (or zone indices) used to obtain the field values for</span>
+<span class="sd">            interpolation. By default, all zones except the *destination_zone*</span>
+<span class="sd">            will be used. All source zones must be FE-Tetra, FE-Brick or be</span>
+<span class="sd">            IJK-ordered when doing linear interpolation in 3D.</span>
+<span class="sd">        variables (`variables &lt;Variable&gt;` or `integers &lt;int&gt;`, optional):</span>
+<span class="sd">            Variables (or variable indices) to interpolate. By default, all</span>
+<span class="sd">            variables except those assigned to the axes will be used and is in</span>
+<span class="sd">            general dependent on the active plot type of the frame.</span>
+<span class="sd">        exponent (`float`, optional): Exponent for the inverse-distance</span>
+<span class="sd">            weighting. (default: 3.5)</span>
+<span class="sd">        num_radius (`float`, optional): Minimum distance used for the</span>
+<span class="sd">            inverse-distance weighting. (default: 0.0)</span>
+<span class="sd">        point_selection (`PtSelection`, optional): Method for determining which</span>
+<span class="sd">            source points to consider for each destination data point. Possible</span>
+<span class="sd">            values: `PtSelection.OctantN` (default) closest *num_points*</span>
+<span class="sd">            selected by coordinate-system octants, `PtSelection.NearestN`</span>
+<span class="sd">            closest *num_points* to the destination point, `PtSelection.All`</span>
+<span class="sd">            all points in the source zone.</span>
+<span class="sd">        num_points (`integer &lt;int&gt;`, optional): Number of source points to</span>
+<span class="sd">            consider for each destination data point if *point_selection* is</span>
+<span class="sd">            `PtSelection.OctantN` or `PtSelection.NearestN`. (default: 8)</span>
+<span class="sd">        plot (:ref:`plot`, optional): The plot to use when interpolating which</span>
+<span class="sd">            determines the dimensionality and spatial variables. By default,</span>
+<span class="sd">            the active plot on the active frame will be used.</span>
+
+<span class="sd">    .. note:: Cartesian 2D and 3D plots only.</span>
+
+<span class="sd">        This interpolation method relies on the coordinates, :math:`(x, y)` for</span>
+<span class="sd">        2D or :math:`(x, y, z)` for 3D, set for the active (or given) plot</span>
+<span class="sd">        which must be either Cartesian2D or Cartesian3D.</span>
+
+<span class="sd">    The following example loads a 2D dataset and interpolates the first zone to</span>
+<span class="sd">    a new one with a larger grid spacing:</span>
+
+<span class="sd">    .. code-block:: python</span>
+
+<span class="sd">        import os</span>
+<span class="sd">        import numpy as np</span>
+<span class="sd">        import tecplot as tp</span>
+<span class="sd">        from tecplot.constant import *</span>
+
+<span class="sd">        # Use interpolation to merge information from two independent zones</span>
+<span class="sd">        examples_dir = tp.session.tecplot_examples_directory()</span>
+<span class="sd">        datafile = os.path.join(examples_dir, &#39;SimpleData&#39;, &#39;RainierElevation.plt&#39;)</span>
+<span class="sd">        dataset = tp.data.load_tecplot(datafile)</span>
+<span class="sd">        # Get list of source zones to use later</span>
+<span class="sd">        srczones = list(dataset.zones())</span>
+
+<span class="sd">        fr = tp.active_frame()</span>
+<span class="sd">        plot = fr.plot(PlotType.Cartesian2D)</span>
+<span class="sd">        plot.activate()</span>
+<span class="sd">        plot.show_contour = True</span>
+<span class="sd">        plot.show_edge = True</span>
+
+<span class="sd">        # Show two section of the plot independently</span>
+<span class="sd">        plot.contour(0).legend.show = False</span>
+<span class="sd">        plot.contour(1).legend.show = False</span>
+<span class="sd">        plot.contour(1).colormap_name = &#39;Diverging - Blue/Red&#39;</span>
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            plot.fieldmap(scrzone).edge.line_thickness = 0.4</span>
+<span class="sd">        plot.fieldmap(0).contour.flood_contour_group = plot.contour(1)</span>
+
+<span class="sd">        # export image of original data</span>
+<span class="sd">        tp.export.save_png(&#39;interpolate_2d_source.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">        # use the first zone as the source, and get the range of (x, y)</span>
+<span class="sd">        xvar = plot.axes.x_axis.variable</span>
+<span class="sd">        yvar = plot.axes.y_axis.variable</span>
+<span class="sd">        ymin, xmin = 99999,99999</span>
+<span class="sd">        ymax, xmax = -99999,-99999</span>
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            curxmin, curxmax = scrzone.values(xvar.index).minmax()</span>
+<span class="sd">            curymin, curymax = scrzone.values(yvar.index).minmax()</span>
+<span class="sd">            ymin = min(curymin,ymin)</span>
+<span class="sd">            ymax = max(curymax,ymax)</span>
+<span class="sd">            xmin = min(curxmin,xmin)</span>
+<span class="sd">            xmax = max(curxmax,xmax)</span>
+
+<span class="sd">        # create new zone with a coarse grid</span>
+<span class="sd">        # onto which we will interpolate from the source zone</span>
+<span class="sd">        xpoints = 40</span>
+<span class="sd">        ypoints = 40</span>
+<span class="sd">        newzone = dataset.add_ordered_zone(&#39;Interpolated&#39;, (xpoints, ypoints))</span>
+
+<span class="sd">        # setup the (x, y) positions of the new grid</span>
+<span class="sd">        xx = np.linspace(xmin, xmax, xpoints)</span>
+<span class="sd">        yy = np.linspace(ymin, ymax, ypoints)</span>
+<span class="sd">        YY, XX = np.meshgrid(yy, xx, indexing=&#39;ij&#39;)</span>
+<span class="sd">        newzone.values(xvar.index)[:] = XX.ravel()</span>
+<span class="sd">        newzone.values(yvar.index)[:] = YY.ravel()</span>
+
+<span class="sd">        # perform linear interpolation from the source to the new zone</span>
+<span class="sd">        tp.data.operate.interpolate_inverse_distance(newzone, source_zones=srczones)</span>
+
+<span class="sd">        # show the new zone&#39;s data, hide the source</span>
+<span class="sd">        plot.fieldmap(newzone).show = True</span>
+<span class="sd">        plot.fieldmap(newzone).contour.show = True</span>
+<span class="sd">        plot.fieldmap(newzone).contour.flood_contour_group = plot.contour(0)</span>
+<span class="sd">        plot.fieldmap(newzone).edge.show = True</span>
+<span class="sd">        plot.fieldmap(newzone).edge.line_thickness = .4</span>
+<span class="sd">        plot.fieldmap(newzone).edge.color = Color.Orange</span>
+
+<span class="sd">        for scrzone in srczones:</span>
+<span class="sd">            plot.fieldmap(scrzone).show = False</span>
+
+<span class="sd">        # export image of interpolated data</span>
+<span class="sd">        tp.export.save_png(&#39;interpolate_invdst_2d_dest.png&#39;, 600, supersample=3)</span>
+
+<span class="sd">    .. figure:: /_static/images/interpolate_2d_source.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+<span class="sd">        Source data.</span>
+
+<span class="sd">    .. figure:: /_static/images/interpolate_invdst_2d_dest.png</span>
+<span class="sd">        :width: 300px</span>
+<span class="sd">        :figwidth: 300px</span>
+
+<span class="sd">        Interpolated data.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="n">_interpolate_process_args</span><span class="p">(</span><span class="n">destination_zone</span><span class="p">,</span> <span class="n">source_zones</span><span class="p">,</span> <span class="n">variables</span><span class="p">,</span>
+                                   <span class="n">plot</span><span class="p">)</span> <span class="k">as</span> <span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">varset</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">InverseDistInterpolation</span><span class="p">(</span>
+            <span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">varset</span><span class="p">,</span> <span class="n">exponent</span><span class="p">,</span> <span class="n">min_radius</span><span class="p">,</span>
+                <span class="n">PtSelection</span><span class="p">(</span><span class="n">point_selection</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">num_points</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>

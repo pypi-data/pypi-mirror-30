@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>tecplot.data.zone &#8212; PyTecplot 0.9.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/pydoctheme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../../',
+        VERSION:     '0.9.4',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="../../../_static/sidebar.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <link rel="shortcut icon" type="image/gif" href="../../../_static/favicon.gif" />
+    <meta name="viewport" content="width=device-width,initial-scale=0.8">
+    
+    <script type="text/javascript" src="../../../_static/copybutton.js"></script>
+
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="responsive-menu"><a href="#sidebar-anchor" title="Navigation">&#9776;</a></li>
+        <li><a href="../../../index.html">PyTecplot-0.9</a> &#187;</li>
+          <li><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for tecplot.data.zone</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Zones describe the size, shape, element (cell) geometry, connectivity and</span>
+<span class="sd">solution time of arrays in a dataset. Zones created as &quot;ordered,&quot; &quot;classic</span>
+<span class="sd">finite-element,&quot; or &quot;polytopal finite-element&quot; along with the number of nodes</span>
+<span class="sd">and elements which can not be changed (without creating a new zone). Ordered</span>
+<span class="sd">zones are always considered to be logically-rectangular grids of one, two or</span>
+<span class="sd">three dimensions depending on the shape. Classic finite-element zones must use</span>
+<span class="sd">a fixed-type element throughout. This means that each element has the same</span>
+<span class="sd">number of faces and nodes. Polytopal zones can have a varying number of faces</span>
+<span class="sd">and nodes for each element. The connectivity is implied in ordered zones and</span>
+<span class="sd">explicitly provided by the user for finite-element zones.</span>
+
+<span class="sd">In PyTecplot, there are three zone class objects: `OrderedZone`,</span>
+<span class="sd">`ClassicFEZone` and `PolyFEZone`. The `OrderedZone` and `ClassicFEZone` classes</span>
+<span class="sd">use the `FaceNeighbors` class to handle &quot;global&quot; face-neighbor connections from</span>
+<span class="sd">one zone to another. The connectivity for the `ClassicFEZone` objects are</span>
+<span class="sd">accessed through the `Nodemap` class. The `PolyFEZone` objects provide element</span>
+<span class="sd">definition and connectivity access through the `Facemap` class.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="kn">import</span> <span class="nb">int</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="nb">reduce</span>
+<span class="kn">from</span> <span class="nn">six</span> <span class="kn">import</span> <span class="n">string_types</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span>
+
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">_tecutil</span><span class="p">,</span> <span class="n">_tecutil_connector</span>
+<span class="kn">from</span> <span class="nn">..constant</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..exception</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">session</span><span class="p">,</span> <span class="n">layout</span><span class="p">,</span> <span class="n">version</span>
+<span class="kn">from</span> <span class="nn">..tecutil</span> <span class="kn">import</span> <span class="n">Index</span><span class="p">,</span> <span class="n">inherited_property</span><span class="p">,</span> <span class="n">lock</span><span class="p">,</span> <span class="n">lock_attributes</span>
+<span class="kn">from</span> <span class="nn">.array</span> <span class="kn">import</span> <span class="n">Array</span>
+<span class="kn">from</span> <span class="nn">.face_neighbors</span> <span class="kn">import</span> <span class="n">FaceNeighbors</span>
+<span class="kn">from</span> <span class="nn">.facemap</span> <span class="kn">import</span> <span class="n">Facemap</span>
+<span class="kn">from</span> <span class="nn">.nodemap</span> <span class="kn">import</span> <span class="n">Nodemap</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="nd">@lock_attributes</span>
+<span class="k">class</span> <span class="nc">Zone</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uid</span><span class="p">,</span> <span class="n">dataset</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">=</span> <span class="n">uid</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span> <span class="o">=</span> <span class="n">dataset</span>
+
+    <span class="k">def</span> <span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Brief string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Brief representation of this `Zone &lt;data_access&gt;`,</span>
+<span class="sd">            showing a list of associated `Variables &lt;Variable&gt;`.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; rect_zone = dataset.zone(&#39;Rectangular zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(rect_zone)</span>
+<span class="sd">            Zone: &#39;Rectangular zone&#39;</span>
+<span class="sd">              Type: Ordered</span>
+<span class="sd">              Shape: (10, 10, 10)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">fmt</span> <span class="o">=</span> <span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span><span class="se">\</span>
+<span class="s1">            Zone: &#39;{}&#39;</span>
+<span class="s1">              Type: {}</span>
+<span class="s1">              Shape: {}&#39;&#39;&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">fmt</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">zone_type</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shape</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Executable string representation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `string &lt;str&gt;`: Internal representation of this `Zone</span>
+<span class="sd">            &lt;data_access&gt;`.</span>
+
+<span class="sd">        The string returned can be executed to generate a clone of this</span>
+<span class="sd">        `Zone &lt;data_access&gt;` object::</span>
+
+<span class="sd">            &gt;&gt;&gt; rectzone = dataset.zone(&#39;Rectangular zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(repr(rectzone))</span>
+<span class="sd">            Zone(uid=31, Dataset(uid=21, frame=Frame(uid=11, page=Page(uid=1)))</span>
+<span class="sd">            &gt;&gt;&gt; exec(&#39;rectzone_clone = &#39;+repr(rectzone))</span>
+<span class="sd">            &gt;&gt;&gt; rectzone_clone</span>
+<span class="sd">            Zone(uid=31, Dataset(uid=21, frame=Frame(uid=11, page=Page(uid=1)))</span>
+<span class="sd">            &gt;&gt;&gt; rectzone == rectzone_clone</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;Zone(uid={uid}, dataset={dataset})&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="n">uid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="nb">repr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks for equality in the |Tecplot Engine|.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `bool`: `True` if the unique ID numbers are the same for both</span>
+<span class="sd">            `Zones &lt;data_access&gt;`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">uid</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">uid</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span> <span class="o">==</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">aux_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Auxiliary data for this zone.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `AuxData`</span>
+
+<span class="sd">        This is the auxiliary data attached to the zone. Such data is</span>
+<span class="sd">        written to the layout file by default and can be retrieved later.</span>
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; frame = tp.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; aux = frame.dataset.zone(&#39;My Zone&#39;).aux_data</span>
+<span class="sd">            &gt;&gt;&gt; aux[&#39;X_weighted_avg&#39;] = &#39;3.14159&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(aux[&#39;X_weighted_avg&#39;])</span>
+<span class="sd">            3.14159</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">session</span><span class="o">.</span><span class="n">AuxData</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="p">,</span> <span class="n">AuxDataObjectType</span><span class="o">.</span><span class="n">Zone</span><span class="p">,</span>
+                               <span class="bp">self</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Zero-based position within the parent `Dataset`.</span>
+
+<span class="sd">        :type: `Index`</span>
+
+<span class="sd">        This is the value used to obtain a specific zone if you have</span>
+<span class="sd">        duplicately named zones in the dataset::</span>
+
+<span class="sd">            &gt;&gt;&gt; tp.new_layout()</span>
+<span class="sd">            &gt;&gt;&gt; frame = tp.active_frame()</span>
+<span class="sd">            &gt;&gt;&gt; dataset = frame.create_dataset(&#39;Dataset&#39;, [&#39;x&#39;, &#39;y&#39;])</span>
+<span class="sd">            &gt;&gt;&gt; dataset.add_ordered_zone(&#39;Zone&#39;, (10,10,10))</span>
+<span class="sd">            &gt;&gt;&gt; dataset.add_ordered_zone(&#39;Zone&#39;, (3,3,3))</span>
+<span class="sd">            &gt;&gt;&gt; # getting zone by name always returns first match</span>
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;Zone&#39;).index)</span>
+<span class="sd">            0</span>
+<span class="sd">            &gt;&gt;&gt; # use index to get specific zone</span>
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(1).dimensions)</span>
+<span class="sd">            (3, 3, 3)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Index</span><span class="p">(</span><span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetNumByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">strand</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The strand ID number.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset.zone(&#39;My Zone&#39;).strand = 2</span>
+
+<span class="sd">        .. note:: **Possible side-effect when connected to Tecplot 360.**</span>
+
+<span class="sd">                Changing the solution times in the dataset or modifying the</span>
+<span class="sd">                active fieldmaps in a frame may trigger a change in the active</span>
+<span class="sd">                plot&#39;s solution time by the Tecplot 360 interface. This is done</span>
+<span class="sd">                to keep the GUI controls consistent. In batch mode, no such</span>
+<span class="sd">                side-effect will take place and the user must take care to set</span>
+<span class="sd">                the plot&#39;s solution time with the `plot.solution_time</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_time&gt;` or</span>
+<span class="sd">                `plot.solution_timestep</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_timestep&gt;` properties.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">MESSAGES</span><span class="o">.</span><span class="n">PERFORMANCE_IMPROVEMENTS</span><span class="p">)</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetStrandID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetStrandIDByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                                                       <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@strand.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">strand</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">__debug__</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">TecplotTypeError</span><span class="p">(</span><span class="s1">&#39;strand must be an integer.&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">MESSAGES</span><span class="o">.</span><span class="n">PERFORMANCE_IMPROVEMENTS</span><span class="p">)</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+                <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneSetStrandID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneSetStrandIDByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                                                <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">solution_time</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The solution time for this zone.</span>
+
+<span class="sd">        :type: `float`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset.zone(&#39;My Zone&#39;).solution_time = 3.14</span>
+
+<span class="sd">        .. note:: **Possible side-effect when connected to Tecplot 360.**</span>
+
+<span class="sd">                Changing the solution times in the dataset or modifying the</span>
+<span class="sd">                active fieldmaps in a frame may trigger a change in the active</span>
+<span class="sd">                plot&#39;s solution time by the Tecplot 360 interface. This is done</span>
+<span class="sd">                to keep the GUI controls consistent. In batch mode, no such</span>
+<span class="sd">                side-effect will take place and the user must take care to set</span>
+<span class="sd">                the plot&#39;s solution time with the `plot.solution_time</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_time&gt;` or</span>
+<span class="sd">                `plot.solution_timestep</span>
+<span class="sd">                &lt;Cartesian3DFieldPlot.solution_timestep&gt;` properties.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetSolutionTime</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@solution_time.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">solution_time</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+            <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneSetSolutionTime</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">zone_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">version</span><span class="o">.</span><span class="n">sdk_version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2017</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">MESSAGES</span><span class="o">.</span><span class="n">PERFORMANCE_IMPROVEMENTS</span><span class="p">)</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">activated</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetType</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetTypeByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                                                   <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The name of the zone.</span>
+
+<span class="sd">        :type: `string &lt;str&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset.zone(0).name = &#39;Zone 0&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">res</span><span class="p">,</span> <span class="n">zname</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetNameByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span>
+                                                     <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">res</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TecplotSystemError</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">zname</span>
+
+    <span class="nd">@name.setter</span>
+    <span class="nd">@lock</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneRenameByDataSetID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of `Variables &lt;Variable&gt;` in the parent `Dataset`.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage, iterating over all variables by index::</span>
+
+<span class="sd">            &gt;&gt;&gt; for i in range(dataset.num_variables):</span>
+<span class="sd">            ...     variable = dataset.variable(i)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">num_variables</span>
+
+    <span class="k">def</span> <span class="nf">values</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns an `Array` by index or string pattern.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            pattern (`integer &lt;int&gt;` or `string &lt;str&gt;`): Zero-based index,</span>
+<span class="sd">                `glob-style pattern &lt;fnmatch.fnmatch&gt;` in which case, the first</span>
+<span class="sd">                match is returned, or a `Variable` object.</span>
+
+<span class="sd">        The `Variable.name` attribute is used to match the *pattern* to the</span>
+<span class="sd">        desired `Array` though this is not necessarily unique::</span>
+
+<span class="sd">            &gt;&gt;&gt; ds = frame.dataset</span>
+<span class="sd">            &gt;&gt;&gt; print(ds)</span>
+<span class="sd">            Dataset:</span>
+<span class="sd">              Zones: [&#39;Rectangular zone&#39;]</span>
+<span class="sd">              Variables: [&#39;x&#39;, &#39;y&#39;, &#39;z&#39;]</span>
+<span class="sd">            &gt;&gt;&gt; zone = ds.zone(&#39;Rectangular zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; x = zone.values(&#39;x&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; x == zone.values(0)</span>
+<span class="sd">            True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="p">(</span><span class="n">string_types</span><span class="p">,</span> <span class="nb">int</span><span class="p">)):</span>
+            <span class="n">variable_id</span> <span class="o">=</span> <span class="n">pattern</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">variable_id</span> <span class="o">=</span> <span class="n">pattern</span><span class="o">.</span><span class="n">index</span>
+        <span class="k">return</span> <span class="n">Array</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">variable</span><span class="p">(</span><span class="n">variable_id</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">share_variables</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Duplicate this `Zone &lt;data_access&gt;` in the parent `Dataset`.</span>
+
+<span class="sd">        The name is also copied but can be changed after duplication.</span>
+
+<span class="sd">        Parameters:</span>
+<span class="sd">            share_variables (`bool` or `list` of `Variables &lt;Variable&gt;`):</span>
+<span class="sd">                Variables to be shared between original and generated zones.</span>
+<span class="sd">                If variables are not shared they will be created as passive</span>
+<span class="sd">                variables.</span>
+<span class="sd">                Default: `False`.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `Zone &lt;data_access&gt;`: The newly created zone.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            &gt;&gt;&gt; new_zone = dataset.zone(&#39;My Zone&#39;).copy()</span>
+<span class="sd">            &gt;&gt;&gt; print(new_zone.name)</span>
+<span class="sd">            My Zone</span>
+<span class="sd">            &gt;&gt;&gt; new_zone.name = &#39;My Zone Copy&#39;</span>
+<span class="sd">            &gt;&gt;&gt; print(new_zone.name)</span>
+<span class="sd">            My Zone Copy</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">copy_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">share_variables</span><span class="o">=</span><span class="n">share_variables</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">_shape</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ZoneGetIJKByUniqueID</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_faces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of faces in this zone.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This is the same as the number of elements times the number of faces</span>
+<span class="sd">        per element. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;My Zone&#39;).num_faces)</span>
+<span class="sd">            1048576</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_elements</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_faces_per_element</span>
+
+
+<div class="viewcode-block" id="OrderedZone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.OrderedZone">[docs]</a><span class="k">class</span> <span class="nc">OrderedZone</span><span class="p">(</span><span class="n">Zone</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;An ordered ``(i, j, k)`` zone within a `Dataset`.</span>
+
+<span class="sd">    Ordered zones contain nodal or cell-centered arrays where the connectivity</span>
+<span class="sd">    is implied by the dimensions and ordering of the data.</span>
+
+<span class="sd">    `Zones &lt;data_access&gt;` can be identified (uniquely) by the index with their</span>
+<span class="sd">    parent `Dataset` or (non-uniquely) by name. In general, a `Variable` must</span>
+<span class="sd">    be selected to access the underlying data array. This object is used by</span>
+<span class="sd">    fieldmaps and linemaps to apply style to specific zones. Here we obtain the</span>
+<span class="sd">    fieldmap associated with the zone named &#39;My Zone&#39;::</span>
+
+<span class="sd">        &gt;&gt;&gt; fmap = plot.fieldmap(dataset.zone(&#39;My Zone&#39;))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">dimensions</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Nodal dimensions along ``(i, j, k)``.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            `tuple` of `integers &lt;int&gt;`: ``(i, j, k)`` for ordered data.</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(zone.dimensions)</span>
+<span class="sd">            (128, 128, 128)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shape</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">rank</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of dimensions of the data array.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This will return the number of dimensions which contain more than one</span>
+<span class="sd">        value::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.dimensions)</span>
+<span class="sd">            (10, 10, 1)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.rank)</span>
+<span class="sd">            2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">s</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">dimensions</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_points</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Total number of nodes within this zone.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This is number of nodes within the zone and is equivalent to the</span>
+<span class="sd">        product of the values in `OrderedZone.dimensions`. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.dimensions)</span>
+<span class="sd">            (128, 128, 128)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.num_points)</span>
+<span class="sd">            2097152</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">reduce</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">x</span> <span class="o">*</span> <span class="n">y</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dimensions</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_elements</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of cells in this zone.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.dimensions)</span>
+<span class="sd">            (128, 128, 128)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.num_elements)</span>
+<span class="sd">            2048383</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">reduced_shape</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">filter</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dimensions</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">reduce</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">x</span> <span class="o">*</span> <span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="mi">1</span><span class="p">),</span> <span class="n">reduced_shape</span> <span class="ow">or</span> <span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_points_per_element</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Points per cell for ordered zones.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        For ordered zones, this is :math:`2^{d}` where :math:`d` is the number</span>
+<span class="sd">        of dimensions greater than one:</span>
+
+<span class="sd">            ==== =================</span>
+<span class="sd">            Rank Faces Per Element</span>
+<span class="sd">            ==== =================</span>
+<span class="sd">            0    0</span>
+<span class="sd">            1    2</span>
+<span class="sd">            2    4</span>
+<span class="sd">            3    8</span>
+<span class="sd">            ==== =================</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.dimensions)</span>
+<span class="sd">            (10, 10, 1)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.rank)</span>
+<span class="sd">            2</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.num_points_per_element)</span>
+<span class="sd">            4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">ndim</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rank</span>
+        <span class="k">return</span> <span class="mi">2</span><span class="o">**</span><span class="n">ndim</span> <span class="k">if</span> <span class="n">ndim</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_faces_per_element</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of faces per element in this ordered zone.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This is determined by the rank of the zone:</span>
+
+<span class="sd">            ==== =================</span>
+<span class="sd">            Rank Faces Per Element</span>
+<span class="sd">            ==== =================</span>
+<span class="sd">            0    0</span>
+<span class="sd">            1    1</span>
+<span class="sd">            2    4</span>
+<span class="sd">            3    6</span>
+<span class="sd">            ==== =================</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.dimensions)</span>
+<span class="sd">            (1, 10, 10)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.rank)</span>
+<span class="sd">            2</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.num_faces_per_element)</span>
+<span class="sd">            4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_fpe</span> <span class="o">=</span> <span class="p">{</span><span class="mi">0</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="mi">6</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">_fpe</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">rank</span><span class="p">]</span>
+
+    <span class="nd">@inherited_property</span><span class="p">(</span><span class="n">Zone</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">zone_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `ZoneType` indicating structure of the data contained.</span>
+
+<span class="sd">        :type: `ZoneType`</span>
+
+<span class="sd">        The specific type of zone this object represents::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(0).zone_type)</span>
+<span class="sd">            ZoneType.Ordered</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">face_neighbors</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The face neighbor list for this ordered zone.</span>
+
+<span class="sd">        :type: `FaceNeighbors`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(0)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.face_neighbors.mode)</span>
+<span class="sd">            FaceNeighborMode.LocalOneToOne</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FaceNeighbors</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<span class="k">class</span> <span class="nc">FEZone</span><span class="p">(</span><span class="n">Zone</span><span class="p">):</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_points</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Total number of nodes within this zone.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This is the total number of nodes in the zone. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;My Zone&#39;).num_points)</span>
+<span class="sd">            2048</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_elements</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of cells in this finite-element zone.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;My Zone&#39;).num_elements)</span>
+<span class="sd">            1048576</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">shared_connectivity</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;`list` of `Zones &lt;data_access&gt;` sharing connectivity.</span>
+
+<span class="sd">        :type: `list` of `Zones &lt;data_access&gt;`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; dataset.zone(&#39;My Zone&#39;).copy()</span>
+<span class="sd">            &gt;&gt;&gt; for zone in dataset.zone(&#39;My Zone&#39;).shared_connectivity:</span>
+<span class="sd">            ...     print(zone.index)</span>
+<span class="sd">            0</span>
+<span class="sd">            1</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">_tecutil</span><span class="o">.</span><span class="n">ConnectGetShareZoneSet</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">zone</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">indices</span><span class="p">]</span>
+        <span class="n">indices</span><span class="o">.</span><span class="n">dealloc</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">ret</span>
+
+
+<div class="viewcode-block" id="ClassicFEZone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.ClassicFEZone">[docs]</a><span class="k">class</span> <span class="nc">ClassicFEZone</span><span class="p">(</span><span class="n">FEZone</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A classic finite-element zone within a `Dataset`.</span>
+
+<span class="sd">    Classic finite-element zones are arrays of nodes that are connected</span>
+<span class="sd">    explicitly into pre-defined geometric shapes called &quot;elements.&quot; The</span>
+<span class="sd">    geometry is consistent across the whole zone so that the number of nodes</span>
+<span class="sd">    per element is constant.</span>
+
+<span class="sd">    `Zones &lt;data_access&gt;` can be identified (uniquely) by the index with their</span>
+<span class="sd">    parent `Dataset` or (non-uniquely) by name. In general, a `Variable` must</span>
+<span class="sd">    be selected to access the underlying data array. This object is used by</span>
+<span class="sd">    fieldmaps and linemaps to apply style to specific zones. Here we obtain the</span>
+<span class="sd">    fieldmap associated with the zone named &#39;My Zone&#39;::</span>
+
+<span class="sd">        &gt;&gt;&gt; fmap = plot.fieldmap(dataset.zone(&#39;My Zone&#39;))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_points_per_element</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Points per element for classic finite-element zones.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        The number of points (also known as nodes) per finite-element is</span>
+<span class="sd">        determined from the ``zone_type`` parameter. The follow table shows the</span>
+<span class="sd">        number of points per element for the available zone types along with</span>
+<span class="sd">        the resulting shape of the nodemap based on the number of points</span>
+<span class="sd">        specified (:math:`N`):</span>
+
+<span class="sd">            ============== ============== ========================</span>
+<span class="sd">            Zone Type      Points/Element Nodemap Shape</span>
+<span class="sd">            ============== ============== ========================</span>
+<span class="sd">            ``FELineSeg``  2              (:math:`N`, :math:`2 N`)</span>
+<span class="sd">            ``FETriangle`` 3              (:math:`N`, :math:`3 N`)</span>
+<span class="sd">            ``FEQuad``     4              (:math:`N`, :math:`4 N`)</span>
+<span class="sd">            ``FETetra``    4              (:math:`N`, :math:`4 N`)</span>
+<span class="sd">            ``FEBrick``    8              (:math:`N`, :math:`8 N`)</span>
+<span class="sd">            ============== ============== ========================</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.zone_type)</span>
+<span class="sd">            ZoneType.FETriangle</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.num_points_per_element)</span>
+<span class="sd">            3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">nodemap</span><span class="o">.</span><span class="n">num_points_per_element</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">nodemap</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The connectivity `Nodemap` for this classic finite-element zone.</span>
+
+<span class="sd">        :type: `Nodemap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(0)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.nodemap.num_points_per_element)</span>
+<span class="sd">            4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Nodemap</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">face_neighbors</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The face neighbor list for this finite-element zone.</span>
+
+<span class="sd">        :type: `FaceNeighbors`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(0)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.face_neighbors.mode)</span>
+<span class="sd">            FaceNeighborMode.LocalOneToMany</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">FaceNeighbors</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@inherited_property</span><span class="p">(</span><span class="n">Zone</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">zone_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `ZoneType` indicating structure of the data contained.</span>
+
+<span class="sd">        :type: `ZoneType`</span>
+
+<span class="sd">        The specific type of zone this object represents::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(0).zone_type)</span>
+<span class="sd">            ZoneType.FEBrick</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">rank</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of dimensions of the data array.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This indicates the dimensionality of the data and is dependent on the</span>
+<span class="sd">        type of element this zone contains:</span>
+
+<span class="sd">            ============== ====</span>
+<span class="sd">            Zone Type      Rank</span>
+<span class="sd">            ============== ====</span>
+<span class="sd">            ``FELineSeg``  1</span>
+<span class="sd">            ``FETriangle`` 2</span>
+<span class="sd">            ``FEQuad``     2</span>
+<span class="sd">            ``FETetra``    3</span>
+<span class="sd">            ``FEBrick``    3</span>
+<span class="sd">            ============== ====</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.zone_type)</span>
+<span class="sd">            ZoneType.FEBrick</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.rank)</span>
+<span class="sd">            3</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_rank</span> <span class="o">=</span> <span class="p">{</span><span class="n">ZoneType</span><span class="o">.</span><span class="n">FELineSeg</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                 <span class="n">ZoneType</span><span class="o">.</span><span class="n">FETriangle</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+                 <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEQuad</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+                 <span class="n">ZoneType</span><span class="o">.</span><span class="n">FETetra</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+                 <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEBrick</span><span class="p">:</span> <span class="mi">3</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">_rank</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">zone_type</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_faces_per_element</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of faces per element.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This is dependent on the type of element this zone contains:</span>
+
+<span class="sd">            ============== =================</span>
+<span class="sd">            Zone Type      Faces Per Element</span>
+<span class="sd">            ============== =================</span>
+<span class="sd">            ``FELineSeg``  1</span>
+<span class="sd">            ``FETriangle`` 3</span>
+<span class="sd">            ``FEQuad``     4</span>
+<span class="sd">            ``FETetra``    4</span>
+<span class="sd">            ``FEBrick``    6</span>
+<span class="sd">            ============== =================</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;My Zone&#39;).num_faces_per_element)</span>
+<span class="sd">            4</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_fpe</span> <span class="o">=</span> <span class="p">{</span><span class="n">ZoneType</span><span class="o">.</span><span class="n">FELineSeg</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="n">ZoneType</span><span class="o">.</span><span class="n">FETriangle</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+                <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEQuad</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+                <span class="n">ZoneType</span><span class="o">.</span><span class="n">FETetra</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+                <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEBrick</span><span class="p">:</span> <span class="mi">6</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">_fpe</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">zone_type</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="PolyFEZone"><a class="viewcode-back" href="../../../api/tecplot.data.html#tecplot.data.PolyFEZone">[docs]</a><span class="k">class</span> <span class="nc">PolyFEZone</span><span class="p">(</span><span class="n">FEZone</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A polygonal finite-element zone within a `Dataset`.</span>
+
+<span class="sd">    A polygonal zone consists of arrays of nodes which are connected explicitly</span>
+<span class="sd">    into arbitrary and varying geometric elements. These elements are 2D or 3D</span>
+<span class="sd">    in nature and have a number of faces (connections between nodes) which hold</span>
+<span class="sd">    the concept of a left and right neighbor.</span>
+
+<span class="sd">    `Zones &lt;data_access&gt;` can be identified (uniquely) by the index with their</span>
+<span class="sd">    parent `Dataset` or (non-uniquely) by name. In general, a `Variable` must</span>
+<span class="sd">    be selected to access the underlying data array. This object is used by</span>
+<span class="sd">    fieldmaps and linemaps to apply style to specific zones. Here we obtain the</span>
+<span class="sd">    fieldmap associated with the zone named &#39;My Zone&#39;::</span>
+
+<span class="sd">        &gt;&gt;&gt; fmap = plot.fieldmap(dataset.zone(&#39;My Zone&#39;))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_faces</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of faces in this finite-element zone.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        The number of faces may be ``0`` if unknown or facemap creation is</span>
+<span class="sd">        deferred. Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(&#39;My Zone&#39;).num_faces)</span>
+<span class="sd">            1048576</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">rank</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Number of dimensions of the data array.</span>
+
+<span class="sd">        :type: `integer &lt;int&gt;`</span>
+
+<span class="sd">        This indicates the dimensionality of the data and is dependent on the</span>
+<span class="sd">        type of element this zone contains:</span>
+
+<span class="sd">            ================ ====</span>
+<span class="sd">            Zone Type        Rank</span>
+<span class="sd">            ================ ====</span>
+<span class="sd">            ``FEPolygon``    2</span>
+<span class="sd">            ``FEPolyhedron`` 3</span>
+<span class="sd">            ================ ====</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(&#39;My Zone&#39;)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.zone_type)</span>
+<span class="sd">            ZoneType.FEPolygon</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.rank)</span>
+<span class="sd">            2</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_rank</span> <span class="o">=</span> <span class="p">{</span><span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolygon</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+                 <span class="n">ZoneType</span><span class="o">.</span><span class="n">FEPolyhedron</span><span class="p">:</span> <span class="mi">3</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">_rank</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">zone_type</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">facemap</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The connectivity `Facemap` for this polygonal finite-element zone.</span>
+
+<span class="sd">        :type: `Facemap`</span>
+
+<span class="sd">        Example usage::</span>
+
+<span class="sd">            &gt;&gt;&gt; zone = dataset.zone(0)</span>
+<span class="sd">            &gt;&gt;&gt; print(zone.facemap.num_faces)</span>
+<span class="sd">            4500</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Facemap</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@inherited_property</span><span class="p">(</span><span class="n">Zone</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">zone_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The `ZoneType` indicating structure of the data contained.</span>
+
+<span class="sd">        :type: `ZoneType`</span>
+
+<span class="sd">        The specific type of zone this object represents::</span>
+
+<span class="sd">            &gt;&gt;&gt; print(dataset.zone(0).zone_type)</span>
+<span class="sd">            ZoneType.FEPolygon</span>
+<span class="sd">        &quot;&quot;&quot;</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+    <a id="sidebar-anchor"></a>
+    
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/powered_by_tecplot.png" alt="Logo"/>
+            </a></p>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script><h3><a href="../../../index.html">Table Of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+      </ul>
+    </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2018, Tecplot, Inc..
+      Last updated on Mar 12, 2018.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.6.4.
+    </div>
+  </body>
+</html>
