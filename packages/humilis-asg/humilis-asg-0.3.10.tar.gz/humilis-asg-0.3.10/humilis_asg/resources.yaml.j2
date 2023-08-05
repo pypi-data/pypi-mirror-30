@@ -1,0 +1,389 @@
+---
+# A nice name to identify the instance
+{% if domain %}
+{% if subdomain %}
+{% set instance_name = subdomain + "." + domain %}
+{% else %}
+{% set instance_name = _env.name + "-" + _env.stage.lower() + "-" + _layer.name + "." + domain %}
+{% endif %}
+{% else %}
+{% set instance_name = _env.name + "-" + _env.stage.lower() + "-" + _layer.name %}
+{% endif %}
+{% if (efs_owner or efs_id) and not efs_mount_point %}
+{% set efs_mount_point = "/efs" %}
+{% endif %}
+resources:
+    # An S3 bucket to store ELB access logs
+    Bucket:
+        Type: "AWS::S3::Bucket"
+        Properties: {}
+
+    IamRole:
+        Type: "AWS::IAM::Role"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  -
+                    Effect: "Allow"
+                    Principal:
+                      Service:
+                        - "ec2.amazonaws.com"
+                    Action:
+                      - "sts:AssumeRole"
+            Path: "/"
+            {% if iam_role_policies %}
+            Policies:
+                {% for policy in iam_role_policies %}
+                - {{ policy }}
+                {% endfor %}
+            {% endif %}
+
+    IamInstanceProfile:
+        Type: "AWS::IAM::InstanceProfile"
+        Properties:
+            Path: "/{{_env.name}}/{{_env.stage}}/"
+            Roles:
+                - {Ref: IamRole}
+
+    # For ASG notifications
+    NotificationTopic:
+        Type: "AWS::SNS::Topic"
+
+    ElbSecurityGroup:
+        Type: "AWS::EC2::SecurityGroup"
+        Properties:
+            GroupDescription: Security group for the ELBs of environment {{_env.name}}
+            VpcId: {{vpc_id or vpc}}
+            Tags:
+                - Key: Name
+                  Value: {{_env.name}}-{{_env.stage.lower()}}-elb-sg
+            SecurityGroupIngress:
+                {% for ip in ip_whitelist %}
+                {% for listener in listeners %}
+                {% if listener.elb_port %}
+                - IpProtocol: tcp
+                  FromPort: {{listener.elb_port}}
+                  ToPort: {{listener.elb_port}}
+                  CidrIp: {{ip}}
+                {% else %}
+                - IpProtocol: tcp
+                  FromPort: {{listener.port}}
+                  ToPort: {{listener.port}}
+                  CidrIp: {{ip}}
+                {% endif %}
+                {% endfor %}
+                - IpProtocol: icmp
+                  FromPort: -1
+                  ToPort: -1
+                  CidrIp: {{ip}}
+                {% endfor %}
+                {% for sg in sg_whitelist %}
+                {% for listener in listeners %}
+                {% if listener.elb_port %}
+                - IpProtocol: tcp
+                  FromPort: {{listener.elb_port}}
+                  ToPort: {{listener.elb_port}}
+                  SourceSecurityGroupId: {{sg}}
+                {% else %}
+                - IpProtocol: tcp
+                  FromPort: {{listener.port}}
+                  ToPort: {{listener.port}}
+                  SourceSecurityGroupId: {{sg}}
+                {% endif %}
+                {% endfor %}
+                - IpProtocol: icmp
+                  FromPort: -1
+                  ToPort: -1
+                  SourceSecurityGroupId: {{sg}}
+                {% endfor %}
+
+    S3LoggingBucketPolicy:
+        Type: "AWS::S3::BucketPolicy"
+        Properties:
+            Bucket:
+                Ref: Bucket
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    - Sid: ELBAccessLogs
+                      Effect: Allow
+                      Resource:
+                        "Fn::Join":
+                            - ""
+                            -
+                                - "arn:aws:s3:::"
+                                - Ref: Bucket
+                                - "/*"
+                      Principal:
+                        "AWS":
+                            - { "Fn::FindInMap" : [ "ElbAccountIdMap", { "Ref" : "AWS::Region" }, "AccountId"]}
+                      Action:
+                        "s3:*"
+
+    {% if domain and not ssl_certificate_id %}
+    # Create a SSL certificate for HTTPS
+    ElbCert:
+        Type: "AWS::CertificateManager::Certificate"
+        Properties:
+            DomainName:
+                "*.{{domain}}"
+    {% endif %}
+
+    InstanceSecurityGroup:
+        Type: "AWS::EC2::SecurityGroup"
+        Properties:
+            GroupDescription: Security group for the EC2 instances in environment {{_env.name}}
+            VpcId: {{vpc_id or vpc}}
+            Tags:
+                - Key: Name
+                  Value: {{_env.name}}-{{_env.stage.lower()}}-ec2-sg
+            SecurityGroupIngress:
+                {% for listener in listeners %}
+                - IpProtocol: tcp
+                  FromPort: {{listener.port}}
+                  ToPort: {{listener.port}}
+                  SourceSecurityGroupId: {"Ref": "ElbSecurityGroup"}
+                - IpProtocol: icmp
+                  FromPort: -1
+                  ToPort: -1
+                  SourceSecurityGroupId: {"Ref": "ElbSecurityGroup"}
+                {% endfor %}
+
+    # Allow all traffic between the instances in the ASG
+    InstanceSecurityGroupIngress:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Properties:
+            GroupId: {Ref: InstanceSecurityGroup}
+            IpProtocol: -1
+            FromPort: -1
+            ToPort: -1
+            SourceSecurityGroupId: {Ref: InstanceSecurityGroup}
+
+    AsgLaunchConfiguration:
+        Type: "AWS::AutoScaling::LaunchConfiguration"
+        DependsOn: InstanceSecurityGroup
+        Properties:
+            # We need to associate a public IP address or the instance
+            # will not be able to access the internet. A better alternative
+            # would be to set up a NAT, but for now this will do.
+            AssociatePublicIpAddress: Yes
+            # BlockDeviceMappings: TBD
+            EbsOptimized: {{ebs_optimized}}
+            ImageId: {{ami_id or image_id}}
+            InstanceType: {{instance_type}}
+            IamInstanceProfile: {Ref: IamInstanceProfile}
+            KeyName: {{key_name}}
+            SecurityGroups:
+                - Ref: InstanceSecurityGroup
+                {% if efs_security_group %}
+                - {{efs_security_group}}
+                {% endif %}
+            {% if spot_price %}
+            SpotPrice: {{spot_price}}
+            {% endif %}
+            {% if efs_mount_point %}
+            UserData:
+                "Fn::Base64":
+                    "Fn::Join":
+                        - ""
+                        -
+                            - "#!/bin/bash -ex\n"
+                            - "exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1\n"
+                            - "mkdir {{efs_mount_point}}\n"
+                            {% if environment %}
+                            {% for k, v in environment.items() %}
+                            - "export {{k}}={{v}}\n"
+                            {% endfor %}
+                            {% endif %}
+                            - "mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+                            - " {{efs_id}}"
+                            - ".efs."
+                            - {Ref: "AWS::Region"}
+                            - ".amazonaws.com:/   {{efs_mount_point}}\n"
+                            {% if efs_owner %}
+                            - "chown {{efs_owner}}:{{efs_owner}} {{efs_mount_point}}\n"
+                            {% else %}
+                            - "chown $(whoami):$(whoami) {{efs_mount_point}}\n"
+                            {% endif %}
+                            {% if bootstrap_s3_path %}
+                            - "apt-get -y update\n"
+                            - "DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq\n"
+                            - "apt-get install -y awscli\n"
+                            - "mydir=$(mktemp -d \"${TMPDIR:-/tmp/}$(basename 0).XXXXXXXXXXXX\")\n"
+                            - "aws s3 cp s3://{{bootstrap_s3_path.s3bucket}}/{{bootstrap_s3_path.s3key}} $(mydir)/bootstrap.sh\n"
+                            - "/bin/bash -ex $(mydir)/bootstrap.sh"
+                            {% endif %}
+            {% elif environment or bootstrap_s3_path %}
+            UserData:
+                "Fn::Base64":
+                    "Fn::Join":
+                        - ""
+                        -
+                            - "#!/bin/bash -ex\n"
+                            - "exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1\n"
+                            {% if environment %}
+                            {% for k, v in environment.items() %}
+                            - "export {{k}}={{v}}\n"
+                            {% endfor %}
+                            {% endif %}
+                            {% if bootstrap_s3_path %}
+                            - "apt-get -y update\n"
+                            - "DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq\n"
+                            - "apt-get install -y awscli\n"
+                            - "mydir=$(mktemp -d \"${TMPDIR:-/tmp/}$(basename 0).XXXXXXXXXXXX\")\n"
+                            - "aws s3 cp s3://{{bootstrap_s3_path.s3bucket}}/{{bootstrap_s3_path.s3key}} $(mydir)/bootstrap.sh\n"
+                            - "/bin/bash -ex $(mydir)/bootstrap.sh"
+                            {% endif %}
+            {% endif %}
+
+    {% if domain %}
+    ElbDnsRecord:
+      Type: AWS::Route53::RecordSetGroup
+      Properties:
+        {% if hosted_zone_id %}
+        HostedZoneId: {{hosted_zone_id}}
+        {% else %}
+        HostedZoneName: {{domain}}.
+        {% endif %}
+        Comment: DNS name for ELB in subnet {{subnet_id or subnet}}
+        RecordSets:
+            - Name: "{{instance_name}}"
+              Type: A
+              AliasTarget:
+                HostedZoneId:
+                    "Fn::GetAtt":
+                        - Elb
+                        - CanonicalHostedZoneNameID
+                DNSName:
+                    "Fn::GetAtt":
+                        - Elb
+                        - DNSName
+    {% endif %}
+    Elb:
+        Type: "AWS::ElasticLoadBalancing::LoadBalancer"
+        DependsOn: S3LoggingBucketPolicy
+        Properties:
+            AccessLoggingPolicy:
+                EmitInterval: 60
+                Enabled: {{logging_enabled}}
+                S3BucketName:
+                    Ref: Bucket
+                S3BucketPrefix:
+                    "elb-logs/elb"
+            Listeners:
+                {% for listener in listeners %}
+                {% if not (listener.protocol in ('ssl', 'https', 'HTTPS', 'SSL') and not domain) %}
+                - InstancePort: {{listener.port}}
+                  InstanceProtocol: {{listener.protocol}}
+                  {% if listener.elb_port %}
+                  LoadBalancerPort: {{listener.elb_port}}
+                  {% else %}
+                  LoadBalancerPort: {{listener.port}}
+                  {% endif %}
+                  Protocol: {{listener.protocol}}
+                  {% if listener.protocol in ('ssl', 'https', 'HTTPS', 'SSL') %}
+                  SSLCertificateId:
+                      {% if ssl_certificate_id %}
+                      {{ssl_certificate_id}}
+                      {% else %}
+                      Ref: ElbCert
+                      {% endif %}
+                  {% endif %}
+                {% endif %}
+                {% endfor %}
+
+            Scheme:
+                {% if public %}
+                internet-facing
+                {% else %}
+                internal
+                {% endif %}
+            SecurityGroups:
+                - Ref: ElbSecurityGroup
+            Subnets:
+                - {{subnet_id or subnet}}
+            HealthCheck:
+                Target: {{health_check_target}}
+                HealthyThreshold: 3
+                UnhealthyThreshold: 5
+                Interval: 30
+                Timeout: 5
+            ConnectionSettings:
+                IdleTimeout: {{idle_timeout}}
+
+    Asg:
+        Type: "AWS::AutoScaling::AutoScalingGroup"
+        Properties:
+            DesiredCapacity: {{desired_capacity}}
+            Tags:
+                - Key: Name
+                  Value: {{instance_name}}
+                  PropagateAtLaunch: yes
+            LaunchConfigurationName:
+                Ref: AsgLaunchConfiguration
+            LoadBalancerNames:
+                - Ref: Elb
+            MaxSize: {{maximum_capacity}}
+            MinSize: {{minimum_capacity}}
+            VPCZoneIdentifier:
+                - {{subnet_id or subnet}}
+            NotificationConfiguration:
+                TopicARN:
+                    Ref: NotificationTopic
+                NotificationTypes:
+                    - "autoscaling:EC2_INSTANCE_LAUNCH"
+                    - "autoscaling:EC2_INSTANCE_LAUNCH_ERROR"
+                    - "autoscaling:EC2_INSTANCE_TERMINATE"
+                    - "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"
+
+    ResizeAsgPolicy:
+        Type: "AWS::IAM::ManagedPolicy"
+        Properties:
+            Description: "Policy that allows setting the desired capacity of autoscaling groups."
+            Path: "/{{_env.name}}/{{_env.stage.lower()}}/"
+            {% if iam_resize_users %}
+            Users:
+                {% for user in iam_resize_users %}
+                - {{user}}
+                {% endfor %}
+            {% endif %}
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    - Effect: Allow
+                      Action: "autoscaling:SetDesiredCapacity"
+                      # Autoscaling does not support anything else than *
+                      Resource:
+                        "Fn::Join":
+                            - ""
+                            -
+                                - "arn:aws:autoscaling:"
+                                - {Ref: "AWS::Region"}
+                                - ":"
+                                - {"Ref": "AWS::AccountId"}
+                                - ":autoScalingGroup:"
+                                - "*"
+                                - ":autoScalingGroupName/"
+                                - Ref: Asg
+
+    {% if scheduled_actions %}
+    {% for action in scheduled_actions %}
+    ScheduledAction{{action['recurrence'].replace(' ', 'x').replace('*', 's').replace('-', 'o')}}:
+      Type: "AWS::AutoScaling::ScheduledAction"
+      Properties:
+        AutoScalingGroupName: {Ref: Asg}
+        {% if action.max_size is defined %}
+        MaxSize: {{action.max_size}}
+        {% endif %}
+        {% if action.min_size is defined %}
+        MinSize: {{action.min_size}}
+        {% endif %}
+        {% if action.desired_capacity is defined %}
+        DesiredCapacity: {{action.desired_capacity}}
+        {% endif %}
+        {% if action.recurrence is defined %}
+        Recurrence: {{action.recurrence}}
+        {% endif %}
+    {% endfor %}
+    {% endif %}
