@@ -1,0 +1,3 @@
+This project seeks to create a simplified and unified system for handling geographic coordinate reference systems.
+
+
