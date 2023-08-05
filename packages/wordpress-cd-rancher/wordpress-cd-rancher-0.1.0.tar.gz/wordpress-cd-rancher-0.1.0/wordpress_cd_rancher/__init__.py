@@ -1,0 +1,1 @@
+import wordpress_cd_rancher.rancher
