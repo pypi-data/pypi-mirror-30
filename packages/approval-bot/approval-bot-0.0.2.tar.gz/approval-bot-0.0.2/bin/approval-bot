@@ -1,0 +1,170 @@
+#!/usr/bin/env python
+import argparse
+import requests
+import boto3
+import json
+import os
+import sys
+import time
+import hashlib
+
+
+md5 = hashlib.md5()
+api_endpoint = os.environ.get('API_HOST', 'https://mb8xlh9rz6.execute-api.eu-west-2.amazonaws.com/Prod')
+
+"""
+Request approvals via Slack.
+
+Args:
+    -m --message              Message with a description of the job requiring approval (must be unique)
+    -c --channel              Slack channel to use for requesting approval
+    -T --teamid               Slack Team ID - Find this out at https://api.slack.com/methods/team.info/test
+    -t --timeout              Approval wait timeout (seconds)
+    -d --debug                Enable debug output
+    -v --version              Show installed version
+"""
+
+version_number='0.0.2'
+
+
+def get_env(variable):
+    '''
+        Get env var or return False
+    '''
+    return os.environ.get(variable, False)
+
+
+def parse_args():
+    '''
+        Parse command line arguments
+    '''
+    PARSER = argparse.ArgumentParser(description='Request approval CLI')
+    PARSER.add_argument('-m', '--message', help="A message describing the approval job", default=False)
+    PARSER.add_argument('-c', '--channel', help="Slack channel to use for approvals", default=False)
+    PARSER.add_argument('-T', '--teamid', help="Slack Team ID", default=False)
+    PARSER.add_argument('-t', '--timeout', help="Approval wait timeout in seconds", default=300)
+    PARSER.add_argument('-d', '--debug', help="Enable debug output", action='store_true')
+    PARSER.add_argument('-v', '--version', help="Show installed version", action='store_true')
+
+    return PARSER.parse_args()
+
+
+def request_approval(team_id, channel, message, message_hash, timeout):
+    '''
+        Post details to the API, Slack Team must already be authorised by Oauth
+    '''
+    response = requests.post('{}/request-approval/'.format(api_endpoint), json={"team_id": team_id, "channel_name": channel, "message": message, "message_hash": message_hash, "timeout": timeout})
+    if response.status_code == 200:
+        return True
+    elif response.status_code == 404:
+        return False
+    elif response.status_code == 500:
+        print('Remote server error')
+        sys.exit(1)
+
+
+def check_approval_status(team_id, message_hash):
+    '''
+        Find out what the approval status is
+    '''
+    params={'team_id': team_id, 'message_hash': message_hash}
+    response = requests.get('{}/status/'.format(api_endpoint), params=params)
+
+    if response.status_code == 200:
+        if response.json()['message'] == 'approved':
+            return 'approved'
+        if response.json()['message'] == 'denied':
+            return 'denied'
+
+    if response.status_code == 202:
+        return 'pending'
+
+    elif response.status_code == 404:
+        print('Workspace {} not found, have you added the approval-bot app to your slack?'.format(team_id))
+        sys.exit(1)
+
+
+def wait_for_approval(team_id, channel, message_hash, timeout):
+    '''
+        Until the timeout is reached, keep checking for approval/denial
+    '''
+    counter = 0
+    while True:
+        time.sleep(1)
+
+        print('Waiting for approval from {}... {}'.format(channel, str(counter)))
+
+        if counter == timeout:
+            print('Approval request timed out after {} seconds'.format(timeout))
+            sys.exit(1)
+
+        status = check_approval_status(team_id, message_hash)
+
+        if status == 'approved' and counter == 0:
+            print('Request already approved'.format(counter))
+            sys.exit(0)
+        if status == 'denied' and counter == 0:
+            print('Request already denied'.format(counter))
+            sys.exit(0)
+        if status == 'approved':
+            print('Request APPROVED after {} seconds'.format(counter))
+            sys.exit(0)
+        elif status == 'denied':
+            print('Request DENIED after {} seconds'.format(counter))
+            sys.exit(1)
+        elif status == 'pending':
+            print('Request pending')
+            counter += 1
+            continue
+
+
+def run():
+    '''
+        Entry point - parse/check args, message slack and wait for approval
+    '''
+    ARGS = parse_args()
+
+    if ARGS.version:
+        print('approval-bot: v{}'.format(version_number))
+        sys.exit(0)
+
+    if ARGS.debug:
+        print('Arguments parsed:')
+        print('Args {}'.format(str(ARGS)))
+        print('API {}'.format(str(api_endpoint)))
+
+    if not ARGS.message:
+        print('-m / --message is required')
+        sys.exit(1)
+
+    if not ARGS.channel:
+        print('-c / --channel is required')
+        sys.exit(1)
+
+    if not ARGS.teamid:
+        print('-T / --teamid is required')
+        sys.exit(1)
+
+    message = ARGS.message
+    channel = ARGS.channel
+    debug = ARGS.debug
+    team_id = ARGS.teamid
+    timeout = int(ARGS.timeout)
+    md5.update(message)
+    message_hash = md5.hexdigest()
+
+    if check_approval_status(team_id, message_hash) == 'approved':
+        print('Already approved')
+        sys.exit(0)
+
+    if check_approval_status(team_id, message_hash) == 'denied':
+        print('Already denied')
+        sys.exit(1)
+
+    request_approval(team_id, channel, message, message_hash, timeout)
+
+    wait_for_approval(team_id, channel, message_hash, timeout)
+
+
+if __name__ == "__main__":
+    run()
