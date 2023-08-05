@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
+
+"""
+https://cgit.freedesktop.org/xorg/app/xrandr/tree/xrandr.c
+"""
+
+import ctypes
+import sys
+
+Time = ctypes.c_ulong
+"""
+#ifndef _XTYPEDEF_XID
+#  define _XTYPEDEF_XID
+#  ifndef _XSERVER64
+typedef unsigned long XID;
+#  else
+typedef CARD32 XID;
+#  endif
+#endif
+"""
+XID = ctypes.c_ulong
+"""
+typedef XID RROutput;
+"""
+RROutput = XID
+"""
+typedef XID RRCrtc;
+"""
+RRCrtc = XID
+""" /usr/include/X11/extensions/Xrandr.h
+typedef XID RRMode;
+"""
+RRMode = XID
+""" /usr/include/X11/extensions/randr.h
+#define RR_Connected		0
+"""
+RR_Connected = 0
+""" /usr/include/X11/extensions/randr.h
+typedef unsigned short	Connection;
+"""
+Connection = ctypes.c_ushort
+""" /usr/include/X11/extensions/randr.h
+typedef unsigned short	SubpixelOrder;
+"""
+SubpixelOrder = ctypes.c_ushort
+
+""" /usr/include/X11/extensions/Xrandr.h
+typedef struct _XRRScreenResources {
+    Time	timestamp;
+    Time	configTimestamp;
+    int		ncrtc;
+    RRCrtc	*crtcs;
+    int		noutput;
+    RROutput	*outputs;
+    int		nmode;
+    XRRModeInfo	*modes;
+} XRRScreenResources;
+"""
+
+
+class XRRScreenResources(ctypes.Structure):
+    _fields_ = [
+        ('timestamp', Time),
+        ('configTimestamp', Time),
+        ('ncrtc', ctypes.c_int),
+        ('crtcs', ctypes.POINTER(RRCrtc)),
+        ('noutput', ctypes.c_int),
+        ('outputs', ctypes.POINTER(RROutput)),
+        ('nmode', ctypes.c_int),
+        ('modes', ctypes.c_void_p),  # ctypes.POINTER(XRRModeInfo)
+    ]
+
+"""
+typedef struct _XRROutputInfo {
+    Time	    timestamp;
+    RRCrtc	    crtc;
+    char	    *name;
+    int		    nameLen;
+    unsigned long   mm_width;
+    unsigned long   mm_height;
+    Connection	    connection;
+    SubpixelOrder   subpixel_order;
+    int		    ncrtc;
+    RRCrtc	    *crtcs;
+    int		    nclone;
+    RROutput	    *clones;
+    int		    nmode;
+    int		    npreferred;
+    RRMode	    *modes;
+} XRROutputInfo;
+"""
+
+
+class XRROutputInfo(ctypes.Structure):
+    _fields_ = [
+        ('timestamp', Time),
+        ('crtc', RRCrtc),
+        ('name', ctypes.c_char_p),
+        ('nameLen', ctypes.c_int),
+        ('mm_width', ctypes.c_ulong),
+        ('mm_height', ctypes.c_ulong),
+        ('connection', Connection),
+        ('subpixel_order', SubpixelOrder),
+        ('ncrtc', ctypes.c_int),
+        ('crtcs', ctypes.POINTER(RRCrtc)),
+        ('nclone', ctypes.c_int),
+        ('clones', ctypes.POINTER(RROutput)),
+        ('nmode', ctypes.c_int),
+        ('npreferred', ctypes.c_int),
+        ('modes', ctypes.POINTER(RRMode)),
+    ]
+
+X11 = ctypes.cdll.LoadLibrary("libX11.so")
+Xrandr = ctypes.cdll.LoadLibrary("libXrandr.so")
+Xrandr.XRRGetScreenResourcesCurrent.restype = ctypes.POINTER(
+    XRRScreenResources)
+"""
+XRROutputInfo *
+XRRGetOutputInfo (Display *dpy, XRRScreenResources *resources, RROutput output);
+"""
+Xrandr.XRRGetOutputInfo.restype = ctypes.POINTER(XRROutputInfo)
+
+
+def get_xrandr_output_infos(xdisplay):
+    screen_resrcs = Xrandr.XRRGetScreenResourcesCurrent(
+        xdisplay,
+        X11.XDefaultRootWindow(xdisplay),
+    )
+    assert isinstance(screen_resrcs.contents, XRRScreenResources)
+    return [Xrandr.XRRGetOutputInfo(xdisplay, screen_resrcs, screen_resrcs.contents.outputs[o])
+            for o in range(screen_resrcs.contents.noutput)]
+
+
+def get_xrandr_output_enabled(output_info):
+    return output_info.contents.crtc != 0
+
+
+def process(connected, disabled, enabled):
+    xdisplay = X11.XOpenDisplay(None)
+    for output_info in get_xrandr_output_infos(xdisplay):
+        if ((not connected or output_info.contents.connection == RR_Connected)
+                and (not disabled or not get_xrandr_output_enabled(output_info))
+                and (not enabled or get_xrandr_output_enabled(output_info))):
+            output_name = output_info.contents.name \
+                .decode(sys.getfilesystemencoding())
+            print(output_name)
+    X11.XCloseDisplay(xdisplay)
+
+
+def _init_argparser():
+    import argparse
+    argparser = argparse.ArgumentParser(
+        description='Show names of outputs available to the X server.',
+    )
+    argparser.add_argument(
+        '-c', '--connected',
+        action='store_true',
+        help='connected only',
+    )
+    argparser.add_argument(
+        '-d', '--disabled',
+        action='store_true',
+        help='disabled only (does not imply --connected)',
+    )
+    argparser.add_argument(
+        '-e', '--enabled',
+        action='store_true',
+        help='enabled only (does not imply --connected)',
+    )
+    return argparser
+
+
+def main(argv):
+    argparser = _init_argparser()
+    try:
+        import argcomplete
+    except ImportError:
+        pass
+    args = argparser.parse_args(argv)
+    process(**vars(args))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
