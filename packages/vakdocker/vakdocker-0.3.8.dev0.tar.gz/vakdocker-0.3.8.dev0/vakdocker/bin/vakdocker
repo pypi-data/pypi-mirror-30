@@ -1,0 +1,105 @@
+#!/usr/bin/python
+
+import os
+from os.path import expanduser
+import argparse
+from vakdocker.container import container
+from vakdocker.daemon import daemon
+
+#Reference:
+# https://docs.docker.com/engine/installation/linux/docker-ce/ubuntu/#os-requirements
+
+#Remove the older installations
+def clean_docker():
+    os.system('apt-get -qq remove docker docker-engine docker.io')
+
+#Installing using the repository
+def install_docker():
+    #Update the apt package index
+    os.system('apt-get -qq update')
+
+    #packages to allow apt to use a repository over HTTPS:
+    os.system('apt-get -qq install -y ' \
+              'apt-transport-https ' \
+              'ca-certificates ' \
+              'curl ' \
+              'software-properties-common')
+
+    #Add Docker's official GPG key:
+    os.system('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo ' \
+              'apt-key add - ')
+
+    #set up the stable repository
+    os.system('add-apt-repository ' \
+              '"deb [arch=amd64] https://download.docker.com/linux/ubuntu ' \
+              '$(lsb_release -cs) ' \
+              'stable"')
+    os.system('apt-get -qq update')
+
+    #Install Docker CE
+    os.system('apt-cache search docker-ce')
+    os.system('apt-get -qq install -y docker-ce')
+
+def run_docker(hostname, port, ssl_keys_dir):
+    #Install openssl library
+    os.system('pip install -qq pyopenssl')
+
+    d = daemon.start_daemon(hostname, port, ssl_keys_dir)
+    d.wait()
+
+def generate_client_keys(hostname, prefix, ssl_keys_dir):
+    (pkey, cert, cacert) = daemon.get_client_tlskeys(hostname, ssl_keys_dir)
+
+    keypath = os.path.join(ssl_keys_dir, '%s_client.pem' % (prefix,))
+    open(keypath, 'w').write(pkey)
+    certpath = os.path.join(ssl_keys_dir, '%s_client.cert' % (prefix,))
+    open(certpath, 'w').write(cert)
+
+
+if __name__ == '__main__':
+    homedir = expanduser('~')
+    default_certificates = os.path.join(homedir, '.docker')
+
+    parser = argparse.ArgumentParser(description='Setup Server for '
+            'Secure Docker using TLS certificates.',
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('--clean', action='store_true',
+            help='clean the older installation of docker engine')
+    parser.add_argument('--install', action='store_true',
+            help='install the latest stable version of docker engine')
+    parser.add_argument('--start', action='store_true',
+            help='start the docker daemon using TLS certificates')
+    parser.add_argument('--hostname', type=str,
+            help='hostname for the docker-daemon')
+    parser.add_argument('--port', type=int, default=2376,
+            help='port to expose docker services')
+    parser.add_argument('--certificates', type=str, default=default_certificates,
+            help='directory to read/write the certificates (must be secure)')
+    #parser.add_argument('--server', action='store_true',
+            #help='generate server keys')
+    parser.add_argument('--client', action='store_true',
+            help='generate client keys')
+
+    args = parser.parse_args()
+
+    if not (args.clean or args.install or args.start or args.client):
+        parser.print_help()
+    
+    if args.clean:
+        clean_docker()
+
+    if args.install:
+        install_docker()
+
+    if args.start:
+        certdir = args.certificates
+        hostname = args.hostname
+        port = args.port
+        run_docker(hostname, port, certdir)
+
+    if args.client:
+        certdir = args.certificates
+        hostname = args.hostname
+        port = args.port
+        generate_client_keys(hostname, 'client', certdir)
