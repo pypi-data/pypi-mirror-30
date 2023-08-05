@@ -1,0 +1,3 @@
+from dataqualityhdfs.test.testoperations.testoperation import TestOperation
+from dataqualityhdfs.test.testoperations.testoperationmayor import TestOperationMayor
+from dataqualityhdfs.test.testoperations.testoperationminor import TestOperationMinor
