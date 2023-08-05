@@ -1,0 +1,223 @@
+#ifndef SELFTEST_H
+#define SELFTEST_H
+
+static const char * pyjava_selftests[] = {
+    "import cpyjava\n"
+    "print = cpyjava.packages.java.lang.System.err.print\n"
+    "for x in range(0,20):\n"
+    "\tprint('')\n"
+    "used = cpyjava.memstat('used')\n"
+    "for x in range(0,2000):\n"
+    "\tprint('')\n"
+    "if used != cpyjava.memstat('used'):\n"
+    "\tprint('ERROR: memory leak detected;'+str(used)+','+str(cpyjava.memstat('used')))\n"
+    "\traise Exception('memory leak detected')\n"
+
+    ,
+    "import threading\n"
+    "def javacall():\n"
+    "\timport cpyjava\n"
+    "\tp = cpyjava.packages.java.lang.System.out.print\n"
+    "\tfor x in range (0,100):\n"
+    "\t\tp('')\n"
+    "t = []\n"
+    "for x in range(0,100):\n"
+    "\tt.append(threading.Thread(target=javacall))\n"
+    "\tt[-1].start()\n"
+    "for x in t:\n"
+    "\tx.join()\n"
+
+    ,
+    "import cpyjava\n"
+    "ok = True\n"
+    "try:\n"
+    "\tcpyjava.packages.java.lang.System.err.print(1,2,3,4,5,6) #expected to fail\n"
+    "\tok = False\n"
+    "except:\n"
+    "\tpass\n"
+    "if not ok:\n"
+    "\traise Exception('Java Exception was not transfered to python.')"
+
+    ,
+    "import cpyjava\n"
+    "if not isinstance(cpyjava.packages.java.util.HashMap(),cpyjava.getType('java/util/Map')):\n"
+    "\traise Exception('Java Interface inheritance failed.')\n"
+    "if not isinstance(cpyjava.packages.java.util.HashMap(),cpyjava.getType('java/util/HashMap')):\n"
+    "\traise Exception('Java Class inheritance failed.')\n"
+    "if isinstance(cpyjava.packages.java.util.HashMap(),cpyjava.getType('java/util/TreeMap')):\n"
+    "\traise Exception('Java Class inheritance failed (false positive).')\n"
+
+    ,
+    "import cpyjava\n"
+    "jobject = cpyjava.packages.java.lang.System.out\n"
+    "ok = True\n"
+    "try:\n"
+    "\tjobject('test')\n"
+    "\tok=False\n"
+    "except:\n"
+    "\tpass\n"
+    "if not ok:\n"
+    "\traise Exception(\"invalid java object call didn't raise an exception\")\n"
+    "cpyjava.setCallDecorator(type(jobject),lambda s,d,a: None)\n"
+    "try:\n"
+    "\tjobject('test')\n"
+    "except:\n"
+    "\traise Exception('call decorator was not used')\n"
+    "cpyjava.setCallDecorator(type(jobject),None)\n"
+
+    ,
+    "import cpyjava\n"
+    "jobject = cpyjava.packages.java.lang.System.out\n"
+    "ok = True\n"
+    "try:\n"
+    "\tjobject.doesnt_exist\n"
+    "\tok=False\n"
+    "except:\n"
+    "\tpass\n"
+    "if not ok:\n"
+    "\traise Exception(\"invalid java field access didn't raise an exception\")\n"
+    "cpyjava.setGetterDecorator(type(jobject),lambda s,d,a: 29384)\n"
+    "test = None\n"
+    "try:\n"
+    "\ttest = jobject.doesnt_exist\n"
+    "except:\n"
+    "\traise Exception('getter decorator was not used')\n"
+    "if test != 29384:\n"
+    "   raise Exception('getter decorator return value lost')\n"
+    "cpyjava.setGetterDecorator(type(jobject),None)\n"
+
+
+    ,
+    "import cpyjava\n"
+    "jobject = cpyjava.packages.java.lang.System.out\n"
+    "ok = True\n"
+    "try:\n"
+    "\tjobject.doesnt_exist = 34534\n"
+    "\tok=False\n"
+    "except:\n"
+    "\tpass\n"
+    "if not ok:\n"
+    "\traise Exception(\"invalid java field access didn't raise an exception\")\n"
+    "test = None\n"
+    "def s(*args):\n"
+    "\tglobal test\n"
+    "\ttest = args[3]\n"
+    "cpyjava.setSetterDecorator(type(jobject),s)\n"
+    "try:\n"
+    "\tjobject.doesnt_exist = 34534\n"
+    "except:\n"
+    "\traise Exception('setter decorator was not used')\n"
+    "if test != 34534:\n"
+    "   raise Exception('setter decorator return value lost')\n"
+    "cpyjava.setSetterDecorator(type(jobject),None)\n"
+
+    ,
+    "import cpyjava\n"
+    "list = cpyjava.packages.java.util.LinkedList()\n"
+    "list.add(\"1\")\n"
+    "list.add(\"2\")\n"
+    "list.add(\"3\")\n"
+    "array = list.toArray()\n"
+    "assert array[1] is list.get(1), 'unexpected list/array behaviour'\n"
+    "array[1] = 'string'\n"
+    "assert array[1] is not list.get(1), 'unexpected list/array behaviour'\n"
+    "ok = False\n"
+    "try:\n"
+    "\tarray[5]\n"
+    "except:\n"
+    "\tok=True\n"
+    "if not ok:\n"
+    "\traise Exception('unexpected array behaviour. '+repr(array))\n"
+    "if repr(list) != '[1, 2, 3]':\n"
+    "\traise Exception('unexpected list behaviour. '+repr(list))\n"
+    "if len(list.toArray()) != list.size():\n"
+    "\traise Exception('unexpected list/array behaviour. ['+str(len(list.toArray()))+','+str(list.size())+']')\n"
+
+    ,
+    // once conversion of Integer is implemeneted, this will fail
+    "import cpyjava\n"
+    "i1 = cpyjava.packages.java.lang.Integer(123)\n"
+    "i2 = cpyjava.packages.java.lang.Integer(123)\n"
+    "if i1 is i2:\n"
+    "\traise Exception('identity comparison failed')\n"
+    "if i1 != i2:\n"
+    "\traise Exception('rich comparison (equals) failed (1)')\n"
+    "if not (i1 == i2):\n"
+    "\traise Exception('rich comparison (equals) failed (2)')\n"
+    "if not (i1 == i1):\n"
+    "\traise Exception('rich comparison (equals) failed (3)')\n"
+    "if i1 == 1:\n"
+    "\traise Exception('rich comparison (equals) failed (4)')\n"
+
+    ,
+    "import cpyjava\n"
+    "hash(cpyjava.packages.java.lang.System.out)\n"
+
+    ,
+    "import cpyjava\n"
+    "dir(cpyjava.packages.java.lang.System.out)\n"
+    "cpyjava.packages.java.lang.System.out.__dict__\n"
+
+    ,
+    "import cpyjava\n"
+    "cpyjava.typeAsClassObject(cpyjava.getType(\"java/lang/String\")).getName()\n"
+
+    ,
+    "import cpyjava\n"
+    "map = cpyjava.packages.java.util.HashMap()\n"
+    "map['1'] = '2'\n"
+    "map.put('3','4')\n"
+    "assert map.get('1') == '2', 'map test failed (1)'\n"
+    "assert map['3'] == '4', 'map test failed (2)'\n"
+    "assert map.size() == len(map), 'map test failed (3)'\n"
+    "del map['3']\n"
+    "assert map.size() == 1, 'map test failed (4)'\n"
+    "count = 0\n"
+    "for x in map:\n"
+    "\tcount += 1\n"
+    "assert count == 1, 'map test failed (5)'"
+
+    ,
+    "import cpyjava\n"
+    "list = cpyjava.packages.java.util.LinkedList()\n"
+    "list.add('2')\n"
+    "list.add('3')\n"
+    "list.add('4')\n"
+    "assert list.get(1) == '3', 'list test failed (1)'\n"
+    "assert list[2] == '4', 'list test failed (2)'\n"
+    "assert list.size() == len(list), 'list test failed (3)'\n"
+    "del list[0]\n"
+    "assert list.size() == 2, 'list test failed (4)'\n"
+    "count = 0\n"
+    "for x in list:\n"
+    "\tcount += 1\n"
+    "assert count == 2, 'list test failed (5)'"
+
+    ,
+    "import cpyjava\n"
+    "jstring = cpyjava.cast(cpyjava.getType(\"java/lang/String\"),\"test\")\n"
+    "assert type(jstring) is cpyjava.getType(\"java/lang/String\") , 'explicit casting failed'\n"
+    "carray = jstring.toCharArray()\n"
+    "assert \"t\"==carray[0] , 'char array access failed (1)'\n"
+    "carray[0] = 'x'\n"
+    "assert \"x\"==carray[0] , 'char array access failed (2)'\n"
+    "barray = jstring.getBytes()\n"
+    "assert 116==barray[0] , 'byte array access failed (1)'\n"
+    "barray[0] = 120\n"
+    "assert 120==barray[0] , 'byte array access failed (2)'\n"
+
+    ,
+    "import cpyjava\n"
+    "list = cpyjava.packages.java.util.HashSet()\n"
+    "list.add('2')\n"
+    "list.add('3')\n"
+    "list.add('4')\n"
+    "assert '3' in list, 'set test failed (1)'\n"
+    "assert list.size() == len(list), 'set test failed (2)'\n"
+
+
+    ,
+    NULL
+};
+
+#endif // SELFTEST_H
