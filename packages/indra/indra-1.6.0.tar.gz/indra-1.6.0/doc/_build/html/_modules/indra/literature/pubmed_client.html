@@ -1,0 +1,594 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.literature.pubmed_client &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../index.html"/>
+        <link rel="up" title="indra.literature" href="../literature.html"/> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+          <li><a href="../literature.html">indra.literature</a> &raquo;</li>
+        
+      <li>indra.literature.pubmed_client</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.literature.pubmed_client</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Search and get metadata for articles in Pubmed.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">xml.etree.ElementTree</span> <span class="k">as</span> <span class="nn">ET</span>
+<span class="kn">import</span> <span class="nn">requests</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="c1"># Python 3</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">lru_cache</span>
+<span class="c1"># Python 2</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">functools32</span> <span class="k">import</span> <span class="n">lru_cache</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">hgnc_client</span>
+<span class="kn">from</span> <span class="nn">indra.util</span> <span class="k">import</span> <span class="n">UnicodeXMLTreeBuilder</span> <span class="k">as</span> <span class="n">UTB</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;pubmed&#39;</span><span class="p">)</span>
+
+<span class="n">pubmed_search</span> <span class="o">=</span> <span class="s1">&#39;https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi&#39;</span>
+<span class="n">pubmed_fetch</span> <span class="o">=</span> <span class="s1">&#39;https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi&#39;</span>
+
+<span class="c1"># Send request can&#39;t be cached by lru_cache because it takes a dict</span>
+<span class="c1"># (a mutable/unhashable type) as an argument. We cache the callers instead.</span>
+<span class="k">def</span> <span class="nf">send_request</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">requests</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">Timeout</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;PubMed request timed out&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;url: </span><span class="si">%s</span><span class="s1">, data: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">data</span><span class="p">))</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">except</span> <span class="n">requests</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">RequestException</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;PubMed request exception&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;url: </span><span class="si">%s</span><span class="s1">, data: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">data</span><span class="p">))</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">res</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">tree</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">XML</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">content</span><span class="p">,</span> <span class="n">parser</span><span class="o">=</span><span class="n">UTB</span><span class="p">())</span>
+    <span class="k">return</span> <span class="n">tree</span>
+
+
+<div class="viewcode-block" id="get_ids"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_ids">[docs]</a><span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">get_ids</span><span class="p">(</span><span class="n">search_term</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Search Pubmed for paper IDs given a search term.</span>
+
+<span class="sd">    The options are passed as named arguments. For details on parameters that</span>
+<span class="sd">    can be used, see</span>
+<span class="sd">    https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch Some useful</span>
+<span class="sd">    parameters to pass are db=&#39;pmc&#39; to search PMC instead of pubmed reldate=2</span>
+<span class="sd">    to search for papers within the last 2 days mindate=&#39;2016/03/01&#39;,</span>
+<span class="sd">    maxdate=&#39;2016/03/31&#39; to search for papers in March 2016.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;term&#39;</span><span class="p">:</span> <span class="n">search_term</span><span class="p">,</span>
+              <span class="s1">&#39;retmax&#39;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
+              <span class="s1">&#39;retstart&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+              <span class="s1">&#39;db&#39;</span><span class="p">:</span> <span class="s1">&#39;pubmed&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;sort&#39;</span><span class="p">:</span> <span class="s1">&#39;pub+date&#39;</span><span class="p">}</span>
+    <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">tree</span> <span class="o">=</span> <span class="n">send_request</span><span class="p">(</span><span class="n">pubmed_search</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">tree</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ERROR&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ERROR&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ErrorList&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">err</span> <span class="ow">in</span> <span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ErrorList&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">getchildren</span><span class="p">():</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Error - </span><span class="si">%s</span><span class="s1">: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">err</span><span class="o">.</span><span class="n">tag</span><span class="p">,</span> <span class="n">err</span><span class="o">.</span><span class="n">text</span><span class="p">))</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;Count&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">id_terms</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;IdList/Id&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">id_terms</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">idt</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">idt</span> <span class="ow">in</span> <span class="n">id_terms</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">count</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ids</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Not all ids were retrieved for search </span><span class="si">%s</span><span class="s1">;</span><span class="se">\n</span><span class="s1">&#39;</span>
+                       <span class="s1">&#39;limited at </span><span class="si">%d</span><span class="s1">.&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">search_term</span><span class="p">,</span> <span class="n">params</span><span class="p">[</span><span class="s1">&#39;retmax&#39;</span><span class="p">]))</span></div>
+    <span class="k">return</span> <span class="n">ids</span>
+
+
+<div class="viewcode-block" id="get_ids_for_gene"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_ids_for_gene">[docs]</a><span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">get_ids_for_gene</span><span class="p">(</span><span class="n">hgnc_name</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get the curated set of articles for a gene in the Entrez database.</span>
+
+<span class="sd">    Search parameters for the Gene database query can be passed in as</span>
+<span class="sd">    keyword arguments. </span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    hgnc_name : string</span>
+<span class="sd">        The HGNC name of the gene. This is used to obtain the HGNC ID</span>
+<span class="sd">        (using the hgnc_client module) and in turn used to obtain the Entrez</span>
+<span class="sd">        ID associated with the gene. Entrez is then queried for that ID.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Get the HGNC ID for the HGNC name</span>
+    <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_id</span><span class="p">(</span><span class="n">hgnc_name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">hgnc_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Invalid HGNC name.&#39;</span><span class="p">)</span>
+    <span class="c1"># Get the Entrez ID</span>
+    <span class="n">entrez_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_entrez_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">entrez_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Entrez ID not found in HGNC table.&#39;</span><span class="p">)</span>
+    <span class="c1"># Query the Entrez Gene database</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;db&#39;</span><span class="p">:</span> <span class="s1">&#39;gene&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;retmode&#39;</span><span class="p">:</span> <span class="s1">&#39;xml&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">entrez_id</span><span class="p">}</span>
+    <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">tree</span> <span class="o">=</span> <span class="n">send_request</span><span class="p">(</span><span class="n">pubmed_fetch</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">tree</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ERROR&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ERROR&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="c1"># Get all PMIDs from the XML tree</span>
+    <span class="n">id_terms</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;.//PubMedId&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">id_terms</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="c1"># Use a set to remove duplicate IDs</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">([</span><span class="n">idt</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">idt</span> <span class="ow">in</span> <span class="n">id_terms</span><span class="p">]))</span></div>
+    <span class="k">return</span> <span class="n">ids</span>
+
+
+<div class="viewcode-block" id="get_article_xml"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_article_xml">[docs]</a><span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">get_article_xml</span><span class="p">(</span><span class="n">pubmed_id</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get the XML metadata for a single article from the Pubmed database.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pubmed_id</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;PMID&#39;</span><span class="p">):</span>
+        <span class="n">pubmed_id</span> <span class="o">=</span> <span class="n">pubmed_id</span><span class="p">[</span><span class="mi">4</span><span class="p">:]</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;db&#39;</span><span class="p">:</span> <span class="s1">&#39;pubmed&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;retmode&#39;</span><span class="p">:</span> <span class="s1">&#39;xml&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">pubmed_id</span><span class="p">}</span>
+    <span class="n">tree</span> <span class="o">=</span> <span class="n">send_request</span><span class="p">(</span><span class="n">pubmed_fetch</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">tree</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">article</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;PubmedArticle/MedlineCitation/Article&#39;</span><span class="p">)</span></div>
+    <span class="k">return</span> <span class="n">article</span> <span class="c1"># May be none</span>
+
+
+<div class="viewcode-block" id="get_title"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_title">[docs]</a><span class="k">def</span> <span class="nf">get_title</span><span class="p">(</span><span class="n">pubmed_id</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get the title of an article in the Pubmed database.&quot;&quot;&quot;</span>
+    <span class="n">article</span> <span class="o">=</span> <span class="n">get_article_xml</span><span class="p">(</span><span class="n">pubmed_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">article</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">title</span> <span class="o">=</span> <span class="n">article</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ArticleTitle&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">text</span></div>
+    <span class="k">return</span> <span class="n">title</span>
+
+
+<span class="k">def</span> <span class="nf">_abstract_from_article_element</span><span class="p">(</span><span class="n">article</span><span class="p">,</span> <span class="n">prepend_title</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="n">abstract</span> <span class="o">=</span> <span class="n">article</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;Abstract/AbstractText&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">abstract</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">abstract_text</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s1">&#39; &#39;</span> <span class="k">if</span> <span class="n">abst</span><span class="o">.</span><span class="n">text</span> <span class="ow">is</span> <span class="kc">None</span>
+                                  <span class="k">else</span> <span class="n">abst</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">abst</span> <span class="ow">in</span> <span class="n">abstract</span><span class="p">])</span>
+    <span class="n">title_tag</span> <span class="o">=</span> <span class="n">article</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;ArticleTitle&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">title_tag</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">prepend_title</span><span class="p">:</span>
+        <span class="n">title</span> <span class="o">=</span> <span class="n">title_tag</span><span class="o">.</span><span class="n">text</span>
+        <span class="k">if</span> <span class="n">title</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">title</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">):</span>
+                <span class="n">title</span> <span class="o">+=</span> <span class="s1">&#39;.&#39;</span>
+            <span class="n">abstract_text</span> <span class="o">=</span> <span class="n">title</span> <span class="o">+</span> <span class="s1">&#39; &#39;</span> <span class="o">+</span> <span class="n">abstract_text</span>
+    <span class="k">return</span> <span class="n">abstract_text</span>
+
+
+<div class="viewcode-block" id="get_abstract"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_abstract">[docs]</a><span class="k">def</span> <span class="nf">get_abstract</span><span class="p">(</span><span class="n">pubmed_id</span><span class="p">,</span> <span class="n">prepend_title</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get the abstract of an article in the Pubmed database.&quot;&quot;&quot;</span>
+    <span class="n">article</span> <span class="o">=</span> <span class="n">get_article_xml</span><span class="p">(</span><span class="n">pubmed_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">article</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span></div>
+    <span class="k">return</span> <span class="n">_abstract_from_article_element</span><span class="p">(</span><span class="n">article</span><span class="p">,</span> <span class="n">prepend_title</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="get_metadata_from_xml_tree"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_metadata_from_xml_tree">[docs]</a><span class="k">def</span> <span class="nf">get_metadata_from_xml_tree</span><span class="p">(</span><span class="n">tree</span><span class="p">,</span> <span class="n">get_issns_from_nlm</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                               <span class="n">get_abstracts</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">prepend_title</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get metadata for an XML tree containing PubmedArticle elements.</span>
+
+<span class="sd">    Documentation on the XML structure can be found at:</span>
+<span class="sd">        - https://www.nlm.nih.gov/bsd/licensee/elements_descriptions.html</span>
+<span class="sd">        - https://www.nlm.nih.gov/bsd/licensee/elements_alphabetical.html</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    tree : xml.etree.ElementTree</span>
+<span class="sd">        ElementTree containing one or more PubmedArticle elements.</span>
+<span class="sd">    get_issns_from_nlm : boolean</span>
+<span class="sd">        Look up the full list of ISSN number for the journal associated with</span>
+<span class="sd">        the article, which helps to match articles to CrossRef search results.</span>
+<span class="sd">        Defaults to False, since it slows down performance.</span>
+<span class="sd">    get_abstracts : boolean</span>
+<span class="sd">        Indicates whether to include the Pubmed abstract in the results.</span>
+<span class="sd">    prepend_title : boolean</span>
+<span class="sd">        If get_abstracts is True, specifies whether the article title should</span>
+<span class="sd">        be prepended to the abstract text.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict of dicts</span>
+<span class="sd">        Dictionary indexed by PMID. Each value is a dict containing the</span>
+<span class="sd">        following fields: &#39;doi&#39;, &#39;title&#39;, &#39;authors&#39;, &#39;journal_title&#39;,</span>
+<span class="sd">        &#39;journal_abbrev&#39;, &#39;journal_nlm_id&#39;, &#39;issn_list&#39;, &#39;page&#39;.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># A function to get the text for the element, or None if not found</span>
+    <span class="k">def</span> <span class="nf">find_elem_text</span><span class="p">(</span><span class="n">root</span><span class="p">,</span> <span class="n">xpath_string</span><span class="p">):</span>
+        <span class="n">elem</span> <span class="o">=</span> <span class="n">root</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">xpath_string</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">elem</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">elem</span><span class="o">.</span><span class="n">text</span>
+
+    <span class="c1"># Iterate over the articles and build the results dict</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">pm_articles</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;./PubmedArticle&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">art_ix</span><span class="p">,</span> <span class="n">pm_article</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">pm_articles</span><span class="p">):</span>
+        <span class="n">pmid</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;MedlineCitation/PMID&#39;</span><span class="p">)</span>
+        <span class="c1"># Look for the DOI in the ELocationID field...</span>
+        <span class="n">doi</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;MedlineCitation/Article/ELocationID&#39;</span>
+                                         <span class="s1">&#39;[@EIdType=&quot;doi&quot;][@ValidYN=&quot;Y&quot;]&#39;</span><span class="p">)</span>
+        <span class="n">pii</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;MedlineCitation/Article/ELocationID&#39;</span>
+                                         <span class="s1">&#39;[@EIdType=&quot;pii&quot;][@ValidYN=&quot;Y&quot;]&#39;</span><span class="p">)</span>
+        <span class="c1"># ...and if that doesn&#39;t work, look in the ArticleIdList</span>
+        <span class="k">if</span> <span class="n">doi</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">doi</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;.//ArticleId[@IdType=&quot;doi&quot;]&#39;</span><span class="p">)</span>
+        <span class="c1"># Try to get the PMCID</span>
+        <span class="n">pmcid</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;.//ArticleId[@IdType=&quot;pmc&quot;]&#39;</span><span class="p">)</span>
+        <span class="c1"># Title</span>
+        <span class="n">title</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span>
+                               <span class="s1">&#39;MedlineCitation/Article/ArticleTitle&#39;</span><span class="p">)</span>
+        <span class="c1"># Author list</span>
+        <span class="n">author_elems</span> <span class="o">=</span> <span class="n">pm_article</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;MedlineCitation/Article/&#39;</span>
+                                          <span class="s1">&#39;AuthorList/Author/LastName&#39;</span><span class="p">)</span>
+        <span class="n">author_names</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">author_elems</span> <span class="ow">is</span> <span class="kc">None</span> \
+                            <span class="k">else</span> <span class="p">[</span><span class="n">au</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">au</span> <span class="ow">in</span> <span class="n">author_elems</span><span class="p">]</span>
+        <span class="c1"># Journal info</span>
+        <span class="n">journal_title</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;MedlineCitation/Article/&#39;</span>
+                                                   <span class="s1">&#39;Journal/Title&#39;</span><span class="p">)</span>
+        <span class="n">journal_abbrev</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;MedlineCitation/Article/&#39;</span>
+                                                   <span class="s1">&#39;Journal/ISOAbbreviation&#39;</span><span class="p">)</span>
+        <span class="c1"># Add the ISSN from the article record</span>
+        <span class="n">issn_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">issn</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;MedlineCitation/Article/&#39;</span>
+                                                   <span class="s1">&#39;Journal/ISSN&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">issn</span><span class="p">:</span>
+            <span class="n">issn_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">issn</span><span class="p">)</span>
+        <span class="c1"># Add the Linking ISSN from the article record</span>
+        <span class="n">issn_linking</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span>
+                                      <span class="s1">&#39;MedlineCitation/MedlineJournalInfo/&#39;</span>
+                                      <span class="s1">&#39;ISSNLinking&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">issn_linking</span><span class="p">:</span>
+            <span class="n">issn_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">issn_linking</span><span class="p">)</span>
+        <span class="c1"># Now get the list of ISSNs from the NLM Catalog</span>
+        <span class="n">nlm_id</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span>
+                                <span class="s1">&#39;MedlineCitation/MedlineJournalInfo/&#39;</span>
+                                <span class="s1">&#39;NlmUniqueID&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">nlm_id</span> <span class="ow">and</span> <span class="n">get_issns_from_nlm</span><span class="p">:</span>
+            <span class="n">nlm_issn_list</span> <span class="o">=</span> <span class="n">get_issns_for_journal</span><span class="p">(</span><span class="n">nlm_id</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">nlm_issn_list</span><span class="p">:</span>
+                <span class="n">issn_list</span> <span class="o">+=</span> <span class="n">nlm_issn_list</span>
+        <span class="c1"># Remove any duplicates</span>
+        <span class="n">issn_list</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">issn_list</span><span class="p">))</span>
+        <span class="c1"># Get the page number entry</span>
+        <span class="n">page</span> <span class="o">=</span> <span class="n">find_elem_text</span><span class="p">(</span><span class="n">pm_article</span><span class="p">,</span> <span class="s1">&#39;MedlineCitation/Article/Pagination/&#39;</span>
+                                          <span class="s1">&#39;MedlinePgn&#39;</span><span class="p">)</span>
+        <span class="c1"># Build the result</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;doi&#39;</span><span class="p">:</span> <span class="n">doi</span><span class="p">,</span>
+                  <span class="s1">&#39;pmcid&#39;</span><span class="p">:</span> <span class="n">pmcid</span><span class="p">,</span>
+                  <span class="s1">&#39;pii&#39;</span><span class="p">:</span> <span class="n">pii</span><span class="p">,</span>
+                  <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="n">title</span><span class="p">,</span>
+                  <span class="s1">&#39;authors&#39;</span><span class="p">:</span> <span class="n">author_names</span><span class="p">,</span>
+                  <span class="s1">&#39;journal_title&#39;</span><span class="p">:</span> <span class="n">journal_title</span><span class="p">,</span>
+                  <span class="s1">&#39;journal_abbrev&#39;</span><span class="p">:</span> <span class="n">journal_abbrev</span><span class="p">,</span>
+                  <span class="s1">&#39;journal_nlm_id&#39;</span><span class="p">:</span> <span class="n">nlm_id</span><span class="p">,</span>
+                  <span class="s1">&#39;issn_list&#39;</span><span class="p">:</span> <span class="n">issn_list</span><span class="p">,</span>
+                  <span class="s1">&#39;page&#39;</span><span class="p">:</span> <span class="n">page</span><span class="p">}</span>
+        <span class="c1"># Get the abstracts if requested</span>
+        <span class="k">if</span> <span class="n">get_abstracts</span><span class="p">:</span>
+            <span class="n">medline_article</span> <span class="o">=</span> <span class="n">pm_article</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;MedlineCitation/Article&#39;</span><span class="p">)</span>
+            <span class="n">abstract</span> <span class="o">=</span> <span class="n">_abstract_from_article_element</span><span class="p">(</span>
+                                <span class="n">medline_article</span><span class="p">,</span> <span class="n">prepend_title</span><span class="o">=</span><span class="n">prepend_title</span><span class="p">)</span>
+            <span class="n">result</span><span class="p">[</span><span class="s1">&#39;abstract&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">abstract</span>
+        <span class="c1"># Add to dict</span>
+        <span class="n">results</span><span class="p">[</span><span class="n">pmid</span><span class="p">]</span> <span class="o">=</span> <span class="n">result</span></div>
+    <span class="k">return</span> <span class="n">results</span>
+
+
+<div class="viewcode-block" id="get_metadata_for_ids"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_metadata_for_ids">[docs]</a><span class="k">def</span> <span class="nf">get_metadata_for_ids</span><span class="p">(</span><span class="n">pmid_list</span><span class="p">,</span> <span class="n">get_issns_from_nlm</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                         <span class="n">get_abstracts</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">prepend_title</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get article metadata for up to 200 PMIDs from the Pubmed database.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    pmid_list : list of PMIDs as strings</span>
+<span class="sd">        Can contain 1-200 PMIDs.</span>
+<span class="sd">    get_issns_from_nlm : boolean</span>
+<span class="sd">        Look up the full list of ISSN number for the journal associated with</span>
+<span class="sd">        the article, which helps to match articles to CrossRef search results.</span>
+<span class="sd">        Defaults to False, since it slows down performance.</span>
+<span class="sd">    get_abstracts : boolean</span>
+<span class="sd">        Indicates whether to include the Pubmed abstract in the results.</span>
+<span class="sd">    prepend_title : boolean</span>
+<span class="sd">        If get_abstracts is True, specifies whether the article title should</span>
+<span class="sd">        be prepended to the abstract text.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict of dicts</span>
+<span class="sd">        Dictionary indexed by PMID. Each value is a dict containing the</span>
+<span class="sd">        following fields: &#39;doi&#39;, &#39;title&#39;, &#39;authors&#39;, &#39;journal_title&#39;,</span>
+<span class="sd">        &#39;journal_abbrev&#39;, &#39;journal_nlm_id&#39;, &#39;issn_list&#39;, &#39;page&#39;.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pmid_list</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">200</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Metadata query is limited to 200 PMIDs at a time.&quot;</span><span class="p">)</span>
+    <span class="n">query_string</span><span class="o">=</span><span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pmid_list</span><span class="p">)</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;db&#39;</span><span class="p">:</span> <span class="s1">&#39;pubmed&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;retmode&#39;</span><span class="p">:</span> <span class="s1">&#39;xml&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">pmid_list</span><span class="p">}</span>
+    <span class="n">tree</span> <span class="o">=</span> <span class="n">send_request</span><span class="p">(</span><span class="n">pubmed_fetch</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">tree</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">get_metadata_from_xml_tree</span><span class="p">(</span><span class="n">tree</span><span class="p">,</span> <span class="n">get_issns_from_nlm</span><span class="p">,</span> <span class="n">get_abstracts</span><span class="p">,</span></div>
+                                      <span class="n">prepend_title</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="get_issns_for_journal"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.get_issns_for_journal">[docs]</a><span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">get_issns_for_journal</span><span class="p">(</span><span class="n">nlm_id</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get a list of the ISSN numbers for a journal given its NLM ID.</span>
+
+<span class="sd">    Information on NLM XML DTDs is available at</span>
+<span class="sd">    https://www.nlm.nih.gov/databases/dtd/</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;db&#39;</span><span class="p">:</span> <span class="s1">&#39;nlmcatalog&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;retmode&#39;</span><span class="p">:</span> <span class="s1">&#39;xml&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">nlm_id</span><span class="p">}</span>
+    <span class="n">tree</span> <span class="o">=</span> <span class="n">send_request</span><span class="p">(</span><span class="n">pubmed_fetch</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">tree</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">issn_list</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;.//ISSN&#39;</span><span class="p">)</span>
+    <span class="n">issn_linking</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;.//ISSNLinking&#39;</span><span class="p">)</span>
+    <span class="n">issns</span> <span class="o">=</span> <span class="n">issn_list</span> <span class="o">+</span> <span class="n">issn_linking</span>
+    <span class="c1"># No ISSNs found!</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">issns</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">else</span><span class="p">:</span></div>
+        <span class="k">return</span> <span class="p">[</span><span class="n">issn</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">issn</span> <span class="ow">in</span> <span class="n">issns</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="expand_pagination"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pubmed_client.expand_pagination">[docs]</a><span class="k">def</span> <span class="nf">expand_pagination</span><span class="p">(</span><span class="n">pages</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Convert a page number to long form, e.g., from 456-7 to 456-457.&quot;&quot;&quot;</span>
+    <span class="c1"># If there is no hyphen, it&#39;s a single page, and we&#39;re good to go</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">pages</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;-&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span> <span class="c1"># No hyphen, so no split</span>
+        <span class="k">return</span> <span class="n">pages</span>
+    <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="c1"># If the end is the same number of digits as the start, then we</span>
+        <span class="c1"># don&#39;t change anything!</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">start</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">end</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">pages</span>
+        <span class="c1"># Otherwise, replace the last digits of start with the digits of end</span>
+        <span class="n">num_end_digits</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">end</span><span class="p">)</span>
+        <span class="n">new_end</span> <span class="o">=</span> <span class="n">start</span><span class="p">[:</span><span class="o">-</span><span class="n">num_end_digits</span><span class="p">]</span> <span class="o">+</span> <span class="n">end</span>
+        <span class="k">return</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">-</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">new_end</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span> <span class="c1"># More than one hyphen, something weird happened</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Multiple hyphens in page number: </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="n">pages</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">pages</span>
+
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

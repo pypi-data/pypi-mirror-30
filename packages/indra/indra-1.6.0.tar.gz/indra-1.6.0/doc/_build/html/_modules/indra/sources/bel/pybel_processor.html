@@ -1,0 +1,842 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.sources.bel.pybel_processor &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../../index.html"/>
+        <link rel="up" title="Module code" href="../../../index.html"/> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.sources.bel.pybel_processor</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.sources.bel.pybel_processor</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">copy</span> <span class="k">import</span> <span class="n">copy</span>
+<span class="kn">import</span> <span class="nn">pybel.constants</span> <span class="k">as</span> <span class="nn">pc</span>
+<span class="kn">from</span> <span class="nn">pybel.struct</span> <span class="k">import</span> <span class="n">has_protein_modification</span>
+<span class="kn">from</span> <span class="nn">pybel.canonicalize</span> <span class="k">import</span> <span class="n">edge_to_bel</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">indra.sources.bel.belrdf_processor</span> <span class="k">import</span> <span class="n">bel_to_indra</span><span class="p">,</span> <span class="n">chebi_name_id</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">hgnc_client</span><span class="p">,</span> <span class="n">uniprot_client</span>
+<span class="kn">from</span> <span class="nn">indra.assemblers.pybel_assembler</span> <span class="k">import</span> <span class="n">_pybel_indra_act_map</span>
+
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;pybel_processor&#39;</span><span class="p">)</span>
+
+
+<span class="n">_pybel_indra_pmod_map</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;Ph&#39;</span><span class="p">:</span> <span class="s1">&#39;phosphorylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Hy&#39;</span><span class="p">:</span> <span class="s1">&#39;hydroxylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Sumo&#39;</span><span class="p">:</span> <span class="s1">&#39;sumoylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Ac&#39;</span><span class="p">:</span> <span class="s1">&#39;acetylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Glyco&#39;</span><span class="p">:</span> <span class="s1">&#39;glycosylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;ADPRib&#39;</span><span class="p">:</span> <span class="s1">&#39;ribosylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Ub&#39;</span><span class="p">:</span> <span class="s1">&#39;ubiquitination&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Farn&#39;</span><span class="p">:</span> <span class="s1">&#39;farnesylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Gerger&#39;</span><span class="p">:</span> <span class="s1">&#39;geranylgeranylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Palm&#39;</span><span class="p">:</span> <span class="s1">&#39;palmitoylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Myr&#39;</span><span class="p">:</span> <span class="s1">&#39;myristoylation&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Me&#39;</span><span class="p">:</span> <span class="s1">&#39;methylation&#39;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1">#: A mapping from the BEL text location annotation to the INDRA ones at</span>
+<span class="c1"># :py:data:`indra.reach.processor._section_list`</span>
+<span class="c1">#: see https://arty.scai.fraunhofer.de/artifactory/bel/annotation/text-location/text-location-1.0.0.belanno</span>
+<span class="n">_pybel_text_location_map</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Abstract&quot;</span><span class="p">:</span> <span class="s1">&#39;abstract&#39;</span><span class="p">,</span>
+    <span class="s2">&quot;Results&quot;</span><span class="p">:</span> <span class="s1">&#39;results&#39;</span><span class="p">,</span>
+    <span class="s2">&quot;Legend&quot;</span><span class="p">:</span> <span class="s1">&#39;figure&#39;</span><span class="p">,</span>
+    <span class="s2">&quot;Review&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="s1">&#39;Introduction&#39;</span><span class="p">:</span> <span class="s1">&#39;introduction&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Methods&#39;</span><span class="p">:</span> <span class="s1">&#39;methods&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Discussion&#39;</span><span class="p">:</span> <span class="s1">&#39;discussion&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;Conclusion&#39;</span><span class="p">:</span> <span class="s1">&#39;conclusion&#39;</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="PybelProcessor"><a class="viewcode-back" href="../../../../modules/sources/bel/index.html#indra.sources.bel.pybel_processor.PybelProcessor">[docs]</a><span class="k">class</span> <span class="nc">PybelProcessor</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Extract INDRA Statements from a PyBEL Graph.</span>
+
+<span class="sd">    Currently does not handle non-causal relationships (positiveCorrelation,</span>
+<span class="sd">    (negativeCorrelation, hasVariant, etc.)</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    graph : pybel.BELGraph</span>
+<span class="sd">        PyBEL graph containing the BEL content.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    statements : list[indra.statements.Statement]</span>
+<span class="sd">        A list of extracted INDRA Statements representing BEL Statements.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">graph</span> <span class="o">=</span> <span class="n">graph</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1"># FIXME: Handle reactions</span>
+    <span class="k">def</span> <span class="nf">get_statements</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">u</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">d</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">edges_iter</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+            <span class="n">u_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">node</span><span class="p">[</span><span class="n">u</span><span class="p">]</span>
+            <span class="n">v_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">node</span><span class="p">[</span><span class="n">v</span><span class="p">]</span>
+            <span class="c1"># We only interpret causal relations, not correlations</span>
+            <span class="k">if</span> <span class="n">d</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">pc</span><span class="o">.</span><span class="n">CAUSAL_RELATIONS</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+                <span class="k">continue</span>
+            <span class="c1"># If the left or right-hand sides involve complex abundances,</span>
+            <span class="c1"># add them as statements</span>
+            <span class="k">for</span> <span class="n">node_ix</span><span class="p">,</span> <span class="n">node_data</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">)):</span>
+                <span class="k">if</span> <span class="n">node_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">COMPLEX</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_get_complex</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">node_ix</span><span class="p">)</span>
+            <span class="n">subj_activity</span> <span class="o">=</span> <span class="n">_get_activity_condition</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+            <span class="n">obj_activity</span> <span class="o">=</span> <span class="n">_get_activity_condition</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">OBJECT</span><span class="p">))</span>
+            <span class="n">obj_to_loc</span> <span class="o">=</span> <span class="n">_get_translocation_target</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">OBJECT</span><span class="p">))</span>
+            <span class="c1"># If the object is a translocation, this represents a controlled</span>
+            <span class="c1"># translocation, which we currently do not represent</span>
+            <span class="k">if</span> <span class="n">obj_to_loc</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Controlled translocations are currently not &quot;</span>
+                               <span class="s2">&quot;handled: </span><span class="si">%s</span><span class="s2">)&quot;</span> <span class="o">%</span> <span class="n">edge_to_bel</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+                <span class="k">continue</span>
+            <span class="c1"># Modification, e.g.</span>
+            <span class="c1">#   x(Foo) -&gt; p(Bar, pmod(Ph))</span>
+            <span class="c1">#   act(x(Foo)) -&gt; p(Bar, pmod(Ph))</span>
+            <span class="k">if</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">PROTEIN</span> <span class="ow">and</span> \
+               <span class="n">has_protein_modification</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="p">,</span> <span class="n">v</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">obj_activity</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Ignoring object activity modifier in &quot;</span>
+                                <span class="s2">&quot;modification statement: </span><span class="si">%s</span><span class="s2">, </span><span class="si">%s</span><span class="s2">, </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span>
+                                <span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_get_modification</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">obj_activity</span><span class="p">:</span>
+                <span class="c1"># If the agents on the left and right hand sides are the same,</span>
+                <span class="c1"># then get an active form:</span>
+                <span class="c1"># ActiveForm</span>
+                <span class="c1">#   p(Foo, {variants}) -&gt;/-| act(p(Foo))</span>
+                <span class="c1"># Also Composite active forms:</span>
+                <span class="c1">#   compositeAbundance(p(Foo, pmod(&#39;Ph&#39;, &#39;T&#39;)),</span>
+                <span class="c1">#                       p(Foo, pmod(&#39;Ph&#39;, &#39;Y&#39;))) -&gt;/-|</span>
+                <span class="c1">#                            act(p(Foo))</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">subj_activity</span> <span class="ow">and</span> <span class="n">_proteins_match</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">):</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_get_active_form</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+                <span class="c1"># Gef</span>
+                <span class="c1">#   act(p(Foo)) =&gt; gtp(p(Foo))</span>
+                <span class="c1"># Gap</span>
+                <span class="c1">#   act(p(Foo)) =| gtp(p(Foo))</span>
+                <span class="k">elif</span> <span class="n">subj_activity</span> <span class="ow">and</span> <span class="n">_rel_is_direct</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="ow">and</span> \
+                     <span class="n">obj_activity</span><span class="o">.</span><span class="n">activity_type</span> <span class="o">==</span> <span class="s1">&#39;gtpbound&#39;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_get_gef_gap</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+                <span class="c1"># Activation/Inhibition</span>
+                <span class="c1">#   x(Foo) -&gt; act(x(Foo))</span>
+                <span class="c1">#   act(x(Foo)) -&gt; act(x(Foo))</span>
+                <span class="c1"># GtpActivation</span>
+                <span class="c1">#   gtp(p(Foo)) =&gt; act(p(Foo))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_get_regulate_activity</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+            <span class="c1"># Activations involving biological processes or pathologies</span>
+            <span class="c1">#   x(Foo) -&gt; bp(Bar)</span>
+            <span class="k">elif</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">BIOPROCESS</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">PATHOLOGY</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_get_regulate_activity</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+            <span class="c1"># Regulate amount</span>
+            <span class="c1">#   x(Foo) -&gt; p(Bar)</span>
+            <span class="c1">#   x(Foo) -&gt; r(Bar)</span>
+            <span class="c1">#   act(x(Foo)) -&gt; p(Bar):</span>
+            <span class="c1">#   x(Foo) -&gt; deg(p(Bar))</span>
+            <span class="c1">#   act(x(Foo)) -&gt;/-| deg(p(Bar))</span>
+            <span class="k">elif</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">PROTEIN</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">RNA</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">ABUNDANCE</span><span class="p">,</span>
+                 <span class="n">pc</span><span class="o">.</span><span class="n">COMPLEX</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">MIRNA</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">obj_activity</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_get_regulate_amount</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+            <span class="c1"># Controlled conversions</span>
+            <span class="c1">#   x(Foo) -&gt; rxn(reactants(r1,...,rn), products(p1,...pn))</span>
+            <span class="c1">#   act(x(Foo)) -&gt; rxn(reactants(r1,...,rn), products(p1,...pn))</span>
+            <span class="c1"># Note that we can&#39;t really handle statements where the relation</span>
+            <span class="c1"># is decreases, as inhibition of a reaction match the semantics</span>
+            <span class="c1"># of a controlled conversion</span>
+            <span class="k">elif</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">REACTION</span> <span class="ow">and</span> \
+                 <span class="n">d</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pc</span><span class="o">.</span><span class="n">CAUSAL_INCREASE_RELATIONS</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_get_conversion</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+            <span class="c1"># UNHANDLED</span>
+            <span class="c1"># rxn(reactants(r1,...,rn), products(p1,...pn))</span>
+            <span class="c1"># Complex(a,b)</span>
+            <span class="c1"># p(A, pmod(&#39;ph&#39;)) -&gt; Complex(A, B)</span>
+            <span class="c1"># Complex(A-Ph, B) </span>
+            <span class="c1"># Complexes</span>
+            <span class="c1">#   complex(x(Foo), x(Bar), ...)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">_get_complex</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">,</span> <span class="n">node_ix</span><span class="p">):</span>
+        <span class="c1"># Get an agent with bound conditions from the Complex</span>
+        <span class="k">assert</span> <span class="n">node_ix</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">node_data</span> <span class="o">=</span> <span class="p">[</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">][</span><span class="n">node_ix</span><span class="p">]</span>
+        <span class="n">cplx_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">node_data</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cplx_agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">agents</span> <span class="o">=</span> <span class="p">[</span><span class="n">bc</span><span class="o">.</span><span class="n">agent</span> <span class="k">for</span> <span class="n">bc</span> <span class="ow">in</span> <span class="n">cplx_agent</span><span class="o">.</span><span class="n">bound_conditions</span><span class="p">]</span>
+        <span class="n">cplx_agent</span><span class="o">.</span><span class="n">bound_conditions</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">agents</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cplx_agent</span><span class="p">)</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="n">Complex</span><span class="p">(</span><span class="n">agents</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="n">ev</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_regulate_amount</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">):</span>
+        <span class="n">subj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+        <span class="n">obj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">OBJECT</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">subj_agent</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">obj_agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">))</span>
+            <span class="k">return</span>
+        <span class="n">obj_mod</span> <span class="o">=</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">OBJECT</span><span class="p">)</span>
+        <span class="n">deg_polarity</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="mi">1</span> <span class="k">if</span> <span class="n">obj_mod</span> <span class="ow">and</span> <span class="n">obj_mod</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">MODIFIER</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">DEGRADATION</span>
+                           <span class="k">else</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">rel_polarity</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="k">if</span> <span class="n">edge_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="ow">in</span>
+                                    <span class="n">pc</span><span class="o">.</span><span class="n">CAUSAL_INCREASE_RELATIONS</span> <span class="k">else</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1"># Set polarity accordingly based on the relation type and whether</span>
+        <span class="c1"># the object is a degradation node</span>
+        <span class="k">if</span> <span class="n">deg_polarity</span> <span class="o">*</span> <span class="n">rel_polarity</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">stmt_class</span> <span class="o">=</span> <span class="n">IncreaseAmount</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">stmt_class</span> <span class="o">=</span> <span class="n">DecreaseAmount</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt_class</span><span class="p">(</span><span class="n">subj_agent</span><span class="p">,</span> <span class="n">obj_agent</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="n">ev</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_modification</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">):</span>
+        <span class="n">subj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+        <span class="n">mods</span><span class="p">,</span> <span class="n">muts</span> <span class="o">=</span> <span class="n">_get_all_pmods</span><span class="p">(</span><span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+        <span class="n">v_data_no_mods</span> <span class="o">=</span> <span class="n">_remove_pmods</span><span class="p">(</span><span class="n">v_data</span><span class="p">)</span>
+        <span class="n">obj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">v_data_no_mods</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">OBJECT</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">subj_agent</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">obj_agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">))</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">mod</span> <span class="ow">in</span> <span class="n">mods</span><span class="p">:</span>
+            <span class="n">modclass</span> <span class="o">=</span> <span class="n">modtype_to_modclass</span><span class="p">[</span><span class="n">mod</span><span class="o">.</span><span class="n">mod_type</span><span class="p">]</span>
+            <span class="n">ev</span> <span class="o">=</span> <span class="n">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+            <span class="n">stmt</span> <span class="o">=</span> <span class="n">modclass</span><span class="p">(</span><span class="n">subj_agent</span><span class="p">,</span> <span class="n">obj_agent</span><span class="p">,</span> <span class="n">mod</span><span class="o">.</span><span class="n">residue</span><span class="p">,</span> <span class="n">mod</span><span class="o">.</span><span class="n">position</span><span class="p">,</span>
+                            <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="n">ev</span><span class="p">])</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_regulate_activity</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">):</span>
+        <span class="c1"># Subject info</span>
+        <span class="n">subj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+        <span class="n">subj_activity</span> <span class="o">=</span> <span class="n">_get_activity_condition</span><span class="p">(</span><span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+        <span class="n">subj_function</span> <span class="o">=</span> <span class="n">u_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">)</span>
+        <span class="c1"># Object info</span>
+        <span class="c1"># Note: Don&#39;t pass the object modifier data because we don&#39;t want to</span>
+        <span class="c1"># put an activity on the agent</span>
+        <span class="n">obj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">v_data</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">obj_function</span> <span class="o">=</span> <span class="n">v_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">)</span>
+        <span class="c1"># If it&#39;s a bioprocess object, we won&#39;t have an activity in the edge</span>
+        <span class="k">if</span> <span class="n">obj_function</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">BIOPROCESS</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">PATHOLOGY</span><span class="p">):</span>
+            <span class="n">activity_type</span> <span class="o">=</span> <span class="s1">&#39;activity&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">obj_activity_condition</span> <span class="o">=</span> \
+                            <span class="n">_get_activity_condition</span><span class="p">(</span><span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">OBJECT</span><span class="p">))</span>
+            <span class="n">activity_type</span> <span class="o">=</span> <span class="n">obj_activity_condition</span><span class="o">.</span><span class="n">activity_type</span>
+            <span class="k">assert</span> <span class="n">obj_activity_condition</span><span class="o">.</span><span class="n">is_active</span> <span class="ow">is</span> <span class="kc">True</span>
+        <span class="c1"># Check for valid subject/object</span>
+        <span class="k">if</span> <span class="n">subj_agent</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">obj_agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">))</span>
+            <span class="k">return</span>
+        <span class="c1"># Check which kind of statement we need to make</span>
+        <span class="c1"># GtpActivation</span>
+        <span class="k">if</span> <span class="n">subj_activity</span> <span class="ow">and</span> <span class="n">subj_activity</span><span class="o">.</span><span class="n">activity_type</span> <span class="o">==</span> <span class="s1">&#39;gtpbound&#39;</span> <span class="ow">and</span> \
+           <span class="n">subj_function</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">PROTEIN</span> <span class="ow">and</span> <span class="n">obj_function</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">PROTEIN</span> <span class="ow">and</span> \
+           <span class="n">edge_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">DIRECTLY_INCREASES</span><span class="p">:</span>
+            <span class="n">stmt_class</span> <span class="o">=</span> <span class="n">GtpActivation</span>
+        <span class="k">elif</span> <span class="n">edge_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pc</span><span class="o">.</span><span class="n">CAUSAL_INCREASE_RELATIONS</span><span class="p">:</span>
+            <span class="n">stmt_class</span> <span class="o">=</span> <span class="n">Activation</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">stmt_class</span> <span class="o">=</span> <span class="n">Inhibition</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt_class</span><span class="p">(</span><span class="n">subj_agent</span><span class="p">,</span> <span class="n">obj_agent</span><span class="p">,</span> <span class="n">activity_type</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="n">ev</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_active_form</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">):</span>
+        <span class="n">subj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+        <span class="c1"># Don&#39;t pass the object modifier info because we don&#39;t want an activity</span>
+        <span class="c1"># condition applied to the agent</span>
+        <span class="n">obj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">v_data</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">subj_agent</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">obj_agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">))</span>
+            <span class="k">return</span>
+        <span class="n">obj_activity_condition</span> <span class="o">=</span> \
+                            <span class="n">_get_activity_condition</span><span class="p">(</span><span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">OBJECT</span><span class="p">))</span>
+        <span class="n">activity_type</span> <span class="o">=</span> <span class="n">obj_activity_condition</span><span class="o">.</span><span class="n">activity_type</span>
+        <span class="c1"># If the relation is DECREASES, this means that this agent state</span>
+        <span class="c1"># is inactivating</span>
+        <span class="n">is_active</span> <span class="o">=</span> <span class="n">edge_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pc</span><span class="o">.</span><span class="n">CAUSAL_INCREASE_RELATIONS</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="n">ActiveForm</span><span class="p">(</span><span class="n">subj_agent</span><span class="p">,</span> <span class="n">activity_type</span><span class="p">,</span> <span class="n">is_active</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="n">ev</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_gef_gap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">):</span>
+        <span class="n">subj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+        <span class="n">obj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">v_data</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">subj_agent</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">obj_agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">))</span>
+            <span class="k">return</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">edge_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pc</span><span class="o">.</span><span class="n">CAUSAL_INCREASE_RELATIONS</span><span class="p">:</span>
+            <span class="n">stmt_class</span> <span class="o">=</span> <span class="n">Gef</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">stmt_class</span> <span class="o">=</span> <span class="n">Gap</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt_class</span><span class="p">(</span><span class="n">subj_agent</span><span class="p">,</span> <span class="n">obj_agent</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="n">ev</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_conversion</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">):</span>
+        <span class="n">subj_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">SUBJECT</span><span class="p">))</span>
+        <span class="c1"># Get the nodes for the reactants and products</span>
+        <span class="n">reactant_agents</span> <span class="o">=</span> <span class="p">[</span><span class="n">_get_agent</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">REACTANTS</span><span class="p">]]</span>
+        <span class="n">product_agents</span> <span class="o">=</span> <span class="p">[</span><span class="n">_get_agent</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">PRODUCTS</span><span class="p">]]</span>
+        <span class="k">if</span> <span class="n">subj_agent</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> \
+           <span class="nb">any</span><span class="p">([</span><span class="n">r</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">reactant_agents</span><span class="p">])</span> <span class="ow">or</span> \
+           <span class="nb">any</span><span class="p">([</span><span class="n">p</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">product_agents</span><span class="p">]):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unhandled</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">))</span>
+            <span class="k">return</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="n">Conversion</span><span class="p">(</span><span class="n">subj_agent</span><span class="p">,</span> <span class="n">obj_from</span><span class="o">=</span><span class="n">reactant_agents</span><span class="p">,</span>
+                          <span class="n">obj_to</span><span class="o">=</span><span class="n">product_agents</span><span class="p">,</span> <span class="n">evidence</span> <span class="o">=</span> <span class="n">ev</span><span class="p">)</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_get_agent</span><span class="p">(</span><span class="n">node_data</span><span class="p">,</span> <span class="n">node_modifier_data</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="c1"># FIXME: Handle translocations on the agent for ActiveForms, turn into</span>
+    <span class="c1"># location conditions</span>
+    <span class="c1"># Check the node type/function</span>
+    <span class="n">node_func</span> <span class="o">=</span> <span class="n">node_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">node_func</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">PROTEIN</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">RNA</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">BIOPROCESS</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">COMPLEX</span><span class="p">,</span>
+                         <span class="n">pc</span><span class="o">.</span><span class="n">PATHOLOGY</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">ABUNDANCE</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">MIRNA</span><span class="p">):</span>
+        <span class="n">mod_data</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;No node data&#39;</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">node_modifier_data</span>
+                                   <span class="k">else</span> <span class="n">node_modifier_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">CNAME</span><span class="p">))</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Nodes of type </span><span class="si">%s</span><span class="s2"> not handled: </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span>
+                        <span class="p">(</span><span class="n">node_func</span><span class="p">,</span> <span class="n">mod_data</span><span class="p">))</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="c1"># Skip gene/protein fusions</span>
+    <span class="k">if</span> <span class="n">pc</span><span class="o">.</span><span class="n">FUSION</span> <span class="ow">in</span> <span class="n">node_data</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Gene and protein fusions not handled: </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="nb">str</span><span class="p">(</span><span class="n">node_data</span><span class="p">))</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="c1"># COMPLEXES ------------</span>
+    <span class="c1"># First, handle complexes, which will consist recursively of other agents</span>
+    <span class="k">if</span> <span class="n">node_func</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">COMPLEX</span><span class="p">:</span>
+        <span class="c1"># First, check for members: if there are no members, we assume this</span>
+        <span class="c1"># is a named complex</span>
+        <span class="n">members</span> <span class="o">=</span> <span class="n">node_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">MEMBERS</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">members</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="c1"># Otherwise, get the &quot;main&quot; agent, to which the other members will be</span>
+        <span class="c1"># attached as bound conditions</span>
+        <span class="n">main_agent</span> <span class="o">=</span> <span class="n">_get_agent</span><span class="p">(</span><span class="n">members</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="c1"># If we can&#39;t get the main agent, return None</span>
+        <span class="k">if</span> <span class="n">main_agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">bound_conditions</span> <span class="o">=</span> <span class="p">[</span><span class="n">BoundCondition</span><span class="p">(</span><span class="n">_get_agent</span><span class="p">(</span><span class="n">m</span><span class="p">),</span> <span class="kc">True</span><span class="p">)</span>
+                            <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">members</span><span class="p">[</span><span class="mi">1</span><span class="p">:]]</span>
+        <span class="c1"># Check the bound_conditions for any None agents</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">([</span><span class="n">bc</span><span class="o">.</span><span class="n">agent</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">bc</span> <span class="ow">in</span> <span class="n">bound_conditions</span><span class="p">]):</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">main_agent</span><span class="o">.</span><span class="n">bound_conditions</span> <span class="o">=</span> <span class="n">bound_conditions</span>
+        <span class="c1"># Get activity of main agent</span>
+        <span class="n">ac</span> <span class="o">=</span> <span class="n">_get_activity_condition</span><span class="p">(</span><span class="n">node_modifier_data</span><span class="p">)</span>
+        <span class="n">main_agent</span><span class="o">.</span><span class="n">activity</span> <span class="o">=</span> <span class="n">ac</span>
+        <span class="k">return</span> <span class="n">main_agent</span>
+    <span class="c1"># OTHER NODE TYPES -----</span>
+    <span class="c1"># Get node identifier information</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">node_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">NAME</span><span class="p">)</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="n">node_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span><span class="p">]</span>
+    <span class="n">ident</span> <span class="o">=</span> <span class="n">node_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">IDENTIFIER</span><span class="p">)</span>
+    <span class="c1"># No ID present, get identifier using the name, namespace</span>
+    <span class="n">db_refs</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ident</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="n">name</span><span class="p">,</span> <span class="s2">&quot;Node must have a name if lacking an identifier.&quot;</span>
+        <span class="k">if</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;HGNC&#39;</span><span class="p">:</span>
+            <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_id</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">hgnc_id</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Invalid HGNC name: </span><span class="si">%s</span><span class="s2"> (</span><span class="si">%s</span><span class="s2">)&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">node_data</span><span class="p">))</span>
+                <span class="k">return</span> <span class="kc">None</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;HGNC&#39;</span><span class="p">:</span> <span class="n">hgnc_id</span><span class="p">}</span>
+            <span class="n">up_id</span> <span class="o">=</span> <span class="n">_get_up_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">up_id</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;UP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">up_id</span>
+        <span class="c1"># FIXME: Look up go ID in ontology lookup service</span>
+        <span class="c1"># FIXME: Look up MESH IDs from name</span>
+        <span class="c1"># FIXME: For now, just use node name</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;GOBP&#39;</span><span class="p">,</span> <span class="s1">&#39;MESHPP&#39;</span><span class="p">,</span> <span class="s1">&#39;MESHD&#39;</span><span class="p">):</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="c1"># For now, handle MGI/RGD but putting the name into the db_refs so</span>
+        <span class="c1"># it&#39;s clear what namespace the name belongs to</span>
+        <span class="c1"># FIXME: Full implementation would look up MGI/RGD identifiers from</span>
+        <span class="c1"># the names, and obtain corresponding Uniprot IDs</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;MGI&#39;</span><span class="p">,</span> <span class="s1">&#39;RGD&#39;</span><span class="p">):</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="n">ns</span><span class="p">:</span> <span class="n">name</span><span class="p">}</span>
+        <span class="c1"># Map Selventa families to FamPlexes</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;SFAM&#39;</span><span class="p">:</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;SFAM&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">}</span>
+            <span class="n">indra_name</span> <span class="o">=</span> <span class="n">bel_to_indra</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">indra_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Could not find mapping for BEL/SFAM family: &#39;</span>
+                            <span class="s1">&#39;</span><span class="si">%s</span><span class="s1"> (</span><span class="si">%s</span><span class="s1">)&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">node_data</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;FPLX&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">indra_name</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">indra_name</span>
+        <span class="c1"># Map Entrez genes to HGNC/UP</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;EGID&#39;</span><span class="p">:</span>
+            <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_from_entrez</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;EGID&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">}</span>
+            <span class="k">if</span> <span class="n">hgnc_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;HGNC&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hgnc_id</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_name</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+                <span class="n">up_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_uniprot_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">up_id</span><span class="p">:</span>
+                    <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;UP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">up_id</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;HGNC entity </span><span class="si">%s</span><span class="s1"> with HGNC ID </span><span class="si">%s</span><span class="s1"> has no &#39;</span>
+                                   <span class="s1">&#39;corresponding Uniprot ID.&#39;</span> <span class="o">%</span>
+                                   <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">hgnc_id</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Could not map EGID</span><span class="si">%s</span><span class="s1"> to HGNC.&#39;</span> <span class="o">%</span> <span class="n">name</span><span class="p">)</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="s1">&#39;E</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">name</span>
+        <span class="c1"># CHEBI</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;CHEBI&#39;</span><span class="p">:</span>
+            <span class="n">chebi_id</span> <span class="o">=</span> <span class="n">chebi_name_id</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">chebi_id</span><span class="p">:</span>
+                <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;CHEBI&#39;</span><span class="p">:</span> <span class="n">chebi_id</span><span class="p">}</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;CHEBI name </span><span class="si">%s</span><span class="s1"> not found in map.&#39;</span> <span class="o">%</span> <span class="n">name</span><span class="p">)</span>
+        <span class="c1"># SDIS, SCHEM: Include the name as the ID for the namespace</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;SDIS&#39;</span><span class="p">,</span> <span class="s1">&#39;SCHEM&#39;</span><span class="p">):</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="n">ns</span><span class="p">:</span> <span class="n">name</span><span class="p">}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unhandled namespace: </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2"> (</span><span class="si">%s</span><span class="s2">)&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">node_data</span><span class="p">))</span>
+    <span class="c1"># We&#39;ve already got an identifier, look up other identifiers if necessary</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Get the name, overwriting existing name if necessary</span>
+        <span class="k">if</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;HGNC&#39;</span><span class="p">:</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_name</span><span class="p">(</span><span class="n">ident</span><span class="p">)</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;HGNC&#39;</span><span class="p">:</span> <span class="n">ident</span><span class="p">}</span>
+            <span class="n">up_id</span> <span class="o">=</span> <span class="n">_get_up_id</span><span class="p">(</span><span class="n">ident</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">up_id</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;UP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">up_id</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;UP&#39;</span><span class="p">:</span>
+            <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;UP&#39;</span><span class="p">:</span> <span class="n">ident</span><span class="p">}</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">uniprot_client</span><span class="o">.</span><span class="n">get_gene_name</span><span class="p">(</span><span class="n">ident</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">name</span>
+            <span class="k">if</span> <span class="n">uniprot_client</span><span class="o">.</span><span class="n">is_human</span><span class="p">(</span><span class="n">ident</span><span class="p">):</span>
+                <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_id</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">hgnc_id</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Uniprot ID linked to invalid human gene &#39;</span>
+                                <span class="s1">&#39;name </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">name</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;HGNC&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hgnc_id</span>
+        <span class="k">elif</span> <span class="n">ns</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;MGI&#39;</span><span class="p">,</span> <span class="s1">&#39;RGD&#39;</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Identifiers for MGI and RGD databases are not &#39;</span>
+                             <span class="s1">&#39;currently handled: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">node_data</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unhandled namespace with identifier: </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2"> (</span><span class="si">%s</span><span class="s2">)&quot;</span> <span class="o">%</span>
+                  <span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">node_data</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">db_refs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Unable to get identifier information for node: </span><span class="si">%s</span><span class="s1">&#39;</span>
+                     <span class="o">%</span> <span class="n">node_data</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="c1"># Get modification conditions</span>
+    <span class="n">mods</span><span class="p">,</span> <span class="n">muts</span> <span class="o">=</span> <span class="n">_get_all_pmods</span><span class="p">(</span><span class="n">node_data</span><span class="p">)</span>
+    <span class="c1"># Get activity condition</span>
+    <span class="n">ac</span> <span class="o">=</span> <span class="n">_get_activity_condition</span><span class="p">(</span><span class="n">node_modifier_data</span><span class="p">)</span>
+    <span class="n">to_loc</span> <span class="o">=</span> <span class="n">_get_translocation_target</span><span class="p">(</span><span class="n">node_modifier_data</span><span class="p">)</span>
+    <span class="c1"># Check for unhandled node modifiers, skip if so</span>
+    <span class="k">if</span> <span class="n">_has_unhandled_modifiers</span><span class="p">(</span><span class="n">node_modifier_data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="c1"># Make the agent</span>
+    <span class="n">ag</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">db_refs</span><span class="o">=</span><span class="n">db_refs</span><span class="p">,</span> <span class="n">mods</span><span class="o">=</span><span class="n">mods</span><span class="p">,</span> <span class="n">mutations</span><span class="o">=</span><span class="n">muts</span><span class="p">,</span> <span class="n">activity</span><span class="o">=</span><span class="n">ac</span><span class="p">,</span>
+               <span class="n">location</span><span class="o">=</span><span class="n">to_loc</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">ag</span>
+
+
+<span class="k">def</span> <span class="nf">_get_evidence</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">):</span>
+    <span class="n">ev_text</span> <span class="o">=</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">EVIDENCE</span><span class="p">)</span>
+    <span class="n">ev_citation</span> <span class="o">=</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">CITATION</span><span class="p">)</span>
+    <span class="n">ev_pmid</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">ev_citation</span><span class="p">:</span>
+        <span class="n">cit_type</span> <span class="o">=</span> <span class="n">ev_citation</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">CITATION_TYPE</span><span class="p">]</span>
+        <span class="n">cit_ref</span> <span class="o">=</span> <span class="n">ev_citation</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">CITATION_REFERENCE</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">cit_type</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">CITATION_TYPE_PUBMED</span><span class="p">:</span>
+            <span class="n">ev_pmid</span> <span class="o">=</span> <span class="n">cit_ref</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ev_pmid</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">cit_type</span><span class="p">,</span> <span class="n">cit_ref</span><span class="p">)</span>
+    <span class="n">epistemics</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;direct&#39;</span><span class="p">:</span> <span class="n">_rel_is_direct</span><span class="p">(</span><span class="n">edge_data</span><span class="p">)}</span>
+    <span class="n">annotations</span> <span class="o">=</span> <span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">ANNOTATIONS</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="n">annotations</span><span class="p">[</span><span class="s1">&#39;bel&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">edge_to_bel</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">,</span> <span class="n">edge_data</span><span class="p">)</span>
+
+    <span class="n">text_location</span> <span class="o">=</span> <span class="n">annotations</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;TextLocation&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">text_location</span><span class="p">:</span>
+        <span class="c1"># Handle dictionary text_location like {&#39;Abstract&#39;: True}</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">text_location</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="c1"># FIXME: INDRA&#39;s section_type entry is meant to contain</span>
+            <span class="c1"># a single section string like &quot;abstract&quot; but in principle</span>
+            <span class="c1"># pybel could have a list of entries in the TextLocation dict.</span>
+            <span class="c1"># Here we just take the first one.</span>
+            <span class="n">text_location</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">text_location</span><span class="o">.</span><span class="n">keys</span><span class="p">())[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">epistemics</span><span class="p">[</span><span class="s1">&#39;section_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_pybel_text_location_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">text_location</span><span class="p">)</span>
+
+    <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="n">ev_text</span><span class="p">,</span> <span class="n">pmid</span><span class="o">=</span><span class="n">ev_pmid</span><span class="p">,</span> <span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;bel&#39;</span><span class="p">,</span>
+                  <span class="n">source_id</span><span class="o">=</span><span class="n">edge_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">HASH</span><span class="p">),</span> <span class="n">epistemics</span><span class="o">=</span><span class="n">epistemics</span><span class="p">,</span>
+                  <span class="n">annotations</span><span class="o">=</span><span class="n">annotations</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">ev</span>
+
+
+<span class="k">def</span> <span class="nf">_rel_is_direct</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">d</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">RELATION</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">DIRECTLY_INCREASES</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">DIRECTLY_DECREASES</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_get_up_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">):</span>
+    <span class="n">up_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_uniprot_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">up_id</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;No Uniprot ID for HGNC ID </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="n">hgnc_id</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">up_id</span>
+
+
+<span class="k">def</span> <span class="nf">_remove_pmods</span><span class="p">(</span><span class="n">node_data</span><span class="p">):</span>
+    <span class="n">node_data_no_pmods</span> <span class="o">=</span> <span class="n">copy</span><span class="p">(</span><span class="n">node_data</span><span class="p">)</span>
+    <span class="n">variants</span> <span class="o">=</span> <span class="n">node_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">VARIANTS</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">variants</span><span class="p">:</span>
+        <span class="n">node_data_no_pmods</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">VARIANTS</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">var</span> <span class="k">for</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">variants</span>
+                                               <span class="k">if</span> <span class="n">var</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">KIND</span><span class="p">]</span> <span class="o">!=</span> <span class="n">pc</span><span class="o">.</span><span class="n">PMOD</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">node_data_no_pmods</span>
+
+
+<span class="k">def</span> <span class="nf">_get_all_pmods</span><span class="p">(</span><span class="n">node_data</span><span class="p">,</span> <span class="n">remove_pmods</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="n">mods</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">muts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">variants</span> <span class="o">=</span> <span class="n">node_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">VARIANTS</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">variants</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">mods</span><span class="p">,</span> <span class="n">muts</span>
+
+    <span class="k">for</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">variants</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">var</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">KIND</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">HGVS</span><span class="p">:</span>
+            <span class="n">hgvs_str</span> <span class="o">=</span> <span class="n">var</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">IDENTIFIER</span><span class="p">]</span>
+            <span class="n">position</span><span class="p">,</span> <span class="n">res_from</span><span class="p">,</span> <span class="n">res_to</span> <span class="o">=</span> <span class="n">_parse_mutation</span><span class="p">(</span><span class="n">hgvs_str</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">position</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">res_from</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">res_to</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Could not parse HGVS string </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="n">hgvs_str</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">mut_cond</span> <span class="o">=</span> <span class="n">MutCondition</span><span class="p">(</span><span class="n">position</span><span class="p">,</span> <span class="n">res_from</span><span class="p">,</span> <span class="n">res_to</span><span class="p">)</span>
+                <span class="n">muts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mut_cond</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">var</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">KIND</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">PMOD</span><span class="p">:</span>
+            <span class="n">var_id_dict</span> <span class="o">=</span> <span class="n">var</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">IDENTIFIER</span><span class="p">]</span>
+            <span class="n">var_ns</span> <span class="o">=</span> <span class="n">var_id_dict</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">var_ns</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">BEL_DEFAULT_NAMESPACE</span><span class="p">:</span>
+                <span class="n">var_id</span> <span class="o">=</span> <span class="n">var_id_dict</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAME</span><span class="p">]</span>
+                <span class="n">mod_type</span> <span class="o">=</span> <span class="n">_pybel_indra_pmod_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">var_id</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">mod_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Unhandled modification type </span><span class="si">%s</span><span class="s2"> (</span><span class="si">%s</span><span class="s2">)&quot;</span> <span class="o">%</span>
+                                <span class="p">(</span><span class="n">var_id</span><span class="p">,</span> <span class="n">node_data</span><span class="p">))</span>
+                    <span class="k">continue</span>
+                <span class="n">mc</span> <span class="o">=</span> <span class="n">ModCondition</span><span class="p">(</span><span class="n">mod_type</span><span class="p">,</span> <span class="n">var</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">PMOD_CODE</span><span class="p">),</span>
+                                  <span class="n">var</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">PMOD_POSITION</span><span class="p">))</span>
+                <span class="n">mods</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mc</span><span class="p">)</span>
+        <span class="c1"># FIXME These unhandled mod types should result in throwing out</span>
+        <span class="c1"># the node (raise, or return None)</span>
+        <span class="k">elif</span> <span class="n">var</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">KIND</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">GMOD</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Unhandled node variant GMOD: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">node_data</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">var</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">KIND</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">FRAGMENT</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Unhandled node variant FRAG: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">node_data</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Unknown node variant type: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">node_data</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">mods</span><span class="p">,</span> <span class="n">muts</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_get_activity_condition</span><span class="p">(</span><span class="n">node_modifier_data</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">node_modifier_data</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">node_modifier_data</span> <span class="o">==</span> <span class="p">{}:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">node_modifier_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">MODIFIER</span><span class="p">]</span> <span class="o">!=</span> <span class="n">pc</span><span class="o">.</span><span class="n">ACTIVITY</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">effect</span> <span class="o">=</span> <span class="n">node_modifier_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">EFFECT</span><span class="p">)</span>
+    <span class="c1"># No specific effect, just return generic activity</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">effect</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">ActivityCondition</span><span class="p">(</span><span class="s1">&#39;activity&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">activity_ns</span> <span class="o">=</span> <span class="n">effect</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">activity_ns</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">BEL_DEFAULT_NAMESPACE</span><span class="p">:</span>
+        <span class="n">activity_name</span> <span class="o">=</span> <span class="n">effect</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAME</span><span class="p">]</span>
+        <span class="n">activity_type</span> <span class="o">=</span> <span class="n">_pybel_indra_act_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">activity_name</span><span class="p">)</span>
+        <span class="c1"># If an activity type in Bel/PyBel that is not implemented in INDRA,</span>
+        <span class="c1"># return generic activity</span>
+        <span class="k">if</span> <span class="n">activity_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ActivityCondition</span><span class="p">(</span><span class="s1">&#39;activity&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ActivityCondition</span><span class="p">(</span><span class="n">activity_type</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+    <span class="c1"># If an unsupported namespace, simply return generic activity</span>
+    <span class="k">return</span> <span class="n">ActivityCondition</span><span class="p">(</span><span class="s1">&#39;activity&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_get_translocation_target</span><span class="p">(</span><span class="n">node_modifier_data</span><span class="p">):</span>
+    <span class="c1"># First check if there is a translocation modifier</span>
+    <span class="k">if</span> <span class="n">node_modifier_data</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">node_modifier_data</span> <span class="o">==</span> <span class="p">{}:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">node_modifier_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">MODIFIER</span><span class="p">]</span> <span class="o">!=</span> <span class="n">pc</span><span class="o">.</span><span class="n">TRANSLOCATION</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="c1"># Next, make sure there is information on the translocation target</span>
+    <span class="n">transloc_data</span> <span class="o">=</span> <span class="n">node_modifier_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">EFFECT</span><span class="p">]</span>
+    <span class="n">to_loc_info</span> <span class="o">=</span> <span class="n">transloc_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">TO_LOC</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">to_loc_info</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">to_loc_ns</span> <span class="o">=</span> <span class="n">to_loc_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span><span class="p">)</span>
+    <span class="n">to_loc_name</span> <span class="o">=</span> <span class="n">to_loc_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">NAME</span><span class="p">)</span>
+    <span class="c1"># Only use GO Cellular Component location names</span>
+    <span class="k">if</span> <span class="n">to_loc_ns</span> <span class="o">!=</span> <span class="s1">&#39;GOCC&#39;</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">to_loc_name</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">valid_loc</span> <span class="o">=</span> <span class="n">get_valid_location</span><span class="p">(</span><span class="n">to_loc_name</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">InvalidLocationError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">valid_loc</span>
+
+
+<span class="k">def</span> <span class="nf">_has_unhandled_modifiers</span><span class="p">(</span><span class="n">node_modifier_data</span><span class="p">):</span>
+    <span class="c1"># First check if there is a translocation modifier</span>
+    <span class="k">if</span> <span class="n">node_modifier_data</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">node_modifier_data</span> <span class="o">==</span> <span class="p">{}:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="n">mod</span> <span class="o">=</span> <span class="n">node_modifier_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">MODIFIER</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">mod</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">mod</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pc</span><span class="o">.</span><span class="n">CELL_SECRETION</span><span class="p">,</span> <span class="n">pc</span><span class="o">.</span><span class="n">CELL_SURFACE_EXPRESSION</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Unhandled node modifier data: </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="n">node_modifier_data</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+
+
+<span class="k">def</span> <span class="nf">_proteins_match</span><span class="p">(</span><span class="n">u_data</span><span class="p">,</span> <span class="n">v_data</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">(</span>
+        <span class="n">u_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">PROTEIN</span> <span class="ow">and</span>
+        <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">FUNCTION</span><span class="p">]</span> <span class="o">==</span> <span class="n">pc</span><span class="o">.</span><span class="n">PROTEIN</span> <span class="ow">and</span>
+        <span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span> <span class="ow">in</span> <span class="n">u_data</span> <span class="ow">and</span> <span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span> <span class="ow">in</span> <span class="n">v_data</span> <span class="ow">and</span>
+        <span class="n">pc</span><span class="o">.</span><span class="n">NAME</span> <span class="ow">in</span> <span class="n">u_data</span> <span class="ow">and</span> <span class="n">pc</span><span class="o">.</span><span class="n">NAME</span> <span class="ow">in</span> <span class="n">v_data</span> <span class="ow">and</span>
+        <span class="n">u_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span><span class="p">]</span> <span class="o">==</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAMESPACE</span><span class="p">]</span> <span class="ow">and</span>
+        <span class="n">u_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAME</span><span class="p">]</span> <span class="o">==</span> <span class="n">v_data</span><span class="p">[</span><span class="n">pc</span><span class="o">.</span><span class="n">NAME</span><span class="p">]</span>
+    <span class="p">)</span>
+
+
+<span class="n">_hgvs_protein_mutation</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s1">&#39;^p.([A-Z][a-z]</span><span class="si">{2}</span><span class="s1">)(\d+)([A-Z][a-z]</span><span class="si">{2}</span><span class="s1">)&#39;</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_parse_mutation</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">_hgvs_protein_mutation</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">from_aa</span><span class="p">,</span> <span class="n">position</span><span class="p">,</span> <span class="n">to_aa</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">position</span><span class="p">,</span> <span class="n">from_aa</span><span class="p">,</span> <span class="n">to_aa</span>
+
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

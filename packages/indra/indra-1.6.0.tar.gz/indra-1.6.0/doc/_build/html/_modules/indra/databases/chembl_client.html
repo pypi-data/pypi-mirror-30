@@ -1,0 +1,579 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.databases.chembl_client &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../index.html"/>
+        <link rel="up" title="Module code" href="../../index.html"/> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.databases.chembl_client</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.databases.chembl_client</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">requests</span>
+<span class="kn">from</span> <span class="nn">sympy.physics</span> <span class="k">import</span> <span class="n">units</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">chebi_client</span><span class="p">,</span> <span class="n">uniprot_client</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="n">Inhibition</span><span class="p">,</span> <span class="n">Agent</span><span class="p">,</span> <span class="n">Evidence</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">defaultdict</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;chembl&#39;</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">get_inhibition</span><span class="p">(</span><span class="n">drug</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
+    <span class="n">chebi_id</span> <span class="o">=</span> <span class="n">drug</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CHEBI&#39;</span><span class="p">)</span>
+    <span class="n">mesh_id</span> <span class="o">=</span> <span class="n">drug</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;MESH&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">chebi_id</span><span class="p">:</span>
+        <span class="n">drug_chembl_id</span> <span class="o">=</span> <span class="n">chebi_client</span><span class="o">.</span><span class="n">get_chembl_id</span><span class="p">(</span><span class="n">chebi_id</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">mesh_id</span><span class="p">:</span>
+        <span class="n">drug_chembl_id</span> <span class="o">=</span> <span class="n">get_chembl_id</span><span class="p">(</span><span class="n">mesh_id</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Drug missing ChEBI or MESH grounding.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="n">target_upid</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;UP&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">target_upid</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Target missing UniProt grounding.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">target_chembl_id</span> <span class="o">=</span> <span class="n">get_target_chemblid</span><span class="p">(</span><span class="n">target_upid</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Drug: </span><span class="si">%s</span><span class="s1">, Target: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">drug_chembl_id</span><span class="p">,</span> <span class="n">target_chembl_id</span><span class="p">))</span>
+    <span class="n">query_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;query&#39;</span><span class="p">:</span> <span class="s1">&#39;activity&#39;</span><span class="p">,</span>
+                  <span class="s1">&#39;params&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;molecule_chembl_id&#39;</span><span class="p">:</span> <span class="n">drug_chembl_id</span><span class="p">,</span>
+                             <span class="s1">&#39;target_chembl_id&#39;</span><span class="p">:</span> <span class="n">target_chembl_id</span><span class="p">,</span>
+                             <span class="s1">&#39;limit&#39;</span><span class="p">:</span> <span class="mi">10000</span><span class="p">}}</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">send_query</span><span class="p">(</span><span class="n">query_dict</span><span class="p">)</span>
+    <span class="n">evidence</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">assay</span> <span class="ow">in</span> <span class="n">res</span><span class="p">[</span><span class="s1">&#39;activities&#39;</span><span class="p">]:</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">get_evidence</span><span class="p">(</span><span class="n">assay</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">ev</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">evidence</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ev</span><span class="p">)</span>
+    <span class="n">st</span> <span class="o">=</span> <span class="n">Inhibition</span><span class="p">(</span><span class="n">drug</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="n">evidence</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">st</span>
+
+
+<div class="viewcode-block" id="get_drug_inhibition_stmts"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_drug_inhibition_stmts">[docs]</a><span class="k">def</span> <span class="nf">get_drug_inhibition_stmts</span><span class="p">(</span><span class="n">drug</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Query ChEMBL for kinetics data given drug as Agent get back statements</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    drug : Agent</span>
+<span class="sd">        Agent representing drug with MESH or CHEBI grounding</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    stmts : list of INDRA statements</span>
+<span class="sd">        INDRA statements generated by querying ChEMBL for all kinetics data of</span>
+<span class="sd">        a drug interacting with protein targets</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">chebi_id</span> <span class="o">=</span> <span class="n">drug</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CHEBI&#39;</span><span class="p">)</span>
+    <span class="n">mesh_id</span> <span class="o">=</span> <span class="n">drug</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;MESH&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">chebi_id</span><span class="p">:</span>
+        <span class="n">drug_chembl_id</span> <span class="o">=</span> <span class="n">chebi_client</span><span class="o">.</span><span class="n">get_chembl_id</span><span class="p">(</span><span class="n">chebi_id</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">mesh_id</span><span class="p">:</span>
+        <span class="n">drug_chembl_id</span> <span class="o">=</span> <span class="n">get_chembl_id</span><span class="p">(</span><span class="n">mesh_id</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Drug missing ChEBI or MESH grounding.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Drug: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">drug_chembl_id</span><span class="p">))</span>
+    <span class="n">query_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;query&#39;</span><span class="p">:</span> <span class="s1">&#39;activity&#39;</span><span class="p">,</span>
+                  <span class="s1">&#39;params&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;molecule_chembl_id&#39;</span><span class="p">:</span> <span class="n">drug_chembl_id</span><span class="p">,</span>
+                             <span class="s1">&#39;limit&#39;</span><span class="p">:</span> <span class="mi">10000</span><span class="p">}</span>
+                  <span class="p">}</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">send_query</span><span class="p">(</span><span class="n">query_dict</span><span class="p">)</span>
+    <span class="n">activities</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="s1">&#39;activities&#39;</span><span class="p">]</span>
+    <span class="n">targ_act_dict</span> <span class="o">=</span> <span class="n">activities_by_target</span><span class="p">(</span><span class="n">activities</span><span class="p">)</span>
+    <span class="n">target_chembl_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">targ_act_dict</span><span class="p">]</span>
+    <span class="n">protein_targets</span> <span class="o">=</span> <span class="n">get_protein_targets_only</span><span class="p">(</span><span class="n">target_chembl_ids</span><span class="p">)</span>
+    <span class="n">filtered_targ_act_dict</span> <span class="o">=</span> <span class="p">{</span><span class="n">t</span><span class="p">:</span> <span class="n">targ_act_dict</span><span class="p">[</span><span class="n">t</span><span class="p">]</span>
+                              <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">protein_targets</span><span class="p">]}</span>
+    <span class="n">stmts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">target_chembl_id</span> <span class="ow">in</span> <span class="n">filtered_targ_act_dict</span><span class="p">:</span>
+        <span class="n">target_activity_ids</span> <span class="o">=</span> <span class="n">filtered_targ_act_dict</span><span class="p">[</span><span class="n">target_chembl_id</span><span class="p">]</span>
+        <span class="n">target_activites</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">activities</span>
+                            <span class="k">if</span> <span class="n">x</span><span class="p">[</span><span class="s1">&#39;activity_id&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="n">target_activity_ids</span><span class="p">]</span>
+        <span class="n">target_upids</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">targ_comp</span> <span class="o">=</span> <span class="n">protein_targets</span><span class="p">[</span><span class="n">target_chembl_id</span><span class="p">][</span><span class="s1">&#39;target_components&#39;</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">t_c</span> <span class="ow">in</span> <span class="n">targ_comp</span><span class="p">:</span>
+            <span class="n">target_upids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">t_c</span><span class="p">[</span><span class="s1">&#39;accession&#39;</span><span class="p">])</span>
+        <span class="n">evidence</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">assay</span> <span class="ow">in</span> <span class="n">target_activites</span><span class="p">:</span>
+            <span class="n">ev</span> <span class="o">=</span> <span class="n">get_evidence</span><span class="p">(</span><span class="n">assay</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">ev</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">evidence</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ev</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">evidence</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">target_upid</span> <span class="ow">in</span> <span class="n">target_upids</span><span class="p">:</span>
+                <span class="n">agent_name</span> <span class="o">=</span> <span class="n">uniprot_client</span><span class="o">.</span><span class="n">get_gene_name</span><span class="p">(</span><span class="n">target_upid</span><span class="p">)</span>
+                <span class="n">target_agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">agent_name</span><span class="p">,</span> <span class="n">db_refs</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;UP&#39;</span><span class="p">:</span> <span class="n">target_upid</span><span class="p">})</span>
+                <span class="n">st</span> <span class="o">=</span> <span class="n">Inhibition</span><span class="p">(</span><span class="n">drug</span><span class="p">,</span> <span class="n">target_agent</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="n">evidence</span><span class="p">)</span>
+                <span class="n">stmts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">st</span><span class="p">)</span></div>
+    <span class="k">return</span> <span class="n">stmts</span>
+
+
+<div class="viewcode-block" id="send_query"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.send_query">[docs]</a><span class="k">def</span> <span class="nf">send_query</span><span class="p">(</span><span class="n">query_dict</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Query ChEMBL API</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    query_dict : dict</span>
+<span class="sd">        &#39;query&#39; : string of the endpoint to query</span>
+<span class="sd">        &#39;params&#39; : dict of params for the query</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    js : dict</span>
+<span class="sd">        dict parsed from json that is unique to the submitted query</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="n">query_dict</span><span class="p">[</span><span class="s1">&#39;query&#39;</span><span class="p">]</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="n">query_dict</span><span class="p">[</span><span class="s1">&#39;params&#39;</span><span class="p">]</span>
+    <span class="n">url</span> <span class="o">=</span> <span class="s1">&#39;https://www.ebi.ac.uk/chembl/api/data/&#39;</span> <span class="o">+</span> <span class="n">query</span> <span class="o">+</span> <span class="s1">&#39;.json&#39;</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">)</span>
+    <span class="n">r</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+    <span class="n">js</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()</span></div>
+    <span class="k">return</span> <span class="n">js</span>
+
+
+<div class="viewcode-block" id="query_target"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.query_target">[docs]</a><span class="k">def</span> <span class="nf">query_target</span><span class="p">(</span><span class="n">target_chembl_id</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Query ChEMBL API target by id</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    target_chembl_id : str</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    target : dict</span>
+<span class="sd">        dict parsed from json that is unique for the target</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">query_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;query&#39;</span><span class="p">:</span> <span class="s1">&#39;target&#39;</span><span class="p">,</span>
+                  <span class="s1">&#39;params&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;target_chembl_id&#39;</span><span class="p">:</span> <span class="n">target_chembl_id</span><span class="p">,</span>
+                             <span class="s1">&#39;limit&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}}</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">send_query</span><span class="p">(</span><span class="n">query_dict</span><span class="p">)</span>
+    <span class="n">target</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="s1">&#39;targets&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span></div>
+    <span class="k">return</span> <span class="n">target</span>
+
+
+<div class="viewcode-block" id="activities_by_target"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.activities_by_target">[docs]</a><span class="k">def</span> <span class="nf">activities_by_target</span><span class="p">(</span><span class="n">activities</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get back lists of activities in a dict keyed by ChEMBL target id</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    activities : list</span>
+<span class="sd">        response from a query returning activities for a drug</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    targ_act_dict : dict</span>
+<span class="sd">        dictionary keyed to ChEMBL target ids with lists of activity ids</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">targ_act_dict</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+    <span class="k">for</span> <span class="n">activity</span> <span class="ow">in</span> <span class="n">activities</span><span class="p">:</span>
+        <span class="n">target_chembl_id</span> <span class="o">=</span> <span class="n">activity</span><span class="p">[</span><span class="s1">&#39;target_chembl_id&#39;</span><span class="p">]</span>
+        <span class="n">activity_id</span> <span class="o">=</span> <span class="n">activity</span><span class="p">[</span><span class="s1">&#39;activity_id&#39;</span><span class="p">]</span>
+        <span class="n">targ_act_dict</span><span class="p">[</span><span class="n">target_chembl_id</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">activity_id</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">target_chembl_id</span> <span class="ow">in</span> <span class="n">targ_act_dict</span><span class="p">:</span>
+        <span class="n">targ_act_dict</span><span class="p">[</span><span class="n">target_chembl_id</span><span class="p">]</span> <span class="o">=</span> \
+            <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">targ_act_dict</span><span class="p">[</span><span class="n">target_chembl_id</span><span class="p">]))</span></div>
+    <span class="k">return</span> <span class="n">targ_act_dict</span>
+
+
+<div class="viewcode-block" id="get_protein_targets_only"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_protein_targets_only">[docs]</a><span class="k">def</span> <span class="nf">get_protein_targets_only</span><span class="p">(</span><span class="n">target_chembl_ids</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Given list of ChEMBL target ids, return dict of SINGLE PROTEIN targets</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    target_chembl_ids : list</span>
+<span class="sd">        list of chembl_ids as strings</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    protein_targets : dict</span>
+<span class="sd">        dictionary keyed to ChEMBL target ids with lists of activity ids</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">protein_targets</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">target_chembl_id</span> <span class="ow">in</span> <span class="n">target_chembl_ids</span><span class="p">:</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="n">query_target</span><span class="p">(</span><span class="n">target_chembl_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;SINGLE PROTEIN&#39;</span> <span class="ow">in</span> <span class="n">target</span><span class="p">[</span><span class="s1">&#39;target_type&#39;</span><span class="p">]:</span>
+            <span class="n">protein_targets</span><span class="p">[</span><span class="n">target_chembl_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span></div>
+    <span class="k">return</span> <span class="n">protein_targets</span>
+
+
+<div class="viewcode-block" id="get_evidence"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_evidence">[docs]</a><span class="k">def</span> <span class="nf">get_evidence</span><span class="p">(</span><span class="n">assay</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Given an activity, return an INDRA Evidence object.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    assay : dict</span>
+<span class="sd">        an activity from the activities list returned by a query to the API</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    ev : :py:class:`Evidence`</span>
+<span class="sd">        an :py:class:`Evidence` object containing the kinetics of the</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">kin</span> <span class="o">=</span> <span class="n">get_kinetics</span><span class="p">(</span><span class="n">assay</span><span class="p">)</span>
+    <span class="n">source_id</span> <span class="o">=</span> <span class="n">assay</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;assay_chembl_id&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">kin</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">annotations</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;kinetics&#39;</span><span class="p">:</span> <span class="n">kin</span><span class="p">}</span>
+    <span class="n">chembl_doc_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">assay</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;document_chembl_id&#39;</span><span class="p">))</span>
+    <span class="n">pmid</span> <span class="o">=</span> <span class="n">get_pmid</span><span class="p">(</span><span class="n">chembl_doc_id</span><span class="p">)</span>
+    <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;chembl&#39;</span><span class="p">,</span> <span class="n">pmid</span><span class="o">=</span><span class="n">pmid</span><span class="p">,</span> <span class="n">source_id</span><span class="o">=</span><span class="n">source_id</span><span class="p">,</span>
+                  <span class="n">annotations</span><span class="o">=</span><span class="n">annotations</span><span class="p">)</span></div>
+    <span class="k">return</span> <span class="n">ev</span>
+
+
+<div class="viewcode-block" id="get_kinetics"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_kinetics">[docs]</a><span class="k">def</span> <span class="nf">get_kinetics</span><span class="p">(</span><span class="n">assay</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Given an activity, return its kinetics values.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    assay : dict</span>
+<span class="sd">        an activity from the activities list returned by a query to the API</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    kin : dict</span>
+<span class="sd">        dictionary of values with units keyed to value types &#39;IC50&#39;, &#39;EC50&#39;,</span>
+<span class="sd">        &#39;INH&#39;, &#39;Potency&#39;, &#39;Kd&#39;</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">assay</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;standard_value&#39;</span><span class="p">))</span>
+    <span class="k">except</span> <span class="ne">TypeError</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Invalid assay value: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">assay</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;standard_value&#39;</span><span class="p">))</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">unit</span> <span class="o">=</span> <span class="n">assay</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;standard_units&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">unit</span> <span class="o">==</span> <span class="s1">&#39;nM&#39;</span><span class="p">:</span>
+        <span class="n">unit_sym</span> <span class="o">=</span> <span class="mf">1e-9</span> <span class="o">*</span> <span class="n">units</span><span class="o">.</span><span class="n">mol</span> <span class="o">/</span> <span class="n">units</span><span class="o">.</span><span class="n">liter</span>
+    <span class="k">elif</span> <span class="n">unit</span> <span class="o">==</span> <span class="s1">&#39;uM&#39;</span><span class="p">:</span>
+        <span class="n">unit_sym</span> <span class="o">=</span> <span class="mf">1e-6</span> <span class="o">*</span> <span class="n">units</span><span class="o">.</span><span class="n">mol</span> <span class="o">/</span> <span class="n">units</span><span class="o">.</span><span class="n">liter</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled unit: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">unit</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">param_type</span> <span class="o">=</span> <span class="n">assay</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;standard_type&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">param_type</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;IC50&#39;</span><span class="p">,</span> <span class="s1">&#39;EC50&#39;</span><span class="p">,</span> <span class="s1">&#39;INH&#39;</span><span class="p">,</span> <span class="s1">&#39;Potency&#39;</span><span class="p">,</span> <span class="s1">&#39;Kd&#39;</span><span class="p">]:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled parameter type: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">param_type</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">assay</span><span class="p">))</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">kin</span> <span class="o">=</span> <span class="p">{</span><span class="n">param_type</span><span class="p">:</span> <span class="n">val</span> <span class="o">*</span> <span class="n">unit_sym</span><span class="p">}</span></div>
+    <span class="k">return</span> <span class="n">kin</span>
+
+
+<div class="viewcode-block" id="get_pmid"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_pmid">[docs]</a><span class="k">def</span> <span class="nf">get_pmid</span><span class="p">(</span><span class="n">doc_id</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get PMID from document_chembl_id</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    doc_id : str</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pmid : str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">url_pmid</span> <span class="o">=</span> <span class="s1">&#39;https://www.ebi.ac.uk/chembl/api/data/document.json&#39;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;document_chembl_id&#39;</span><span class="p">:</span> <span class="n">doc_id</span><span class="p">}</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url_pmid</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">)</span>
+    <span class="n">js</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+    <span class="n">pmid</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">js</span><span class="p">[</span><span class="s1">&#39;documents&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;pubmed_id&#39;</span><span class="p">])</span></div>
+    <span class="k">return</span> <span class="n">pmid</span>
+
+
+<div class="viewcode-block" id="get_target_chemblid"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_target_chemblid">[docs]</a><span class="k">def</span> <span class="nf">get_target_chemblid</span><span class="p">(</span><span class="n">target_upid</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get ChEMBL ID from UniProt upid</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    target_upid : str</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    target_chembl_id : str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">url</span> <span class="o">=</span> <span class="s1">&#39;https://www.ebi.ac.uk/chembl/api/data/target.json&#39;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;target_components__accession&#39;</span><span class="p">:</span> <span class="n">target_upid</span><span class="p">}</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">)</span>
+    <span class="n">r</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+    <span class="n">js</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+    <span class="n">target_chemblid</span> <span class="o">=</span> <span class="n">js</span><span class="p">[</span><span class="s1">&#39;targets&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;target_chembl_id&#39;</span><span class="p">]</span></div>
+    <span class="k">return</span> <span class="n">target_chemblid</span>
+
+
+<div class="viewcode-block" id="get_mesh_id"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_mesh_id">[docs]</a><span class="k">def</span> <span class="nf">get_mesh_id</span><span class="p">(</span><span class="n">nlm_mesh</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get MESH ID from NLM MESH</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    nlm_mesh : str</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    mesh_id : str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">url_nlm2mesh</span> <span class="o">=</span> <span class="s1">&#39;http://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi&#39;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;db&#39;</span><span class="p">:</span> <span class="s1">&#39;mesh&#39;</span><span class="p">,</span> <span class="s1">&#39;term&#39;</span><span class="p">:</span> <span class="n">nlm_mesh</span><span class="p">,</span> <span class="s1">&#39;retmode&#39;</span><span class="p">:</span> <span class="s1">&#39;JSON&#39;</span><span class="p">}</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url_nlm2mesh</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">)</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+    <span class="n">mesh_id</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="s1">&#39;esearchresult&#39;</span><span class="p">][</span><span class="s1">&#39;idlist&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span></div>
+    <span class="k">return</span> <span class="n">mesh_id</span>
+
+
+<div class="viewcode-block" id="get_pcid"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_pcid">[docs]</a><span class="k">def</span> <span class="nf">get_pcid</span><span class="p">(</span><span class="n">mesh_id</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get PC ID from MESH ID</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    mesh : str</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pcid : str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">url_mesh2pcid</span> <span class="o">=</span> <span class="s1">&#39;http://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi&#39;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;dbfrom&#39;</span><span class="p">:</span> <span class="s1">&#39;mesh&#39;</span><span class="p">,</span> <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">mesh_id</span><span class="p">,</span>
+              <span class="s1">&#39;db&#39;</span><span class="p">:</span> <span class="s1">&#39;pccompound&#39;</span><span class="p">,</span> <span class="s1">&#39;retmode&#39;</span><span class="p">:</span> <span class="s1">&#39;JSON&#39;</span><span class="p">}</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url_mesh2pcid</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">)</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+    <span class="n">pcid</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="s1">&#39;linksets&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;linksetdbs&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;links&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span></div>
+    <span class="k">return</span> <span class="n">pcid</span>
+
+
+<div class="viewcode-block" id="get_chembl_id"><a class="viewcode-back" href="../../../modules/databases/index.html#indra.databases.chembl_client.get_chembl_id">[docs]</a><span class="k">def</span> <span class="nf">get_chembl_id</span><span class="p">(</span><span class="n">nlm_mesh</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get ChEMBL ID from NLM MESH</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    nlm_mesh : str</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    chembl_id : str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">mesh_id</span> <span class="o">=</span> <span class="n">get_mesh_id</span><span class="p">(</span><span class="n">nlm_mesh</span><span class="p">)</span>
+    <span class="n">pcid</span> <span class="o">=</span> <span class="n">get_pcid</span><span class="p">(</span><span class="n">mesh_id</span><span class="p">)</span>
+    <span class="n">url_mesh2pcid</span> <span class="o">=</span> <span class="s1">&#39;https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/&#39;</span> <span class="o">+</span> \
+                    <span class="s1">&#39;cid/</span><span class="si">%s</span><span class="s1">/synonyms/JSON&#39;</span> <span class="o">%</span> <span class="n">pcid</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url_mesh2pcid</span><span class="p">)</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+    <span class="n">synonyms</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="s1">&#39;InformationList&#39;</span><span class="p">][</span><span class="s1">&#39;Information&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;Synonym&#39;</span><span class="p">]</span>
+    <span class="n">chembl_id</span> <span class="o">=</span> <span class="p">[</span><span class="n">syn</span> <span class="k">for</span> <span class="n">syn</span> <span class="ow">in</span> <span class="n">synonyms</span>
+                 <span class="k">if</span> <span class="s1">&#39;CHEMBL&#39;</span> <span class="ow">in</span> <span class="n">syn</span> <span class="ow">and</span> <span class="s1">&#39;SCHEMBL&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">syn</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span></div>
+    <span class="k">return</span> <span class="n">chembl_id</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

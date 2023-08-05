@@ -1,0 +1,526 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.tools.incremental_model &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../index.html"/>
+        <link rel="up" title="Module code" href="../../index.html"/> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.tools.incremental_model</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.tools.incremental_model</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">pickle</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="n">Agent</span>
+<span class="kn">import</span> <span class="nn">indra.tools.assemble_corpus</span> <span class="k">as</span> <span class="nn">ac</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">hgnc_client</span>
+<span class="kn">from</span> <span class="nn">indra.preassembler.hierarchy_manager</span> <span class="k">import</span> <span class="n">hierarchies</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;incremental_model&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="IncrementalModel"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel">[docs]</a><span class="k">class</span> <span class="nc">IncrementalModel</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Assemble a model incrementally by iteratively adding new Statements.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    model_fname : Optional[str]</span>
+<span class="sd">        The name of the pickle file in which a set of INDRA Statements are</span>
+<span class="sd">        stored in a dict keyed by PubMed IDs. This is the state of an</span>
+<span class="sd">        IncrementalModel that is loaded upon instantiation.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    stmts : dict[str, list[indra.statements.Statement]]</span>
+<span class="sd">        A dictionary of INDRA Statements keyed by PMIDs that stores the current</span>
+<span class="sd">        state of the IncrementalModel.</span>
+<span class="sd">    assembled_stmts : list[indra.statements.Statement]</span>
+<span class="sd">        A list of INDRA Statements after assembly.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model_fname</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">model_fname</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">model_fname</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Could not load </span><span class="si">%s</span><span class="s1">, starting new model.&#39;</span> <span class="o">%</span>
+                               <span class="n">model_fname</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prior_genes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assembled_stmts</span> <span class="o">=</span> <span class="p">[]</span>
+
+<div class="viewcode-block" id="IncrementalModel.save"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.save">[docs]</a>    <span class="k">def</span> <span class="nf">save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model_fname</span><span class="o">=</span><span class="s1">&#39;model.pkl&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Save the state of the IncrementalModel in a pickle file.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        model_fname : Optional[str]</span>
+<span class="sd">            The name of the pickle file to save the state of the</span>
+<span class="sd">            IncrementalModel in. Default: model.pkl</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">model_fname</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span></div>
+            <span class="n">pickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="p">,</span> <span class="n">fh</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+
+<div class="viewcode-block" id="IncrementalModel.add_statements"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.add_statements">[docs]</a>    <span class="k">def</span> <span class="nf">add_statements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pmid</span><span class="p">,</span> <span class="n">stmts</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add INDRA Statements to the incremental model indexed by PMID.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        pmid : str</span>
+<span class="sd">            The PMID of the paper from which statements were extracted.</span>
+<span class="sd">        stmts : list[indra.statements.Statement]</span>
+<span class="sd">            A list of INDRA Statements to be added to the model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">pmid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="p">[</span><span class="n">pmid</span><span class="p">]</span> <span class="o">=</span> <span class="n">stmts</span>
+        <span class="k">else</span><span class="p">:</span></div>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="p">[</span><span class="n">pmid</span><span class="p">]</span> <span class="o">+=</span> <span class="n">stmts</span>
+
+    <span class="k">def</span> <span class="nf">_relevance_filter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmts</span><span class="p">,</span> <span class="n">filters</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">filters</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">stmts</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Running relevance filter on </span><span class="si">%d</span><span class="s1"> statements&#39;</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">stmts</span><span class="p">))</span>
+        <span class="n">prior_agents</span> <span class="o">=</span> <span class="n">get_gene_agents</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">prior_genes</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;prior_all&#39;</span> <span class="ow">in</span> <span class="n">filters</span><span class="p">:</span>
+            <span class="n">stmts</span> <span class="o">=</span> <span class="n">_ref_agents_all_filter</span><span class="p">(</span><span class="n">stmts</span><span class="p">,</span> <span class="n">prior_agents</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="s1">&#39;prior_one&#39;</span> <span class="ow">in</span> <span class="n">filters</span><span class="p">:</span>
+            <span class="n">stmts</span> <span class="o">=</span> <span class="n">_ref_agents_one_filter</span><span class="p">(</span><span class="n">stmts</span><span class="p">,</span> <span class="n">prior_agents</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%d</span><span class="s1"> statements after relevance filter&#39;</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">stmts</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">stmts</span>
+
+<div class="viewcode-block" id="IncrementalModel.preassemble"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.preassemble">[docs]</a>    <span class="k">def</span> <span class="nf">preassemble</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filters</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Preassemble the Statements collected in the model.</span>
+
+<span class="sd">        Use INDRA&#39;s GroundingMapper, Preassembler and BeliefEngine</span>
+<span class="sd">        on the IncrementalModel and save the unique statements and</span>
+<span class="sd">        the top level statements in class attributes.</span>
+
+<span class="sd">        Currently the following filter options are implemented:</span>
+<span class="sd">        - grounding: require that all Agents in statements are grounded</span>
+<span class="sd">        - human_only: require that all proteins are human proteins</span>
+<span class="sd">        - prior_one: require that at least one Agent is in the prior model</span>
+<span class="sd">        - prior_all: require that all Agents are in the prior model</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        filters : Optional[list[str]]</span>
+<span class="sd">            A list of filter options to apply when choosing the statements.</span>
+<span class="sd">            See description above for more details. Default: None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_statements</span><span class="p">()</span>
+
+        <span class="c1"># Filter out hypotheses</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="n">ac</span><span class="o">.</span><span class="n">filter_no_hypothesis</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+
+        <span class="c1"># Fix grounding</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="n">ac</span><span class="o">.</span><span class="n">map_grounding</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">filters</span> <span class="ow">and</span> <span class="p">(</span><span class="s1">&#39;grounding&#39;</span> <span class="ow">in</span> <span class="n">filters</span><span class="p">):</span>
+            <span class="n">stmts</span> <span class="o">=</span> <span class="n">ac</span><span class="o">.</span><span class="n">filter_grounded_only</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+
+        <span class="c1"># Fix sites</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="n">ac</span><span class="o">.</span><span class="n">map_sequence</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">filters</span> <span class="ow">and</span> <span class="s1">&#39;human_only&#39;</span> <span class="ow">in</span> <span class="n">filters</span><span class="p">:</span>
+            <span class="n">stmts</span> <span class="o">=</span> <span class="n">ac</span><span class="o">.</span><span class="n">filter_human_only</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+
+        <span class="c1"># Run preassembly</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="n">ac</span><span class="o">.</span><span class="n">run_preassembly</span><span class="p">(</span><span class="n">stmts</span><span class="p">,</span> <span class="n">return_toplevel</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="c1"># Run relevance filter</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_relevance_filter</span><span class="p">(</span><span class="n">stmts</span><span class="p">,</span> <span class="n">filters</span><span class="p">)</span>
+
+        <span class="c1"># Save Statements</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assembled_stmts</span> <span class="o">=</span> <span class="n">stmts</span>
+
+<div class="viewcode-block" id="IncrementalModel.load_prior"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.load_prior">[docs]</a>    <span class="k">def</span> <span class="nf">load_prior</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prior_fname</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Load a set of prior statements from a pickle file.</span>
+
+<span class="sd">        The prior statements have a special key in the stmts dictionary</span>
+<span class="sd">        called &quot;prior&quot;.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        prior_fname : str</span>
+<span class="sd">            The name of the pickle file containing the prior Statements.</span>
+<span class="sd">        &quot;&quot;&quot;</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="p">[</span><span class="s1">&#39;prior&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ac</span><span class="o">.</span><span class="n">load_statements</span><span class="p">(</span><span class="n">prior_fname</span><span class="p">)</span>
+
+<div class="viewcode-block" id="IncrementalModel.get_model_agents"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.get_model_agents">[docs]</a>    <span class="k">def</span> <span class="nf">get_model_agents</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a list of all Agents from all Statements.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        agents : list[indra.statements.Agent]</span>
+<span class="sd">           A list of Agents that are in the model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">model_stmts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_statements</span><span class="p">()</span>
+        <span class="n">agents</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="n">model_stmts</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">stmt</span><span class="o">.</span><span class="n">agent_list</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">a</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">agents</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">a</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">agents</span>
+
+<div class="viewcode-block" id="IncrementalModel.get_statements"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.get_statements">[docs]</a>    <span class="k">def</span> <span class="nf">get_statements</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a list of all Statements in a single list.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        stmts : list[indra.statements.Statement]</span>
+<span class="sd">            A list of all the INDRA Statements in the model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">stmt_lists</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="o">.</span><span class="n">items</span><span class="p">()]</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">stmt_lists</span><span class="p">:</span>
+            <span class="n">stmts</span> <span class="o">+=</span> <span class="n">s</span></div>
+        <span class="k">return</span> <span class="n">stmts</span>
+
+<div class="viewcode-block" id="IncrementalModel.get_statements_noprior"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.get_statements_noprior">[docs]</a>    <span class="k">def</span> <span class="nf">get_statements_noprior</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a list of all non-prior Statements in a single list.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        stmts : list[indra.statements.Statement]</span>
+<span class="sd">            A list of all the INDRA Statements in the model (excluding</span>
+<span class="sd">            the prior).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">stmt_lists</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="o">!=</span> <span class="s1">&#39;prior&#39;</span><span class="p">]</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">stmt_lists</span><span class="p">:</span>
+            <span class="n">stmts</span> <span class="o">+=</span> <span class="n">s</span></div>
+        <span class="k">return</span> <span class="n">stmts</span>
+
+<div class="viewcode-block" id="IncrementalModel.get_statements_prior"><a class="viewcode-back" href="../../../modules/tools/index.html#indra.tools.incremental_model.IncrementalModel.get_statements_prior">[docs]</a>    <span class="k">def</span> <span class="nf">get_statements_prior</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a list of all prior Statements in a single list.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        stmts : list[indra.statements.Statement]</span>
+<span class="sd">            A list of all the INDRA Statements in the prior.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;prior&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="p">[</span><span class="s1">&#39;prior&#39;</span><span class="p">]</span></div></div>
+        <span class="k">return</span> <span class="p">[]</span>
+
+
+<span class="k">def</span> <span class="nf">_get_agent_comp</span><span class="p">(</span><span class="n">agent</span><span class="p">):</span>
+    <span class="n">eh</span> <span class="o">=</span> <span class="n">hierarchies</span><span class="p">[</span><span class="s1">&#39;entity&#39;</span><span class="p">]</span>
+    <span class="n">a_ns</span><span class="p">,</span> <span class="n">a_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">get_grounding</span><span class="p">()</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">a_ns</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">a_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">uri</span> <span class="o">=</span> <span class="n">eh</span><span class="o">.</span><span class="n">get_uri</span><span class="p">(</span><span class="n">a_ns</span><span class="p">,</span> <span class="n">a_id</span><span class="p">)</span>
+    <span class="n">comp_id</span> <span class="o">=</span> <span class="n">eh</span><span class="o">.</span><span class="n">components</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">uri</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">comp_id</span>
+
+<span class="k">def</span> <span class="nf">get_gene_agents</span><span class="p">(</span><span class="n">gene_names</span><span class="p">):</span>
+    <span class="n">agents</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">gn</span> <span class="ow">in</span> <span class="n">gene_names</span><span class="p">:</span>
+        <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_id</span><span class="p">(</span><span class="n">gn</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">hgnc_id</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Invalid HGNC gene symbol: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">gn</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;HGNC&#39;</span><span class="p">:</span> <span class="n">hgnc_id</span><span class="p">}</span>
+        <span class="n">up_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_uniprot_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">up_id</span><span class="p">:</span>
+            <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;UP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">up_id</span>
+        <span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">gn</span><span class="p">,</span> <span class="n">db_refs</span><span class="o">=</span><span class="n">db_refs</span><span class="p">)</span>
+        <span class="n">agents</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">agent</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">agents</span>
+
+<span class="k">def</span> <span class="nf">_ref_agents_all_filter</span><span class="p">(</span><span class="n">stmts_in</span><span class="p">,</span> <span class="n">ref_agents</span><span class="p">):</span>
+    <span class="c1"># If there is no reference, keep everything by default</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ref_agents</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">stmts_in</span>
+    <span class="n">stmts_out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="c1"># Preprocess reference Agents: make a list of entity hierarchy components</span>
+    <span class="c1"># that appear in the reference and also a list of reference Agent names</span>
+    <span class="n">ref_agent_names</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">ref_components</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">ref_agents</span><span class="p">:</span>
+        <span class="n">comp_id</span> <span class="o">=</span> <span class="n">_get_agent_comp</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">comp_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ref_components</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">comp_id</span><span class="p">)</span>
+        <span class="n">ref_agent_names</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+    <span class="c1"># Iterate over every Statement and check if any of its Agents are either</span>
+    <span class="c1"># in a component appearing in the reference, or match one of the</span>
+    <span class="c1"># reference Agents that isn&#39;t in any of the components.</span>
+    <span class="k">for</span> <span class="n">st</span> <span class="ow">in</span> <span class="n">stmts_in</span><span class="p">:</span>
+        <span class="n">agents</span> <span class="o">=</span> <span class="p">[</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">st</span><span class="o">.</span><span class="n">agent_list</span><span class="p">()</span> <span class="k">if</span> <span class="n">a</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="n">found_all</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">for</span> <span class="n">st_agent</span> <span class="ow">in</span> <span class="n">agents</span><span class="p">:</span>
+            <span class="n">found</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">comp_id</span> <span class="o">=</span> <span class="n">_get_agent_comp</span><span class="p">(</span><span class="n">st_agent</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">comp_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">ref_agent_name</span> <span class="ow">in</span> <span class="n">ref_agent_names</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">st_agent</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">ref_agent_name</span><span class="p">:</span>
+                        <span class="n">found</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">elif</span> <span class="n">comp_id</span> <span class="ow">in</span> <span class="n">ref_components</span><span class="p">:</span>
+                <span class="n">found</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">found</span><span class="p">:</span>
+                <span class="n">found_all</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="k">break</span>
+        <span class="k">if</span> <span class="n">found_all</span><span class="p">:</span>
+            <span class="n">stmts_out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">st</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">stmts_out</span>
+
+
+<span class="k">def</span> <span class="nf">_ref_agents_one_filter</span><span class="p">(</span><span class="n">stmts_in</span><span class="p">,</span> <span class="n">ref_agents</span><span class="p">):</span>
+    <span class="c1"># If there is no reference, keep everything by default</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ref_agents</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">stmts_in</span>
+    <span class="n">stmts_out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="c1"># Preprocess reference Agents: make a list of entity hierarchy components</span>
+    <span class="c1"># that appear in the reference and also a list of reference Agent names</span>
+    <span class="n">ref_agent_names</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">ref_components</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">ref_agents</span><span class="p">:</span>
+        <span class="n">comp_id</span> <span class="o">=</span> <span class="n">_get_agent_comp</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">comp_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ref_components</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">comp_id</span><span class="p">)</span>
+        <span class="n">ref_agent_names</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+    <span class="c1"># Iterate over every Statement and check if any of its Agents are either</span>
+    <span class="c1"># in a component appearing in the reference, or match one of the</span>
+    <span class="c1"># reference Agents that isn&#39;t in any of the components.</span>
+    <span class="k">for</span> <span class="n">st</span> <span class="ow">in</span> <span class="n">stmts_in</span><span class="p">:</span>
+        <span class="n">agents</span> <span class="o">=</span> <span class="p">[</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">st</span><span class="o">.</span><span class="n">agent_list</span><span class="p">()</span> <span class="k">if</span> <span class="n">a</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="n">found</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">st_agent</span> <span class="ow">in</span> <span class="n">agents</span><span class="p">:</span>
+            <span class="n">comp_id</span> <span class="o">=</span> <span class="n">_get_agent_comp</span><span class="p">(</span><span class="n">st_agent</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">comp_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">ref_agent_name</span> <span class="ow">in</span> <span class="n">ref_agent_names</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">st_agent</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">ref_agent_name</span><span class="p">:</span>
+                        <span class="n">found</span> <span class="o">=</span> <span class="kc">True</span>
+                        <span class="k">break</span>
+            <span class="k">elif</span> <span class="n">comp_id</span> <span class="ow">in</span> <span class="n">ref_components</span><span class="p">:</span>
+                <span class="n">found</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">break</span>
+        <span class="k">if</span> <span class="n">found</span><span class="p">:</span>
+            <span class="n">stmts_out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">st</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">stmts_out</span>
+
+<span class="k">def</span> <span class="nf">_agent_related</span><span class="p">(</span><span class="n">a1</span><span class="p">,</span> <span class="n">a2</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">a1</span><span class="o">.</span><span class="n">matches</span><span class="p">(</span><span class="n">a2</span><span class="p">)</span> <span class="ow">or</span> <span class="n">a1</span><span class="o">.</span><span class="n">isa</span><span class="p">(</span><span class="n">a2</span><span class="p">,</span> <span class="n">hierarchies</span><span class="p">)</span> <span class="ow">or</span> <span class="n">a2</span><span class="o">.</span><span class="n">isa</span><span class="p">(</span><span class="n">a1</span><span class="p">,</span> <span class="n">hierarchies</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="kc">False</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

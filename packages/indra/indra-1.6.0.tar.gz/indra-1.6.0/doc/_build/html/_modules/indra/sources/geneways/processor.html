@@ -1,0 +1,416 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.sources.geneways.processor &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../../index.html"/>
+        <link rel="up" title="Module code" href="../../../index.html"/> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.sources.geneways.processor</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.sources.geneways.processor</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">This module provides an input processor for information extracted using the</span>
+<span class="sd">Geneways software suite, converting extraction data in Geneways format into</span>
+<span class="sd">INDRA statements.</span>
+
+<span class="sd">See publication:</span>
+<span class="sd">Rzhetsky, Andrey, Ivan Iossifov, Tomohiro Koike, Michael Krauthammer, Pauline</span>
+<span class="sd">Kra, Mitzi Morris, Hong Yu et al. &quot;GeneWays: a system for extracting,</span>
+<span class="sd">analyzing, visualizing, and integrating molecular pathway data.&quot;</span>
+<span class="sd">Journal of biomedical informatics 37, no. 1 (2004): 43-53.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="n">Evidence</span><span class="p">,</span> <span class="n">Agent</span>
+<span class="kn">import</span> <span class="nn">indra.databases.hgnc_client</span> <span class="k">as</span> <span class="nn">hgc</span>
+<span class="kn">from</span> <span class="nn">indra.literature</span> <span class="k">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="n">Complex</span><span class="p">,</span> <span class="n">Phosphorylation</span>
+<span class="kn">from</span> <span class="nn">indra.sources.geneways.geneways_action_parser</span> <span class="k">import</span> <span class="n">GenewaysActionParser</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">indra.sources.geneways.find_full_text_sentence</span> <span class="k">import</span> <span class="n">FullTextMention</span>
+    <span class="n">get_ft_mention</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Install the nltk and stemming packages to extract full &#39;</span>
+                 <span class="s1">&#39;text evidence for Geneways mentions.&#39;</span><span class="p">)</span>
+    <span class="n">get_ft_mention</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;geneways&#39;</span><span class="p">)</span>
+
+
+<span class="c1"># This will take in an action and action mention and create a single statement</span>
+<div class="viewcode-block" id="GenewaysProcessor"><a class="viewcode-back" href="../../../../modules/sources/geneways/index.html#indra.sources.geneways.processor.GenewaysProcessor">[docs]</a><span class="k">class</span> <span class="nc">GenewaysProcessor</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The GenewaysProcessors converts extracted Geneways action mentions into</span>
+<span class="sd">    INDRA statements.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    search_path : list[str]</span>
+<span class="sd">        A list of directories in which to search for Geneways data</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    statements : list[indra.statements.Statement]</span>
+<span class="sd">        A list of INDRA statements converted from Geneways action</span>
+<span class="sd">        mentions, populated by calling the constructor</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">search_path</span><span class="p">):</span>
+        <span class="c1"># Parse Geneways data. Will give an error if it can&#39;t find</span>
+        <span class="c1"># the Geneways data</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Loading Geneways extractions&#39;</span><span class="p">)</span>
+        <span class="n">parser</span> <span class="o">=</span> <span class="n">GenewaysActionParser</span><span class="p">(</span><span class="n">search_path</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Geneways extractions loaded&#39;</span><span class="p">)</span>
+        <span class="n">actions</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">actions</span>
+
+        <span class="c1"># Make a list of statements from the actions</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">action</span> <span class="ow">in</span> <span class="n">actions</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">mention</span> <span class="ow">in</span> <span class="n">action</span><span class="o">.</span><span class="n">action_mentions</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">mention</span><span class="o">.</span><span class="n">negative</span> <span class="o">!=</span> <span class="s1">&#39;1&#39;</span><span class="p">:</span>
+                    <span class="n">new_statement</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">make_statement</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">mention</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">new_statement</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_statement</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GenewaysProcessor.make_statement"><a class="viewcode-back" href="../../../../modules/sources/geneways/index.html#indra.sources.geneways.processor.GenewaysProcessor.make_statement">[docs]</a>    <span class="k">def</span> <span class="nf">make_statement</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">,</span> <span class="n">mention</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Makes an INDRA statement from a Geneways action and action mention.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        action : GenewaysAction</span>
+<span class="sd">            The mechanism that the Geneways mention maps to. Note that</span>
+<span class="sd">            several text mentions can correspond to the same action if they are</span>
+<span class="sd">            referring to the same relationship - there may be multiple</span>
+<span class="sd">            Geneways action mentions corresponding to each action.</span>
+<span class="sd">        mention : GenewaysActionMention</span>
+<span class="sd">            The Geneways action mention object corresponding to a single</span>
+<span class="sd">            mention of a mechanism in a specific text. We make a new INDRA</span>
+<span class="sd">            statement corresponding to each action mention.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        statement : indra.statements.Statement</span>
+<span class="sd">            An INDRA statement corresponding to the provided Geneways action</span>
+<span class="sd">            mention, or None if the action mention&#39;s type does not map onto</span>
+<span class="sd">            any INDRA statement type in geneways_action_type_mapper.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="p">(</span><span class="n">statement_generator</span><span class="p">,</span> <span class="n">is_direct</span><span class="p">)</span> <span class="o">=</span> \
+            <span class="n">geneways_action_to_indra_statement_type</span><span class="p">(</span><span class="n">mention</span><span class="o">.</span><span class="n">actiontype</span><span class="p">,</span>
+                                                    <span class="n">action</span><span class="o">.</span><span class="n">plo</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">statement_generator</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Geneways statement does not map onto an indra statement</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="c1"># Try to find the full-text sentence</span>
+        <span class="c1"># Unfortunately, the sentence numbers in the Geneways dataset</span>
+        <span class="c1"># don&#39;t correspond to an obvious sentence segmentation.</span>
+        <span class="c1"># This code looks for sentences with the subject, object, and verb</span>
+        <span class="c1"># listed by the Geneways action mention table and only includes</span>
+        <span class="c1"># it in the evidence if there is exactly one such sentence</span>
+        <span class="k">if</span> <span class="n">get_ft_mention</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">content</span><span class="p">,</span> <span class="n">content_type</span> <span class="o">=</span> <span class="n">get_full_text</span><span class="p">(</span><span class="n">mention</span><span class="o">.</span><span class="n">pmid</span><span class="p">,</span> <span class="s1">&#39;pmid&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">content</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">ftm</span> <span class="o">=</span> <span class="n">FullTextMention</span><span class="p">(</span><span class="n">mention</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
+                    <span class="n">sentences</span> <span class="o">=</span> <span class="n">ftm</span><span class="o">.</span><span class="n">find_matching_sentences</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sentences</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                        <span class="n">text</span> <span class="o">=</span> <span class="n">sentences</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">text</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">text</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Could not fetch full text for PMID &#39;</span> <span class="o">+</span>
+                               <span class="n">mention</span><span class="o">.</span><span class="n">pmid</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">text</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Make an evidence object</span>
+        <span class="n">epistemics</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+        <span class="n">epistemics</span><span class="p">[</span><span class="s1">&#39;direct&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">is_direct</span>
+        <span class="n">annotations</span> <span class="o">=</span> <span class="n">mention</span><span class="o">.</span><span class="n">make_annotation</span><span class="p">()</span>
+        <span class="n">annotations</span><span class="p">[</span><span class="s1">&#39;plo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">action</span><span class="o">.</span><span class="n">plo</span>  <span class="c1"># plo only in action table</span>
+        <span class="n">evidence</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;geneways&#39;</span><span class="p">,</span>
+                            <span class="n">source_id</span><span class="o">=</span><span class="n">mention</span><span class="o">.</span><span class="n">actionmentionid</span><span class="p">,</span>
+                            <span class="n">pmid</span><span class="o">=</span><span class="n">mention</span><span class="o">.</span><span class="n">pmid</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">text</span><span class="p">,</span>
+                            <span class="n">epistemics</span><span class="o">=</span><span class="n">epistemics</span><span class="p">,</span>
+                            <span class="n">annotations</span><span class="o">=</span><span class="n">annotations</span><span class="p">)</span>
+
+        <span class="c1"># Construct the grounded and name standardized agents</span>
+        <span class="c1"># Note that this involves grounding the agent by</span>
+        <span class="c1"># converting the Entrez ID listed in the Geneways data with</span>
+        <span class="c1"># HGNC and UniProt</span>
+        <span class="n">upstream_agent</span> <span class="o">=</span> <span class="n">get_agent</span><span class="p">(</span><span class="n">mention</span><span class="o">.</span><span class="n">upstream</span><span class="p">,</span> <span class="n">action</span><span class="o">.</span><span class="n">up</span><span class="p">)</span>
+        <span class="n">downstream_agent</span> <span class="o">=</span> <span class="n">get_agent</span><span class="p">(</span><span class="n">mention</span><span class="o">.</span><span class="n">downstream</span><span class="p">,</span> <span class="n">action</span><span class="o">.</span><span class="n">dn</span><span class="p">)</span>
+
+        <span class="c1"># Make the statement</span></div></div>
+        <span class="k">return</span> <span class="n">statement_generator</span><span class="p">(</span><span class="n">upstream_agent</span><span class="p">,</span> <span class="n">downstream_agent</span><span class="p">,</span> <span class="n">evidence</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">get_agent</span><span class="p">(</span><span class="n">raw_name</span><span class="p">,</span> <span class="n">entrez_id</span><span class="p">):</span>
+    <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;TEXT&#39;</span><span class="p">:</span> <span class="n">raw_name</span><span class="p">}</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Looking up grounding data for Entrez #</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">entrez_id</span><span class="p">)</span>
+    <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgc</span><span class="o">.</span><span class="n">get_hgnc_from_entrez</span><span class="p">(</span><span class="n">entrez_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">hgnc_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;UP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hgc</span><span class="o">.</span><span class="n">get_uniprot_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">hgc</span><span class="o">.</span><span class="n">get_hgnc_name</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">raw_name</span>
+    <span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">db_refs</span><span class="o">=</span><span class="n">db_refs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">agent</span>
+
+
+<div class="viewcode-block" id="geneways_action_to_indra_statement_type"><a class="viewcode-back" href="../../../../modules/sources/geneways/index.html#indra.sources.geneways.processor.geneways_action_to_indra_statement_type">[docs]</a><span class="k">def</span> <span class="nf">geneways_action_to_indra_statement_type</span><span class="p">(</span><span class="n">actiontype</span><span class="p">,</span> <span class="n">plo</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return INDRA Statement corresponding to Geneways action type.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    actiontype : str</span>
+<span class="sd">        The verb extracted by the Geneways processor</span>
+<span class="sd">    plo : str</span>
+<span class="sd">        A one character string designating whether Geneways classifies</span>
+<span class="sd">        this verb as a physical, logical, or other interaction</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    statement_generator :</span>
+<span class="sd">        If there is no mapping to INDRA statements from this action type</span>
+<span class="sd">        the return value is None.</span>
+<span class="sd">        If there is such a mapping, statement_generator is an anonymous</span>
+<span class="sd">        function that takes in the subject agent, object agent, and evidence,</span>
+<span class="sd">        in that order, and returns an INDRA statement object.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">actiontype</span> <span class="o">=</span> <span class="n">actiontype</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+
+    <span class="n">statement_generator</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">is_direct</span> <span class="o">=</span> <span class="p">(</span><span class="n">plo</span> <span class="o">==</span> <span class="s1">&#39;P&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">actiontype</span> <span class="o">==</span> <span class="s1">&#39;bind&#39;</span><span class="p">:</span>
+        <span class="n">statement_generator</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">substance1</span><span class="p">,</span> <span class="n">substance2</span><span class="p">,</span> <span class="n">evidence</span><span class="p">:</span> \
+                <span class="n">Complex</span><span class="p">([</span><span class="n">substance1</span><span class="p">,</span> <span class="n">substance2</span><span class="p">],</span> <span class="n">evidence</span><span class="o">=</span><span class="n">evidence</span><span class="p">)</span>
+        <span class="n">is_direct</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">elif</span> <span class="n">actiontype</span> <span class="o">==</span> <span class="s1">&#39;phosphorylate&#39;</span><span class="p">:</span>
+        <span class="n">statement_generator</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">substance1</span><span class="p">,</span> <span class="n">substance2</span><span class="p">,</span> <span class="n">evidence</span><span class="p">:</span> \
+                <span class="n">Phosphorylation</span><span class="p">(</span><span class="n">substance1</span><span class="p">,</span> <span class="n">substance2</span><span class="p">,</span> <span class="n">evidence</span><span class="o">=</span><span class="n">evidence</span><span class="p">)</span>
+        <span class="n">is_direct</span> <span class="o">=</span> <span class="kc">True</span>
+</div>
+    <span class="k">return</span> <span class="p">(</span><span class="n">statement_generator</span><span class="p">,</span> <span class="n">is_direct</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

@@ -1,0 +1,745 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.assemblers.cx_assembler &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../index.html"/>
+        <link rel="up" title="Module code" href="../../index.html"/> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.assemblers.cx_assembler</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.assemblers.cx_assembler</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">io</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">OrderedDict</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">context_client</span><span class="p">,</span> <span class="n">ndex_client</span><span class="p">,</span> <span class="n">get_identifiers_url</span>
+
+<span class="c1"># Python 2</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">basestring</span>
+<span class="c1"># Python 3</span>
+<span class="k">except</span><span class="p">:</span>
+    <span class="n">basestring</span> <span class="o">=</span> <span class="nb">str</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;cx_assembler&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="CxAssembler"><a class="viewcode-back" href="../../../modules/assemblers/cx_assembler.html#indra.assemblers.cx_assembler.CxAssembler">[docs]</a><span class="k">class</span> <span class="nc">CxAssembler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;This class assembles a CX network from a set of INDRA Statements.</span>
+
+<span class="sd">    The CX format is an aspect oriented data mode for networks.</span>
+<span class="sd">    The format is defined at http://www.home.ndexbio.org/data-model/.</span>
+<span class="sd">    The CX format is the standard for NDEx and is compatible with</span>
+<span class="sd">    CytoScape via the CyNDEx plugin.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    stmts : Optional[list[indra.statements.Statement]]</span>
+<span class="sd">        A list of INDRA Statements to be assembled.</span>
+<span class="sd">    network_name : Optional[str]</span>
+<span class="sd">        The name of the network to be assembled. Default: indra_assembled</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    statements : list[indra.statements.Statement]</span>
+<span class="sd">        A list of INDRA Statements to be assembled.</span>
+<span class="sd">    network_name : str</span>
+<span class="sd">        The name of the network to be assembled.</span>
+<span class="sd">    cx : dict</span>
+<span class="sd">        The structure of the CX network that is assembled.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmts</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">network_name</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">stmts</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="n">stmts</span>
+        <span class="k">if</span> <span class="n">network_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">network_name</span> <span class="o">=</span> <span class="s1">&#39;indra_assembled&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">network_name</span> <span class="o">=</span> <span class="n">network_name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;nodes&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;edges&#39;</span><span class="p">:</span> <span class="p">[],</span>
+                   <span class="s1">&#39;nodeAttributes&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;edgeAttributes&#39;</span><span class="p">:</span> <span class="p">[],</span>
+                   <span class="s1">&#39;citations&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;edgeCitations&#39;</span><span class="p">:</span> <span class="p">[],</span>
+                   <span class="s1">&#39;supports&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;edgeSupports&#39;</span><span class="p">:</span> <span class="p">[],</span>
+                   <span class="s1">&#39;networkAttributes&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_existing_nodes</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_existing_edges</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_id_counter</span> <span class="o">=</span> <span class="mi">0</span>
+
+<div class="viewcode-block" id="CxAssembler.add_statements"><a class="viewcode-back" href="../../../modules/assemblers/cx_assembler.html#indra.assemblers.cx_assembler.CxAssembler.add_statements">[docs]</a>    <span class="k">def</span> <span class="nf">add_statements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmts</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add INDRA Statements to the assembler&#39;s list of statements.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        stmts : list[indra.statements.Statement]</span>
+<span class="sd">            A list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">            to be added to the statement list of the assembler.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="n">stmts</span><span class="p">:</span></div>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+<div class="viewcode-block" id="CxAssembler.make_model"><a class="viewcode-back" href="../../../modules/assemblers/cx_assembler.html#indra.assemblers.cx_assembler.CxAssembler.make_model">[docs]</a>    <span class="k">def</span> <span class="nf">make_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">add_indra_json</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Assemble the CX network from the collected INDRA Statements.</span>
+
+<span class="sd">        This method assembles a CX network from the set of INDRA Statements.</span>
+<span class="sd">        The assembled network is set as the assembler&#39;s cx argument.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        add_indra_json : Optional[bool]</span>
+<span class="sd">            If True, the INDRA Statement JSON annotation is added to each</span>
+<span class="sd">            edge in the network. Default: True</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        cx_str : str</span>
+<span class="sd">            The json serialized CX model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_indra_json</span> <span class="o">=</span> <span class="n">add_indra_json</span>
+        <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Modification</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_modification</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">SelfModification</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_self_modification</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">RegulateActivity</span><span class="p">)</span> <span class="ow">or</span> \
+                <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">RegulateAmount</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_regulation</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Complex</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_complex</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gef</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_gef</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gap</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_gap</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="n">network_description</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;networkAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;name&#39;</span><span class="p">,</span>
+                                             <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">network_name</span><span class="p">})</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;networkAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;description&#39;</span><span class="p">,</span>
+                                             <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">network_description</span><span class="p">})</span>
+        <span class="n">cx_str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">print_cx</span><span class="p">()</span></div>
+        <span class="k">return</span> <span class="n">cx_str</span>
+
+<div class="viewcode-block" id="CxAssembler.print_cx"><a class="viewcode-back" href="../../../modules/assemblers/cx_assembler.html#indra.assemblers.cx_assembler.CxAssembler.print_cx">[docs]</a>    <span class="k">def</span> <span class="nf">print_cx</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pretty</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the assembled CX network as a json string.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        pretty : bool</span>
+<span class="sd">            If True, the CX string is formatted with indentation (for human</span>
+<span class="sd">            viewing) otherwise no indentation is used.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        json_str : str</span>
+<span class="sd">            A json formatted string representation of the CX network.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">def</span> <span class="nf">_get_aspect_metadata</span><span class="p">(</span><span class="n">aspect</span><span class="p">):</span>
+            <span class="n">count</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">aspect</span><span class="p">))</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">aspect</span><span class="p">)</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">count</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">None</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="n">aspect</span><span class="p">,</span>
+                    <span class="s1">&#39;idCounter&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_id_counter</span><span class="p">,</span>
+                    <span class="s1">&#39;consistencyGroup&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                    <span class="s1">&#39;elementCount&#39;</span><span class="p">:</span> <span class="n">count</span><span class="p">}</span>
+            <span class="k">return</span> <span class="n">data</span>
+        <span class="n">full_cx</span> <span class="o">=</span> <span class="n">OrderedDict</span><span class="p">()</span>
+        <span class="n">full_cx</span><span class="p">[</span><span class="s1">&#39;numberVerification&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[{</span><span class="s1">&#39;longNumber&#39;</span><span class="p">:</span> <span class="mi">281474976710655</span><span class="p">}]</span>
+        <span class="n">aspects</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;nodes&#39;</span><span class="p">,</span> <span class="s1">&#39;edges&#39;</span><span class="p">,</span> <span class="s1">&#39;supports&#39;</span><span class="p">,</span> <span class="s1">&#39;citations&#39;</span><span class="p">,</span> <span class="s1">&#39;edgeAttributes&#39;</span><span class="p">,</span>
+                   <span class="s1">&#39;edgeCitations&#39;</span><span class="p">,</span> <span class="s1">&#39;edgeSupports&#39;</span><span class="p">,</span> <span class="s1">&#39;networkAttributes&#39;</span><span class="p">,</span>
+                   <span class="s1">&#39;nodeAttributes&#39;</span><span class="p">]</span>
+        <span class="n">full_cx</span><span class="p">[</span><span class="s1">&#39;metaData&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">aspect</span> <span class="ow">in</span> <span class="n">aspects</span><span class="p">:</span>
+            <span class="n">metadata</span> <span class="o">=</span> <span class="n">_get_aspect_metadata</span><span class="p">(</span><span class="n">aspect</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">metadata</span><span class="p">:</span>
+                <span class="n">full_cx</span><span class="p">[</span><span class="s1">&#39;metaData&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">full_cx</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+        <span class="n">full_cx</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[{</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}]</span>
+        <span class="n">full_cx</span> <span class="o">=</span> <span class="p">[{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">}</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">full_cx</span><span class="o">.</span><span class="n">items</span><span class="p">()]</span>
+        <span class="k">if</span> <span class="n">pretty</span><span class="p">:</span>
+            <span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">full_cx</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">full_cx</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">json_str</span>
+
+<div class="viewcode-block" id="CxAssembler.save_model"><a class="viewcode-back" href="../../../modules/assemblers/cx_assembler.html#indra.assemblers.cx_assembler.CxAssembler.save_model">[docs]</a>    <span class="k">def</span> <span class="nf">save_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file_name</span><span class="o">=</span><span class="s1">&#39;model.cx&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Save the assembled CX network in a file.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        file_name : Optional[str]</span>
+<span class="sd">            The name of the file to save the CX network to. Default: model.cx</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file_name</span><span class="p">,</span> <span class="s1">&#39;wt&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">cx_str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">print_cx</span><span class="p">()</span></div>
+            <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">cx_str</span><span class="p">)</span>
+
+<div class="viewcode-block" id="CxAssembler.upload_model"><a class="viewcode-back" href="../../../modules/assemblers/cx_assembler.html#indra.assemblers.cx_assembler.CxAssembler.upload_model">[docs]</a>    <span class="k">def</span> <span class="nf">upload_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ndex_cred</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Creates a new NDEx network of the assembled CX model.</span>
+
+<span class="sd">        To upload the assembled CX model to NDEx, you need to have</span>
+<span class="sd">        a registered account on NDEx (http://ndexbio.org/) and have</span>
+<span class="sd">        the `ndex` python package installed. The uploaded network</span>
+<span class="sd">        is private by default.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        ndex_cred : dict</span>
+<span class="sd">            A dictionary with the following entries:</span>
+<span class="sd">            &#39;user&#39;: NDEx user name</span>
+<span class="sd">            &#39;password&#39;: NDEx password</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        network_id :  str</span>
+<span class="sd">            The UUID of the NDEx network that was created by uploading</span>
+<span class="sd">            the assembled CX model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">cx_str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">print_cx</span><span class="p">()</span>
+        <span class="n">network_id</span> <span class="o">=</span> <span class="n">ndex_client</span><span class="o">.</span><span class="n">create_network</span><span class="p">(</span><span class="n">cx_str</span><span class="p">,</span> <span class="n">ndex_cred</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">network_id</span>
+
+<div class="viewcode-block" id="CxAssembler.set_context"><a class="viewcode-back" href="../../../modules/assemblers/cx_assembler.html#indra.assemblers.cx_assembler.CxAssembler.set_context">[docs]</a>    <span class="k">def</span> <span class="nf">set_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cell_type</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set protein expression data and mutational status as node attribute</span>
+
+<span class="sd">        This method uses :py:mod:`indra.databases.context_client` to get</span>
+<span class="sd">        protein expression levels and mutational status for a given cell type</span>
+<span class="sd">        and set a node attribute for proteins accordingly.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        cell_type : str</span>
+<span class="sd">            Cell type name for which expression levels are queried.</span>
+<span class="sd">            The cell type name follows the CCLE database conventions.</span>
+<span class="sd">            Example: LOXIMVI_SKIN, BT20_BREAST</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">node_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">node</span><span class="p">[</span><span class="s1">&#39;n&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;nodes&#39;</span><span class="p">]]</span>
+        <span class="n">res_expr</span> <span class="o">=</span> <span class="n">context_client</span><span class="o">.</span><span class="n">get_protein_expression</span><span class="p">(</span><span class="n">node_names</span><span class="p">,</span>
+                                                         <span class="p">[</span><span class="n">cell_type</span><span class="p">])</span>
+        <span class="n">res_mut</span> <span class="o">=</span> <span class="n">context_client</span><span class="o">.</span><span class="n">get_mutations</span><span class="p">(</span><span class="n">node_names</span><span class="p">,</span>
+                                               <span class="p">[</span><span class="n">cell_type</span><span class="p">])</span>
+        <span class="n">res_expr</span> <span class="o">=</span> <span class="n">res_expr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cell_type</span><span class="p">)</span>
+        <span class="n">res_mut</span> <span class="o">=</span> <span class="n">res_mut</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cell_type</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">res_expr</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Could not get protein expression for </span><span class="si">%s</span><span class="s1"> cell type.&#39;</span> <span class="o">%</span> \
+                  <span class="n">cell_type</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">res_mut</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Could not get mutational status for </span><span class="si">%s</span><span class="s1"> cell type.&#39;</span> <span class="o">%</span> \
+                  <span class="n">cell_type</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">res_expr</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">res_mut</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;networkAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;cellular_context&#39;</span><span class="p">,</span>
+                                             <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">cell_type</span><span class="p">})</span>
+        <span class="n">counter</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;nodes&#39;</span><span class="p">]:</span>
+            <span class="n">amount</span> <span class="o">=</span> <span class="n">res_expr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">node</span><span class="p">[</span><span class="s1">&#39;n&#39;</span><span class="p">])</span>
+            <span class="n">mut</span> <span class="o">=</span> <span class="n">res_mut</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">node</span><span class="p">[</span><span class="s1">&#39;n&#39;</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">amount</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">node_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">node</span><span class="p">[</span><span class="s1">&#39;@id&#39;</span><span class="p">],</span>
+                                  <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;expression_amount&#39;</span><span class="p">,</span>
+                                  <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">amount</span><span class="p">)}</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;nodeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node_attribute</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">mut</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">is_mutated</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">mut</span> <span class="k">else</span> <span class="mi">0</span>
+                <span class="n">node_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">node</span><span class="p">[</span><span class="s1">&#39;@id&#39;</span><span class="p">],</span>
+                                  <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;is_mutated&#39;</span><span class="p">,</span>
+                                  <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">is_mutated</span><span class="p">}</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;nodeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node_attribute</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">mut</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">amount</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">counter</span> <span class="o">+=</span> <span class="mi">1</span></div>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Set context for </span><span class="si">%d</span><span class="s1"> nodes.&#39;</span> <span class="o">%</span> <span class="n">counter</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_new_id</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_id_counter</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_id_counter</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">ret</span>
+
+    <span class="k">def</span> <span class="nf">_add_modification</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">stmt</span><span class="o">.</span><span class="n">enz</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">enz_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">enz</span><span class="p">)</span>
+        <span class="n">sub_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">sub</span><span class="p">)</span>
+        <span class="n">stmt_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">enz_id</span><span class="p">,</span> <span class="n">sub_id</span><span class="p">,</span> <span class="n">stmt_type</span><span class="p">,</span> <span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_self_modification</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="n">enz_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">enz</span><span class="p">)</span>
+        <span class="n">stmt_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">enz_id</span><span class="p">,</span> <span class="n">enz_id</span><span class="p">,</span> <span class="n">stmt_type</span><span class="p">,</span> <span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_complex</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">m1</span><span class="p">,</span> <span class="n">m2</span> <span class="ow">in</span> <span class="n">itertools</span><span class="o">.</span><span class="n">combinations</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">members</span><span class="p">,</span> <span class="mi">2</span><span class="p">):</span>
+            <span class="n">m1_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">m1</span><span class="p">)</span>
+            <span class="n">m2_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">m2</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">m1_id</span><span class="p">,</span> <span class="n">m2_id</span><span class="p">,</span> <span class="s1">&#39;Complex&#39;</span><span class="p">,</span> <span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_regulation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">stmt</span><span class="o">.</span><span class="n">subj</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">subj_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">subj</span><span class="p">)</span>
+        <span class="n">obj_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">obj</span><span class="p">)</span>
+        <span class="n">stmt_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">subj_id</span><span class="p">,</span> <span class="n">obj_id</span><span class="p">,</span> <span class="n">stmt_type</span><span class="p">,</span> <span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_gef</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="n">gef_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">gef</span><span class="p">)</span>
+        <span class="n">ras_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">ras</span><span class="p">)</span>
+        <span class="n">stmt_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">gef_id</span><span class="p">,</span> <span class="n">ras_id</span><span class="p">,</span> <span class="n">stmt_type</span><span class="p">,</span> <span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_gap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="n">gap_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">gap</span><span class="p">)</span>
+        <span class="n">ras_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">ras</span><span class="p">)</span>
+        <span class="n">stmt_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">gap_id</span><span class="p">,</span> <span class="n">ras_id</span><span class="p">,</span> <span class="n">stmt_type</span><span class="p">,</span> <span class="n">stmt</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent</span><span class="p">):</span>
+        <span class="n">node_key</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">name</span>
+        <span class="n">node_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_existing_nodes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">node_key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">node_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">node_id</span>
+        <span class="n">node_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_existing_nodes</span><span class="p">[</span><span class="n">node_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">node_id</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;@id&#39;</span><span class="p">:</span> <span class="n">node_id</span><span class="p">,</span>
+                <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="n">agent</span><span class="o">.</span><span class="n">name</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;nodes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_node_metadata</span><span class="p">(</span><span class="n">node_id</span><span class="p">,</span> <span class="n">agent</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">node_id</span>
+
+    <span class="k">def</span> <span class="nf">_add_node_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node_id</span><span class="p">,</span> <span class="n">agent</span><span class="p">):</span>
+        <span class="n">agent_type</span> <span class="o">=</span> <span class="n">_get_agent_type</span><span class="p">(</span><span class="n">agent</span><span class="p">)</span>
+        <span class="n">node_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">node_id</span><span class="p">,</span>
+                          <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;type&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">agent_type</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;nodeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node_attribute</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">db_name</span><span class="p">,</span> <span class="n">db_ids</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">db_ids</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Missing db_id for </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">agent</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">db_ids</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+                <span class="n">db_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">db_ids</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">db_ids</span><span class="p">,</span> <span class="n">basestring</span><span class="p">):</span>
+                <span class="n">db_id</span> <span class="o">=</span> <span class="n">db_ids</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">db_id</span> <span class="o">=</span> <span class="n">db_ids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">url</span> <span class="o">=</span> <span class="n">get_identifiers_url</span><span class="p">(</span><span class="n">db_name</span><span class="p">,</span> <span class="n">db_id</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">url</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">db_name_map</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;UP&#39;</span><span class="p">:</span> <span class="s1">&#39;UniProt&#39;</span><span class="p">,</span> <span class="s1">&#39;PUBCHEM&#39;</span><span class="p">:</span> <span class="s1">&#39;PubChem&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;IP&#39;</span><span class="p">:</span> <span class="s1">&#39;InterPro&#39;</span><span class="p">,</span> <span class="s1">&#39;NXPFA&#39;</span><span class="p">:</span> <span class="s1">&#39;NextProtFamily&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;PF&#39;</span><span class="p">:</span> <span class="s1">&#39;Pfam&#39;</span><span class="p">,</span> <span class="s1">&#39;CHEBI&#39;</span><span class="p">:</span> <span class="s1">&#39;ChEBI&#39;</span><span class="p">}</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">db_name_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">db_name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span><span class="p">:</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">db_name</span>
+
+            <span class="n">node_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">node_id</span><span class="p">,</span>
+                              <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+                              <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">url</span><span class="p">}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;nodeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node_attribute</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">interaction</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="n">edge_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">interaction</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">edge_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_existing_edges</span><span class="p">[</span><span class="n">edge_key</span><span class="p">]</span>
+            <span class="k">return</span> <span class="n">edge_id</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="n">edge_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_existing_nodes</span><span class="p">[</span><span class="n">edge_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">edge_id</span>
+        <span class="n">edge</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;@id&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span>
+                <span class="s1">&#39;s&#39;</span><span class="p">:</span> <span class="n">source</span><span class="p">,</span>
+                <span class="s1">&#39;t&#39;</span><span class="p">:</span> <span class="n">target</span><span class="p">,</span>
+                <span class="s1">&#39;i&#39;</span><span class="p">:</span> <span class="n">interaction</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edges&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge_metadata</span><span class="p">(</span><span class="n">edge_id</span><span class="p">,</span> <span class="n">stmt</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">edge_id</span>
+
+    <span class="k">def</span> <span class="nf">_add_edge_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">edge_id</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="c1"># Add the string of the statement itself</span>
+        <span class="n">indra_stmt_str</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">stmt</span>
+        <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span>
+                          <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;INDRA statement&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">indra_stmt_str</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+
+        <span class="c1"># Add INDRA JSON</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_indra_json</span><span class="p">:</span>
+            <span class="n">indra_stmt_json</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">to_json</span><span class="p">())</span>
+            <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span>
+                              <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;INDRA json&#39;</span><span class="p">,</span>
+                              <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">indra_stmt_json</span><span class="p">}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+
+        <span class="c1"># Add the type of statement as the edge type</span>
+        <span class="n">stmt_type</span><span class="p">,</span> <span class="n">stmt_polarity</span> <span class="o">=</span> <span class="n">_get_stmt_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span>
+                          <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;type&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">stmt_type</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+        <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span>
+                          <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;polarity&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">stmt_polarity</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+
+        <span class="c1"># Add the citations for the edge</span>
+        <span class="n">pmids</span> <span class="o">=</span> <span class="p">[</span><span class="n">e</span><span class="o">.</span><span class="n">pmid</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span> <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">pmid</span><span class="p">]</span>
+        <span class="n">edge_citations</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">pmids_added</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">pmid</span> <span class="ow">in</span> <span class="n">pmids</span><span class="p">:</span>
+            <span class="n">pmid_txt</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="s1">&#39;[0-9]+&#39;</span><span class="p">,</span> <span class="n">pmid</span><span class="p">):</span>
+                <span class="n">pmid_txt</span> <span class="o">=</span> <span class="s1">&#39;pmid:&#39;</span> <span class="o">+</span> <span class="n">pmid</span>
+                <span class="k">if</span> <span class="n">pmid_txt</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">pmids_added</span><span class="p">:</span>
+                    <span class="n">citation_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()</span>
+                    <span class="n">citation</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;@id&#39;</span><span class="p">:</span> <span class="n">citation_id</span><span class="p">,</span>
+                                <span class="s1">&#39;dc:identifier&#39;</span><span class="p">:</span> <span class="n">pmid_txt</span><span class="p">}</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;citations&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">citation</span><span class="p">)</span>
+                    <span class="n">edge_citations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">citation_id</span><span class="p">)</span>
+                    <span class="n">pmids_added</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pmid_txt</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">edge_citations</span><span class="p">:</span>
+            <span class="n">edge_citation</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;citations&#39;</span><span class="p">:</span> <span class="n">edge_citations</span><span class="p">,</span>
+                             <span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">edge_id</span><span class="p">]}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeCitations&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_citation</span><span class="p">)</span>
+
+        <span class="c1"># Add the textual supports for the edge</span>
+        <span class="n">texts</span> <span class="o">=</span> <span class="p">[</span><span class="n">e</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span> <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">text</span><span class="p">]</span>
+        <span class="n">edge_supports</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">texts</span><span class="p">:</span>
+            <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;XREF_BIBR&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+            <span class="n">support_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()</span>
+            <span class="n">support</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;@id&#39;</span><span class="p">:</span> <span class="n">support_id</span><span class="p">,</span>
+                       <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">text</span><span class="p">}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;supports&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">support</span><span class="p">)</span>
+            <span class="n">edge_supports</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">support_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">edge_supports</span><span class="p">:</span>
+            <span class="n">edge_support</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;supports&#39;</span><span class="p">:</span> <span class="n">edge_supports</span><span class="p">,</span>
+                            <span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">edge_id</span><span class="p">]}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeSupports&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_support</span><span class="p">)</span>
+
+        <span class="n">belief_str</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">%.2f</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">stmt</span><span class="o">.</span><span class="n">belief</span>
+        <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span>
+                          <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;Belief score&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">belief_str</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+
+        <span class="c1"># NOTE: supports and edgeSupports are currently</span>
+        <span class="c1"># not shown on NDEx therefore we add text evidence as a generic</span>
+        <span class="c1"># edgeAttribute</span>
+        <span class="k">if</span> <span class="n">texts</span><span class="p">:</span>
+            <span class="n">text</span> <span class="o">=</span> <span class="n">texts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span>
+                              <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;Text&#39;</span><span class="p">,</span>
+                              <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">text</span><span class="p">}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+
+        <span class="c1"># Add the serialized JSON INDRA Statement</span>
+        <span class="n">stmt_dict</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="n">to_json</span><span class="p">()</span>
+        <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span> <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;indra&#39;</span><span class="p">,</span> <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">stmt_dict</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+
+        <span class="c1"># Add support type</span>
+        <span class="n">support_type</span> <span class="o">=</span> <span class="n">_get_support_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="n">edge_attribute</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;po&#39;</span><span class="p">:</span> <span class="n">edge_id</span><span class="p">,</span> <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="s1">&#39;supportType&#39;</span><span class="p">,</span> <span class="s1">&#39;v&#39;</span><span class="p">:</span> <span class="n">support_type</span><span class="p">}</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cx</span><span class="p">[</span><span class="s1">&#39;edgeAttributes&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_attribute</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_get_support_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">):</span>
+    <span class="n">dbs</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;bel&#39;</span><span class="p">,</span> <span class="s1">&#39;biopax&#39;</span><span class="p">,</span> <span class="s1">&#39;phosphosite&#39;</span><span class="p">,</span> <span class="s1">&#39;biogrid&#39;</span><span class="p">]</span>
+    <span class="n">readers</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;reach&#39;</span><span class="p">,</span> <span class="s1">&#39;trips&#39;</span><span class="p">,</span> <span class="s1">&#39;sparser&#39;</span><span class="p">,</span> <span class="s1">&#39;r3&#39;</span><span class="p">]</span>
+    <span class="n">has_db</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">has_reading</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">for</span> <span class="n">ev</span> <span class="ow">in</span> <span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ev</span><span class="o">.</span><span class="n">source_api</span> <span class="ow">in</span> <span class="n">dbs</span><span class="p">:</span>
+            <span class="n">has_db</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="n">ev</span><span class="o">.</span><span class="n">source_api</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">:</span>
+            <span class="n">has_reading</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">has_db</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">has_reading</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s1">&#39;database&#39;</span>
+    <span class="k">elif</span> <span class="n">has_db</span> <span class="ow">and</span> <span class="n">has_db</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s1">&#39;database and literature&#39;</span>
+    <span class="k">elif</span> <span class="ow">not</span> <span class="n">has_db</span> <span class="ow">and</span> <span class="n">has_reading</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s1">&#39;literature&#39;</span>
+
+<span class="k">def</span> <span class="nf">_get_stmt_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">AddModification</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Modification&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">RemoveModification</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Modification&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">SelfModification</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;SelfModification&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Complex</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Complex&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;none&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Activation</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Activation&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Inhibition</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Inhibition&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">DecreaseAmount</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;DecreaseAmount&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">IncreaseAmount</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;IncreaseAmount&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gef</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Gef&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gap</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Gap&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="fm">__str__</span><span class="p">()</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;none&#39;</span>
+    <span class="k">return</span> <span class="n">edge_type</span><span class="p">,</span> <span class="n">edge_polarity</span>
+
+<span class="k">def</span> <span class="nf">_get_agent_type</span><span class="p">(</span><span class="n">agent</span><span class="p">):</span>
+    <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;HGNC&#39;</span><span class="p">)</span>
+    <span class="n">uniprot_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;UP&#39;</span><span class="p">)</span>
+    <span class="n">pfam_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PF&#39;</span><span class="p">)</span>
+    <span class="n">fa_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;FA&#39;</span><span class="p">)</span>
+    <span class="n">chebi_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CHEBI&#39;</span><span class="p">)</span>
+    <span class="n">pubchem_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PUBCHEM&#39;</span><span class="p">)</span>
+    <span class="n">be_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;FPLX&#39;</span><span class="p">)</span>
+    <span class="n">go_id</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;GO&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">hgnc_id</span> <span class="ow">or</span> <span class="n">uniprot_id</span><span class="p">:</span>
+        <span class="n">agent_type</span> <span class="o">=</span> <span class="s1">&#39;protein&#39;</span>
+    <span class="k">elif</span> <span class="n">pfam_id</span> <span class="ow">or</span> <span class="n">fa_id</span> <span class="ow">or</span> <span class="n">be_id</span><span class="p">:</span>
+        <span class="n">agent_type</span> <span class="o">=</span> <span class="s1">&#39;proteinfamily&#39;</span>
+    <span class="k">elif</span> <span class="n">chebi_id</span> <span class="ow">or</span> <span class="n">pubchem_id</span><span class="p">:</span>
+        <span class="n">agent_type</span> <span class="o">=</span> <span class="s1">&#39;chemical&#39;</span>
+    <span class="k">elif</span> <span class="n">go_id</span><span class="p">:</span>
+        <span class="n">agent_type</span> <span class="o">=</span> <span class="s1">&#39;bioprocess&#39;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">agent_type</span> <span class="o">=</span> <span class="s1">&#39;other&#39;</span>
+    <span class="k">return</span> <span class="n">agent_type</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

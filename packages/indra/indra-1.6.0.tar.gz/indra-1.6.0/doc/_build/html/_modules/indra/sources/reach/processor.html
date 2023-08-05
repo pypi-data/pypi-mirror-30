@@ -1,0 +1,952 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.sources.reach.processor &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../../index.html"/>
+        <link rel="up" title="Module code" href="../../../index.html"/> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.sources.reach.processor</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.sources.reach.processor</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">objectpath</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">indra.util</span> <span class="k">import</span> <span class="n">read_unicode_csv</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">hgnc_client</span>
+<span class="kn">import</span> <span class="nn">indra.databases.uniprot_client</span> <span class="k">as</span> <span class="nn">up_client</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;reach&#39;</span><span class="p">)</span>
+
+
+
+<div class="viewcode-block" id="ReachProcessor"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor">[docs]</a><span class="k">class</span> <span class="nc">ReachProcessor</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The ReachProcessor extracts INDRA Statements from REACH parser output.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    json_dict : dict</span>
+<span class="sd">        A JSON dictionary containing the REACH extractions.</span>
+<span class="sd">    pmid : Optional[str]</span>
+<span class="sd">        The PubMed ID associated with the extractions. This can be passed</span>
+<span class="sd">        in case the PMID cannot be determined from the extractions alone.`</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    tree : objectpath.Tree</span>
+<span class="sd">        The objectpath Tree object representing the extractions.</span>
+<span class="sd">    statements : list[indra.statements.Statement]</span>
+<span class="sd">        A list of INDRA Statements that were extracted by the processor.</span>
+<span class="sd">    citation : str</span>
+<span class="sd">        The PubMed ID associated with the extractions.</span>
+<span class="sd">    all_events : dict[str, str]</span>
+<span class="sd">        The frame IDs of all events by type in the REACH extraction.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">json_dict</span><span class="p">,</span> <span class="n">pmid</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tree</span> <span class="o">=</span> <span class="n">objectpath</span><span class="o">.</span><span class="n">Tree</span><span class="p">(</span><span class="n">json_dict</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">citation</span> <span class="o">=</span> <span class="n">pmid</span>
+        <span class="k">if</span> <span class="n">pmid</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">citation</span> <span class="o">=</span>\
+                    <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;$.events.object_meta.doc_id&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_all_events</span><span class="p">()</span>
+
+<div class="viewcode-block" id="ReachProcessor.print_event_statistics"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor.print_event_statistics">[docs]</a>    <span class="k">def</span> <span class="nf">print_event_statistics</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Print the number of events in the REACH output by type.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;All events by type&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;-------------------&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_events</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%s</span><span class="s1">, </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)))</span></div>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;-------------------&#39;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ReachProcessor.get_all_events"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor.get_all_events">[docs]</a>    <span class="k">def</span> <span class="nf">get_all_events</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Gather all event IDs in the REACH output by type.</span>
+
+<span class="sd">        These IDs are stored in the self.all_events dict.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">all_events</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">events</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;$.events.frames&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">events</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span><span class="p">:</span>
+            <span class="n">event_type</span> <span class="o">=</span> <span class="n">e</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span>
+            <span class="n">frame_id</span> <span class="o">=</span> <span class="n">e</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;frame_id&#39;</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">all_events</span><span class="p">[</span><span class="n">event_type</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">frame_id</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span></div>
+                <span class="bp">self</span><span class="o">.</span><span class="n">all_events</span><span class="p">[</span><span class="n">event_type</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">frame_id</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">print_regulations</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[(@.type is &#39;regulation&#39;)]&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;subtype&#39;</span><span class="p">])</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">],</span> <span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">a</span><span class="p">[</span><span class="s1">&#39;argument-type&#39;</span><span class="p">],</span> <span class="s1">&#39;:&#39;</span><span class="p">,</span> <span class="n">a</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">])</span>
+
+<div class="viewcode-block" id="ReachProcessor.get_modifications"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor.get_modifications">[docs]</a>    <span class="k">def</span> <span class="nf">get_modifications</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract Modification INDRA Statements.&quot;&quot;&quot;</span>
+        <span class="c1"># Find all event frames that are a type of protein modification</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[(@.type is &#39;protein-modification&#39;)]&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="c1"># Extract each of the results when possible</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">:</span>
+            <span class="c1"># The subtype of the modification</span>
+            <span class="n">modification_type</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;subtype&#39;</span><span class="p">)</span>
+
+            <span class="c1"># Skip negated events (i.e. something doesn&#39;t happen)</span>
+            <span class="n">epistemics</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_epistemics</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">epistemics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;negative&#39;</span><span class="p">):</span>
+                <span class="k">continue</span>
+
+            <span class="n">context</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_context</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="n">frame_id</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;frame_id&#39;</span><span class="p">]</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]</span>
+            <span class="n">site</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">theme</span> <span class="o">=</span> <span class="kc">None</span>
+
+            <span class="c1"># Find the substrate (the &quot;theme&quot; agent here) and the</span>
+            <span class="c1"># site and position it is modified on</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;theme&#39;</span><span class="p">:</span>
+                    <span class="n">theme</span> <span class="o">=</span> <span class="n">a</span><span class="p">[</span><span class="s1">&#39;arg&#39;</span><span class="p">]</span>
+                <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;site&#39;</span><span class="p">:</span>
+                    <span class="n">site</span> <span class="o">=</span> <span class="n">a</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]</span>
+            <span class="n">theme_agent</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">theme</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">site</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">residue</span><span class="p">,</span> <span class="n">pos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_site_text</span><span class="p">(</span><span class="n">site</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">residue</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="n">pos</span> <span class="o">=</span> <span class="kc">None</span>
+
+            <span class="c1"># Now we need to look for all regulation event to get to the</span>
+            <span class="c1"># enzymes (the &quot;controller&quot; here)</span>
+            <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[(@.type is &#39;regulation&#39;) and &quot;</span> <span class="o">+</span> \
+                   <span class="s2">&quot;(@.arguments[0].arg is &#39;</span><span class="si">%s</span><span class="s2">&#39;)]&quot;</span> <span class="o">%</span> <span class="n">frame_id</span>
+            <span class="n">reg_res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+            <span class="n">reg_res</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">reg_res</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">reg</span> <span class="ow">in</span> <span class="n">reg_res</span><span class="p">:</span>
+                <span class="n">controller_agent</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">reg</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;controller&#39;</span><span class="p">:</span>
+                        <span class="n">controller</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;arg&#39;</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">controller</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                            <span class="n">controller_agent</span> <span class="o">=</span> \
+                                <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">controller</span><span class="p">)</span>
+                            <span class="k">break</span>
+                <span class="c1"># Check the polarity of the regulation and if negative,</span>
+                <span class="c1"># flip the modification type.</span>
+                <span class="c1"># For instance, negative-regulation of a phosphorylation</span>
+                <span class="c1"># will become an (indirect) dephosphorylation</span>
+                <span class="n">reg_subtype</span> <span class="o">=</span> <span class="n">reg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;subtype&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">reg_subtype</span> <span class="o">==</span> <span class="s1">&#39;negative-regulation&#39;</span><span class="p">:</span>
+                    <span class="n">modification_type</span> <span class="o">=</span> \
+                        <span class="n">modtype_to_inverse</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">modification_type</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">modification_type</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled modification type: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span>
+                                       <span class="n">modification_type</span><span class="p">)</span>
+                        <span class="k">continue</span>
+
+                <span class="n">sentence</span> <span class="o">=</span> <span class="n">reg</span><span class="p">[</span><span class="s1">&#39;verbose-text&#39;</span><span class="p">]</span>
+                <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;reach&#39;</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">sentence</span><span class="p">,</span>
+                              <span class="n">annotations</span><span class="o">=</span><span class="n">context</span><span class="p">,</span> <span class="n">pmid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">citation</span><span class="p">,</span>
+                              <span class="n">epistemics</span><span class="o">=</span><span class="n">epistemics</span><span class="p">)</span>
+                <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="n">controller_agent</span><span class="p">,</span> <span class="n">theme_agent</span><span class="p">,</span> <span class="n">residue</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">ev</span><span class="p">]</span>
+
+                <span class="c1"># Here ModStmt is a sub-class of Modification</span>
+                <span class="n">ModStmt</span> <span class="o">=</span> <span class="n">modtype_to_modclass</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">modification_type</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">ModStmt</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled modification type: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span>
+                                   <span class="n">modification_type</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># Handle this special case here because only</span>
+                    <span class="c1"># enzyme argument is needed</span>
+                    <span class="k">if</span> <span class="n">modification_type</span> <span class="o">==</span> <span class="s1">&#39;autophosphorylation&#39;</span><span class="p">:</span>
+                        <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="n">theme_agent</span><span class="p">,</span> <span class="n">residue</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">ev</span><span class="p">]</span></div>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ModStmt</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">))</span>
+
+<div class="viewcode-block" id="ReachProcessor.get_regulate_amounts"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor.get_regulate_amounts">[docs]</a>    <span class="k">def</span> <span class="nf">get_regulate_amounts</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract RegulateAmount INDRA Statements.&quot;&quot;&quot;</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[(@.type is &#39;transcription&#39;)]&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="n">all_res</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">all_res</span> <span class="o">+=</span> <span class="nb">list</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[(@.type is &#39;amount&#39;)]&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">all_res</span> <span class="o">+=</span> <span class="nb">list</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">all_res</span><span class="p">:</span>
+            <span class="n">subtype</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;subtype&#39;</span><span class="p">)</span>
+            <span class="n">epistemics</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_epistemics</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">epistemics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;negative&#39;</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">context</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_context</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="n">frame_id</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;frame_id&#39;</span><span class="p">]</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]</span>
+            <span class="n">theme</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;theme&#39;</span><span class="p">:</span>
+                    <span class="n">theme</span> <span class="o">=</span> <span class="n">a</span><span class="p">[</span><span class="s1">&#39;arg&#39;</span><span class="p">]</span>
+                    <span class="k">break</span>
+            <span class="k">if</span> <span class="n">theme</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">theme_agent</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">theme</span><span class="p">)</span>
+            <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[(@.type is &#39;regulation&#39;) and &quot;</span> <span class="o">+</span> \
+                   <span class="s2">&quot;(@.arguments[0].arg is &#39;</span><span class="si">%s</span><span class="s2">&#39;)]&quot;</span> <span class="o">%</span> <span class="n">frame_id</span>
+            <span class="n">reg_res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">reg</span> <span class="ow">in</span> <span class="n">reg_res</span><span class="p">:</span>
+                <span class="n">controller_agent</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">reg</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;controller&#39;</span><span class="p">:</span>
+                        <span class="n">controller</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;arg&#39;</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">controller</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                            <span class="n">controller_agent</span> <span class="o">=</span> \
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">controller</span><span class="p">)</span>
+                            <span class="k">break</span>
+                <span class="n">sentence</span> <span class="o">=</span> <span class="n">reg</span><span class="p">[</span><span class="s1">&#39;verbose-text&#39;</span><span class="p">]</span>
+
+                <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;reach&#39;</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">sentence</span><span class="p">,</span>
+                              <span class="n">annotations</span><span class="o">=</span><span class="n">context</span><span class="p">,</span> <span class="n">pmid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">citation</span><span class="p">,</span>
+                              <span class="n">epistemics</span><span class="o">=</span><span class="n">epistemics</span><span class="p">)</span>
+                <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="n">controller_agent</span><span class="p">,</span> <span class="n">theme_agent</span><span class="p">,</span> <span class="n">ev</span><span class="p">]</span>
+                <span class="n">subtype</span> <span class="o">=</span> <span class="n">reg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;subtype&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">subtype</span> <span class="o">==</span> <span class="s1">&#39;positive-regulation&#39;</span><span class="p">:</span>
+                    <span class="n">st</span> <span class="o">=</span> <span class="n">IncreaseAmount</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">st</span> <span class="o">=</span> <span class="n">DecreaseAmount</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span></div>
+                <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">st</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="ReachProcessor.get_complexes"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor.get_complexes">[docs]</a>    <span class="k">def</span> <span class="nf">get_complexes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract INDRA Complex Statements.&quot;&quot;&quot;</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[@.type is &#39;complex-assembly&#39;]&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">:</span>
+            <span class="n">epistemics</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_epistemics</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">epistemics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;negative&#39;</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">context</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_context</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]</span>
+            <span class="n">sentence</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;verbose-text&#39;</span><span class="p">]</span>
+            <span class="n">members</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+                <span class="n">agent</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="s1">&#39;arg&#39;</span><span class="p">])</span>
+                <span class="n">members</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">agent</span><span class="p">)</span>
+            <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;reach&#39;</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">sentence</span><span class="p">,</span>
+                          <span class="n">annotations</span><span class="o">=</span><span class="n">context</span><span class="p">,</span> <span class="n">pmid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">citation</span><span class="p">,</span>
+                          <span class="n">epistemics</span><span class="o">=</span><span class="n">epistemics</span><span class="p">)</span></div>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Complex</span><span class="p">(</span><span class="n">members</span><span class="p">,</span> <span class="n">ev</span><span class="p">))</span>
+
+<div class="viewcode-block" id="ReachProcessor.get_activation"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor.get_activation">[docs]</a>    <span class="k">def</span> <span class="nf">get_activation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract INDRA Activation Statements.&quot;&quot;&quot;</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[@.type is &#39;activation&#39;]&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">:</span>
+            <span class="n">epistemics</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_epistemics</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">epistemics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;negative&#39;</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">sentence</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;verbose-text&#39;</span><span class="p">]</span>
+            <span class="n">context</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_context</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;reach&#39;</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">sentence</span><span class="p">,</span>
+                          <span class="n">pmid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">citation</span><span class="p">,</span> <span class="n">annotations</span><span class="o">=</span><span class="n">context</span><span class="p">,</span>
+                          <span class="n">epistemics</span><span class="o">=</span><span class="n">epistemics</span><span class="p">)</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;controller&#39;</span><span class="p">:</span>
+                    <span class="n">controller</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;arg&#39;</span><span class="p">)</span>
+                    <span class="c1"># When the controller is not a simple entity</span>
+                    <span class="k">if</span> <span class="n">controller</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">a</span><span class="p">[</span><span class="s1">&#39;argument-type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;complex&#39;</span><span class="p">:</span>
+                            <span class="n">controllers</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;args&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+                            <span class="n">controller_agent</span> <span class="o">=</span>\
+                                <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">controllers</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                            <span class="n">bound_agents</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> 
+                                            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">controllers</span><span class="p">[</span><span class="mi">1</span><span class="p">:]]</span>
+                            <span class="n">bound_conditions</span> <span class="o">=</span> <span class="p">[</span><span class="n">BoundCondition</span><span class="p">(</span><span class="n">ba</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span> <span class="k">for</span>
+                                                <span class="n">ba</span> <span class="ow">in</span> <span class="n">bound_agents</span><span class="p">]</span>
+                            <span class="n">controller_agent</span><span class="o">.</span><span class="n">bound_conditions</span> <span class="o">=</span> \
+                                    <span class="n">bound_conditions</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">controller_agent</span> <span class="o">=</span>\
+                            <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">controller</span><span class="p">)</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;controlled&#39;</span><span class="p">:</span>
+                    <span class="n">controlled</span> <span class="o">=</span> <span class="n">a</span><span class="p">[</span><span class="s1">&#39;arg&#39;</span><span class="p">]</span>
+            <span class="n">controlled_agent</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">controlled</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;subtype&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;positive-activation&#39;</span><span class="p">:</span>
+                <span class="n">st</span> <span class="o">=</span> <span class="n">Activation</span><span class="p">(</span><span class="n">controller_agent</span><span class="p">,</span> <span class="n">controlled_agent</span><span class="p">,</span>
+                                <span class="n">evidence</span><span class="o">=</span><span class="n">ev</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">st</span> <span class="o">=</span> <span class="n">Inhibition</span><span class="p">(</span><span class="n">controller_agent</span><span class="p">,</span> <span class="n">controlled_agent</span><span class="p">,</span>
+                                <span class="n">evidence</span><span class="o">=</span><span class="n">ev</span><span class="p">)</span></div>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">st</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ReachProcessor.get_translocation"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.ReachProcessor.get_translocation">[docs]</a>    <span class="k">def</span> <span class="nf">get_translocation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract INDRA Translocation Statements.&quot;&quot;&quot;</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.events.frames[@.type is &#39;translocation&#39;]&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">:</span>
+            <span class="n">epistemics</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_epistemics</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">epistemics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;negative&#39;</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">sentence</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;verbose-text&#39;</span><span class="p">]</span>
+            <span class="n">context</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_context</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;reach&#39;</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">sentence</span><span class="p">,</span>
+                          <span class="n">pmid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">citation</span><span class="p">,</span> <span class="n">annotations</span><span class="o">=</span><span class="n">context</span><span class="p">,</span>
+                          <span class="n">epistemics</span><span class="o">=</span><span class="n">epistemics</span><span class="p">)</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;arguments&#39;</span><span class="p">]</span>
+            <span class="n">from_location</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">to_location</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;theme&#39;</span><span class="p">:</span>
+                    <span class="n">agent</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_agent_from_entity</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="s1">&#39;arg&#39;</span><span class="p">])</span>
+                    <span class="k">if</span> <span class="n">agent</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="k">continue</span>
+                <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;source&#39;</span><span class="p">:</span>
+                    <span class="n">from_location</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_location_by_id</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="s1">&#39;arg&#39;</span><span class="p">])</span>
+                <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_arg_type</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;destination&#39;</span><span class="p">:</span>
+                    <span class="n">to_location</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_location_by_id</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="s1">&#39;arg&#39;</span><span class="p">])</span>
+            <span class="n">st</span> <span class="o">=</span> <span class="n">Translocation</span><span class="p">(</span><span class="n">agent</span><span class="p">,</span> <span class="n">from_location</span><span class="p">,</span> <span class="n">to_location</span><span class="p">,</span>
+                               <span class="n">evidence</span><span class="o">=</span><span class="n">ev</span><span class="p">)</span></div>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">st</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_location_by_id</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loc_id</span><span class="p">):</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.entities.frames[(@.frame_id is </span><span class="se">\&#39;</span><span class="si">%s</span><span class="se">\&#39;</span><span class="s2">)]&quot;</span> <span class="o">%</span> <span class="n">loc_id</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">entity_term</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39; </span><span class="si">%s</span><span class="s1"> is not an entity&#39;</span> <span class="o">%</span> <span class="n">loc_id</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">entity_term</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span>
+        <span class="n">go_id</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">xr</span> <span class="ow">in</span> <span class="n">entity_term</span><span class="p">[</span><span class="s1">&#39;xrefs&#39;</span><span class="p">]:</span>
+            <span class="n">ns</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;namespace&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;go&#39;</span><span class="p">:</span>
+                <span class="n">go_id</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+        <span class="c1"># Try to get valid location based on GO id</span>
+        <span class="k">if</span> <span class="n">go_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">loc</span> <span class="o">=</span> <span class="n">get_valid_location</span><span class="p">(</span><span class="n">go_id</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">loc</span>
+            <span class="k">except</span> <span class="n">InvalidLocationError</span><span class="p">:</span>
+                <span class="k">pass</span>
+        <span class="c1"># See if the raw name is a valid cellular component</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">loc</span> <span class="o">=</span> <span class="n">get_valid_location</span><span class="p">(</span><span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">())</span>
+            <span class="k">return</span> <span class="n">loc</span>
+        <span class="k">except</span> <span class="n">InvalidLocationError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">_get_agent_from_entity</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity_id</span><span class="p">):</span>
+        <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.entities.frames[(@.frame_id is </span><span class="se">\&#39;</span><span class="si">%s</span><span class="se">\&#39;</span><span class="s2">)]&quot;</span> <span class="o">%</span> <span class="n">entity_id</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">entity_term</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39; </span><span class="si">%s</span><span class="s1"> is not an entity&#39;</span> <span class="o">%</span> <span class="n">entity_id</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="c1"># This is the default name, which can be overwritten </span>
+        <span class="c1"># below for specific database entries</span>
+        <span class="n">agent_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_valid_name</span><span class="p">(</span><span class="n">entity_term</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">])</span>
+        <span class="n">db_refs</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">xr</span> <span class="ow">in</span> <span class="n">entity_term</span><span class="p">[</span><span class="s1">&#39;xrefs&#39;</span><span class="p">]:</span>
+            <span class="n">ns</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;namespace&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;uniprot&#39;</span><span class="p">:</span>
+                <span class="n">up_id</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;UP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">up_id</span>
+                <span class="c1"># Look up official names in UniProt</span>
+                <span class="n">gene_name</span> <span class="o">=</span> <span class="n">up_client</span><span class="o">.</span><span class="n">get_gene_name</span><span class="p">(</span><span class="n">up_id</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">gene_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">agent_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_valid_name</span><span class="p">(</span><span class="n">gene_name</span><span class="p">)</span>
+                    <span class="c1"># If the gene name corresponds to an HGNC ID, add it to the</span>
+                    <span class="c1"># db_refs</span>
+                    <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_id</span><span class="p">(</span><span class="n">gene_name</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">hgnc_id</span><span class="p">:</span>
+                        <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;HGNC&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hgnc_id</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;hgnc&#39;</span><span class="p">:</span>
+                <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;HGNC&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hgnc_id</span>
+                <span class="c1"># Look up the standard gene symbol and set as name</span>
+                <span class="n">hgnc_name</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_name</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">hgnc_name</span><span class="p">:</span>
+                    <span class="n">agent_name</span> <span class="o">=</span> <span class="n">hgnc_name</span>
+                <span class="c1"># Look up the corresponding uniprot id</span>
+                <span class="n">up_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_uniprot_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">up_id</span><span class="p">:</span>
+                    <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;UP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">up_id</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;pfam&#39;</span><span class="p">:</span>
+                <span class="n">be_id</span> <span class="o">=</span> <span class="n">famplex_map</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="s1">&#39;PF&#39;</span><span class="p">,</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]))</span>
+                <span class="k">if</span> <span class="n">be_id</span><span class="p">:</span>
+                    <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;FPLX&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">be_id</span>
+                    <span class="n">agent_name</span> <span class="o">=</span> <span class="n">be_id</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;PF&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;interpro&#39;</span><span class="p">:</span>
+                <span class="n">be_id</span> <span class="o">=</span> <span class="n">famplex_map</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="s1">&#39;IP&#39;</span><span class="p">,</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]))</span>
+                <span class="k">if</span> <span class="n">be_id</span><span class="p">:</span>
+                    <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;FPLX&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">be_id</span>
+                    <span class="n">agent_name</span> <span class="o">=</span> <span class="n">be_id</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;IP&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;chebi&#39;</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;CHEBI&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;pubchem&#39;</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;PUBCHEM&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;go&#39;</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;GO&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;mesh&#39;</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;MESH&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;hmdb&#39;</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;HMDB&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;simple_chemical&#39;</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;HMDB&#39;</span><span class="p">):</span>
+                    <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;HMDB&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="o">==</span> <span class="s1">&#39;be&#39;</span><span class="p">:</span>
+                <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;FPLX&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+                <span class="n">agent_name</span> <span class="o">=</span> <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;FPLX&#39;</span><span class="p">]</span>
+            <span class="c1"># These name spaces are ignored</span>
+            <span class="k">elif</span> <span class="n">ns</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;uaz&#39;</span><span class="p">]:</span>
+                <span class="k">pass</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled xref namespace: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">ns</span><span class="p">)</span>
+        <span class="n">db_refs</span><span class="p">[</span><span class="s1">&#39;TEXT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">entity_term</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]</span>
+
+        <span class="n">mod_terms</span> <span class="o">=</span> <span class="n">entity_term</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;modifications&#39;</span><span class="p">)</span>
+        <span class="n">mods</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">muts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">mod_terms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">mod_terms</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">m</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;mutation&#39;</span><span class="p">:</span>
+                    <span class="c1"># Evidence is usualy something like &quot;V600E&quot;</span>
+                    <span class="c1"># We could parse this to get the amino acid</span>
+                    <span class="c1"># change that happened.</span>
+                    <span class="n">mutation_str</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;evidence&#39;</span><span class="p">)</span>
+                    <span class="c1"># TODO: sometimes mutation_str is &quot;mutant&quot;, &quot;Mutant&quot;,</span>
+                    <span class="c1"># &quot;mutants&quot; - this indicates that there is a mutation</span>
+                    <span class="c1"># but not the specific type. We should encode this</span>
+                    <span class="c1"># somehow as a &quot;blank&quot; mutation condition</span>
+                    <span class="n">mut</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_mutation</span><span class="p">(</span><span class="n">mutation_str</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">mut</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">muts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mut</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">mc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_mod_condition</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">mc</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">mods</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mc</span><span class="p">)</span>
+
+        <span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">agent_name</span><span class="p">,</span> <span class="n">db_refs</span><span class="o">=</span><span class="n">db_refs</span><span class="p">,</span> <span class="n">mods</span><span class="o">=</span><span class="n">mods</span><span class="p">,</span> <span class="n">mutations</span><span class="o">=</span><span class="n">muts</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">agent</span>
+
+    <span class="k">def</span> <span class="nf">_get_mod_condition</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mod_term</span><span class="p">):</span>
+        <span class="n">site</span> <span class="o">=</span> <span class="n">mod_term</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;site&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">site</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">mod_res</span><span class="p">,</span> <span class="n">mod_pos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_site_text</span><span class="p">(</span><span class="n">site</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">mod_res</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">mod_pos</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">mod_type_str</span> <span class="o">=</span> <span class="n">mod_term</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="n">mod_state</span> <span class="o">=</span> <span class="n">agent_mod_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">mod_type_str</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">mod_state</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">mc</span> <span class="o">=</span> <span class="n">ModCondition</span><span class="p">(</span><span class="n">mod_state</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">residue</span><span class="o">=</span><span class="n">mod_res</span><span class="p">,</span> <span class="n">position</span><span class="o">=</span><span class="n">mod_pos</span><span class="p">,</span>
+                              <span class="n">is_modified</span><span class="o">=</span><span class="n">mod_state</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="k">return</span> <span class="n">mc</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled entity modification type: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">mod_type_str</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">_get_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame_term</span><span class="p">):</span>
+        <span class="n">context</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">context</span><span class="p">[</span><span class="s1">&#39;found_by&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">frame_term</span><span class="p">[</span><span class="s1">&#39;found_by&#39;</span><span class="p">]</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">context_id</span> <span class="o">=</span> <span class="n">frame_term</span><span class="p">[</span><span class="s1">&#39;context&#39;</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">context</span>
+        <span class="c1"># For backwards compatibility with older versions</span>
+        <span class="c1"># of REACH</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">context_id</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="n">context_term</span> <span class="o">=</span> <span class="n">context_id</span>
+            <span class="n">species</span> <span class="o">=</span> <span class="n">context_term</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;Species&#39;</span><span class="p">)</span>
+            <span class="n">cell_type</span> <span class="o">=</span> <span class="n">context_term</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CellType&#39;</span><span class="p">)</span>
+            <span class="n">cell_line</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">location</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">tissue</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">organ</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.entities.frames[(@.frame_id is </span><span class="se">\&#39;</span><span class="si">%s</span><span class="se">\&#39;</span><span class="s2">)]&quot;</span> <span class="o">%</span> <span class="n">context_id</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">context</span>
+            <span class="n">context_frame</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+            <span class="n">facets</span> <span class="o">=</span> <span class="n">context_frame</span><span class="p">[</span><span class="s1">&#39;facets&#39;</span><span class="p">]</span>
+            <span class="n">cell_line</span> <span class="o">=</span> <span class="n">facets</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cell-line&#39;</span><span class="p">)</span>
+            <span class="n">cell_type</span> <span class="o">=</span> <span class="n">facets</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cell-type&#39;</span><span class="p">)</span>
+            <span class="n">species</span> <span class="o">=</span> <span class="n">facets</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;organism&#39;</span><span class="p">)</span>
+            <span class="n">location</span> <span class="o">=</span> <span class="n">facets</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;location&#39;</span><span class="p">)</span>
+            <span class="n">tissue</span> <span class="o">=</span> <span class="n">facets</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tissue_type&#39;</span><span class="p">)</span>
+            <span class="n">organ</span> <span class="o">=</span> <span class="n">facets</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;organ&#39;</span><span class="p">)</span>
+        <span class="n">context</span><span class="p">[</span><span class="s1">&#39;species&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">species</span>
+        <span class="n">context</span><span class="p">[</span><span class="s1">&#39;cell_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cell_type</span>
+        <span class="n">context</span><span class="p">[</span><span class="s1">&#39;cell_line&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cell_line</span>
+        <span class="n">context</span><span class="p">[</span><span class="s1">&#39;location&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">location</span>
+        <span class="n">context</span><span class="p">[</span><span class="s1">&#39;tissue&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tissue</span>
+        <span class="n">context</span><span class="p">[</span><span class="s1">&#39;organ&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">organ</span>
+        <span class="k">return</span> <span class="n">context</span>
+
+    <span class="k">def</span> <span class="nf">_get_epistemics</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="n">epistemics</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="c1"># Check whether information is negative</span>
+        <span class="n">neg</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;is_negated&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">neg</span> <span class="ow">is</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">epistemics</span><span class="p">[</span><span class="s1">&#39;negative&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="c1"># Check if it is a hypothesis</span>
+        <span class="n">hyp</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;is_hypothesis&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">hyp</span> <span class="ow">is</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">epistemics</span><span class="p">[</span><span class="s1">&#39;hypothesis&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="c1"># Check if it is direct</span>
+        <span class="k">if</span> <span class="s1">&#39;is_direct&#39;</span> <span class="ow">in</span> <span class="n">event</span><span class="p">:</span>
+            <span class="n">direct</span> <span class="o">=</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;is_direct&#39;</span><span class="p">]</span>
+            <span class="n">epistemics</span><span class="p">[</span><span class="s1">&#39;direct&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">direct</span>
+        <span class="c1"># Get the section of the paper it comes from</span>
+        <span class="n">section</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_section</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+        <span class="n">epistemics</span><span class="p">[</span><span class="s1">&#39;section_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">section</span>
+        <span class="k">return</span> <span class="n">epistemics</span>
+
+    <span class="n">_section_list</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">,</span> <span class="s1">&#39;abstract&#39;</span><span class="p">,</span> <span class="s1">&#39;introduction&#39;</span><span class="p">,</span> <span class="s1">&#39;background&#39;</span><span class="p">,</span>
+                     <span class="s1">&#39;results&#39;</span><span class="p">,</span> <span class="s1">&#39;methods&#39;</span><span class="p">,</span> <span class="s1">&#39;discussion&#39;</span><span class="p">,</span> <span class="s1">&#39;conclusion&#39;</span><span class="p">,</span>
+                     <span class="s1">&#39;supplementary&#39;</span><span class="p">,</span> <span class="s1">&#39;figure&#39;</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">_get_section</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the section of the paper that the event is from.&quot;&quot;&quot;</span>
+        <span class="n">sentence_id</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;sentence&#39;</span><span class="p">)</span>
+        <span class="n">section</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">sentence_id</span><span class="p">:</span>
+            <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.sentences.frames[(@.frame_id is </span><span class="se">\&#39;</span><span class="si">%s</span><span class="se">\&#39;</span><span class="s2">)]&quot;</span> <span class="o">%</span> <span class="n">sentence_id</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">res</span><span class="p">:</span>
+                <span class="n">sentence_frame</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">res</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">passage_id</span> <span class="o">=</span> <span class="n">sentence_frame</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;passage&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">passage_id</span><span class="p">:</span>
+                    <span class="n">qstr</span> <span class="o">=</span> <span class="s2">&quot;$.sentences.frames[(@.frame_id is </span><span class="se">\&#39;</span><span class="si">%s</span><span class="se">\&#39;</span><span class="s2">)]&quot;</span> <span class="o">%</span> \
+                            <span class="n">passage_id</span>
+                    <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">qstr</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">res</span><span class="p">:</span>
+                        <span class="n">passage_frame</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">res</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                        <span class="n">section</span> <span class="o">=</span> <span class="n">passage_frame</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;section-id&#39;</span><span class="p">)</span>
+        <span class="c1"># If the section is in the standard list, return as is</span>
+        <span class="k">if</span> <span class="n">section</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_section_list</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">section</span>
+        <span class="c1"># Next, handle a few special cases that come up in practice</span>
+        <span class="k">elif</span> <span class="n">section</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;fig&#39;</span><span class="p">):</span>
+            <span class="k">return</span> <span class="s1">&#39;figure&#39;</span>
+        <span class="k">elif</span> <span class="n">section</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;supm&#39;</span><span class="p">):</span>
+            <span class="k">return</span> <span class="s1">&#39;supplementary&#39;</span>
+        <span class="k">elif</span> <span class="n">section</span> <span class="o">==</span> <span class="s1">&#39;article-title&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s1">&#39;title&#39;</span>
+        <span class="k">elif</span> <span class="n">section</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;subjects|methods&#39;</span><span class="p">,</span> <span class="s1">&#39;methods|subjects&#39;</span><span class="p">]:</span>
+            <span class="k">return</span> <span class="s1">&#39;methods&#39;</span>
+        <span class="k">elif</span> <span class="n">section</span> <span class="o">==</span> <span class="s1">&#39;conclusions&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s1">&#39;conclusion&#39;</span>
+        <span class="k">elif</span> <span class="n">section</span> <span class="o">==</span> <span class="s1">&#39;intro&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s1">&#39;introduction&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_get_arg_type</span><span class="p">(</span><span class="n">arg</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the type of the argument with backwards compatibility.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">arg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;argument_label&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">arg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;argument_label&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">arg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_get_valid_name</span><span class="p">(</span><span class="n">txt</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Produce valid agent name from string.&quot;&quot;&quot;</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ch</span> <span class="k">if</span> <span class="n">ch</span><span class="o">.</span><span class="n">isalnum</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;_&#39;</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">txt</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">and</span> <span class="n">name</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">isdigit</span><span class="p">():</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="s1">&#39;p&#39;</span> <span class="o">+</span> <span class="n">name</span>
+        <span class="k">return</span> <span class="n">name</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_parse_mutation</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;([A-Z])([0-9]+)([A-Z])&#39;</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">g</span><span class="p">)</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()]</span>
+            <span class="n">residue_from</span> <span class="o">=</span> <span class="n">get_valid_residue</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">residue_to</span> <span class="o">=</span> <span class="n">get_valid_residue</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+            <span class="n">position</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">mut</span> <span class="o">=</span> <span class="n">MutCondition</span><span class="p">(</span><span class="n">position</span><span class="p">,</span> <span class="n">residue_from</span><span class="p">,</span> <span class="n">residue_to</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">mut</span>
+        <span class="k">elif</span> <span class="n">s</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;mutation&#39;</span><span class="p">,</span> <span class="s1">&#39;mutations&#39;</span><span class="p">,</span> <span class="s1">&#39;mutant&#39;</span><span class="p">,</span> <span class="s1">&#39;mutants&#39;</span><span class="p">,</span>
+                           <span class="s1">&#39;mutational&#39;</span><span class="p">):</span>
+            <span class="n">mut</span> <span class="o">=</span> <span class="n">MutCondition</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">mut</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled mutation string: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">s</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_parse_site_text</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="p">(</span><span class="n">_site_pattern1</span><span class="p">,</span> <span class="n">_site_pattern2</span><span class="p">,</span> <span class="n">_site_pattern3</span><span class="p">):</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>
+            <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">residue</span> <span class="o">=</span> <span class="n">get_valid_residue</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="n">site</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span>
+                <span class="k">return</span> <span class="n">residue</span><span class="p">,</span> <span class="n">site</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">_site_pattern4</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">site</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">residue</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="k">return</span> <span class="n">residue</span><span class="p">,</span> <span class="n">site</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="p">(</span><span class="n">_site_pattern5</span><span class="p">,</span> <span class="n">_site_pattern6</span><span class="p">,</span> <span class="n">_site_pattern7</span><span class="p">):</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>
+            <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">residue</span> <span class="o">=</span> <span class="n">get_valid_residue</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="n">site</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="k">return</span> <span class="n">residue</span><span class="p">,</span> <span class="n">site</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">_site_pattern8</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">site</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">groups</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">residue</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="n">residue</span><span class="p">,</span> <span class="n">site</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Could not parse site text </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">s</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+
+<span class="n">_site_pattern1</span> <span class="o">=</span> <span class="s1">&#39;([&#39;</span> <span class="o">+</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">amino_acids</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span> <span class="o">+</span> <span class="s1">&#39;])[-]?([0-9]+)$&#39;</span>
+<span class="n">_site_pattern2</span> <span class="o">=</span> <span class="s1">&#39;(&#39;</span> <span class="o">+</span> <span class="s1">&#39;|&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;short_name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span> <span class="k">for</span>
+                                 <span class="n">v</span> <span class="ow">in</span> <span class="n">amino_acids</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span> <span class="o">+</span> \
+                        <span class="s1">&#39;)[- ]?([0-9]+)$&#39;</span>
+<span class="n">_site_pattern3</span> <span class="o">=</span> <span class="s1">&#39;(&#39;</span> <span class="o">+</span> <span class="s1">&#39;|&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;indra_name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span> <span class="k">for</span>
+                                 <span class="n">v</span> <span class="ow">in</span> <span class="n">amino_acids</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span> <span class="o">+</span> \
+                        <span class="s1">&#39;)[^0-9]*([0-9]+)$&#39;</span>
+<span class="n">_site_pattern4</span> <span class="o">=</span> <span class="s1">&#39;([0-9]+)[ ]?([&#39;</span> <span class="o">+</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">amino_acids</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span> <span class="o">+</span> <span class="s1">&#39;])$&#39;</span>
+<span class="n">_site_pattern5</span> <span class="o">=</span> <span class="s1">&#39;^([&#39;</span> <span class="o">+</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">amino_acids</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span> <span class="o">+</span> <span class="s1">&#39;])$&#39;</span>
+<span class="n">_site_pattern6</span> <span class="o">=</span> <span class="s1">&#39;^(&#39;</span> <span class="o">+</span> <span class="s1">&#39;|&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;short_name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span> <span class="k">for</span>
+                                 <span class="n">v</span> <span class="ow">in</span> <span class="n">amino_acids</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span> <span class="o">+</span> <span class="s1">&#39;)$&#39;</span>
+<span class="n">_site_pattern7</span> <span class="o">=</span> <span class="s1">&#39;.*(&#39;</span> <span class="o">+</span> <span class="s1">&#39;|&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;indra_name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span> <span class="k">for</span>
+                                 <span class="n">v</span> <span class="ow">in</span> <span class="n">amino_acids</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span> <span class="o">+</span> <span class="s1">&#39;).*&#39;</span>
+<span class="n">_site_pattern8</span> <span class="o">=</span> <span class="s1">&#39;([0-9]+)$&#39;</span>
+
+<span class="c1"># Subtypes that exist but we don&#39;t handle: hydrolysis</span>
+<span class="n">agent_mod_map</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;phosphorylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;phosphorylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;phosphorylated&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;phosphorylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;dephosphorylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;phosphorylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;acetylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;acetylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;deacetylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;acetylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;ubiquitination&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;ubiquitination&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;deubiquitination&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;ubiquitination&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;hydroxylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;hydroxylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;dehydroxylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;hydroxylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;sumoylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;sumoylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;desumoylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;sumoylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;glycosylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;glycosylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;deglycosylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;glycosylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;farnesylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;farnesylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;defarnesylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;farnesylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;ribosylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;ribosylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;deribosylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;ribosylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;methylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;methylation&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+    <span class="s1">&#39;demethylation&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;methylation&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="s1">&#39;unknown&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;modification&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+<span class="p">}</span>
+
+<span class="k">def</span> <span class="nf">_read_famplex_map</span><span class="p">():</span>
+    <span class="n">fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)),</span>
+                         <span class="s1">&#39;../../resources/famplex_map.tsv&#39;</span><span class="p">)</span>
+    <span class="n">famplex_map</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">csv_rows</span> <span class="o">=</span> <span class="n">read_unicode_csv</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">delimiter</span><span class="o">=</span><span class="s1">&#39;</span><span class="se">\t</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv_rows</span><span class="p">:</span>
+        <span class="n">source_ns</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">source_id</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">be_id</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+        <span class="n">famplex_map</span><span class="p">[(</span><span class="n">source_ns</span><span class="p">,</span> <span class="n">source_id</span><span class="p">)]</span> <span class="o">=</span> <span class="n">be_id</span>
+    <span class="k">return</span> <span class="n">famplex_map</span>
+
+<span class="n">famplex_map</span> <span class="o">=</span> <span class="n">_read_famplex_map</span><span class="p">()</span>
+
+
+<span class="k">def</span> <span class="nf">_read_reach_rule_regexps</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Load in a file with the regular expressions corresponding to each</span>
+<span class="sd">    reach rule. Why regular expression matching?</span>
+<span class="sd">    The rule name in found_by has instances of some reach rules for each</span>
+<span class="sd">    possible event type</span>
+<span class="sd">    (activation, binding, etc). This makes for too many different types of</span>
+<span class="sd">    rules for practical curation of examples.</span>
+<span class="sd">    We use regular expressions to only match the rule used for extraction,</span>
+<span class="sd">    independently of what the event is.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">reach_rule_filename</span> <span class="o">=</span> \
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)),</span>
+                     <span class="s1">&#39;reach_rule_regexps.txt&#39;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">reach_rule_filename</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">reach_rule_regexp</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">reach_rule_regexp</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">rstrip</span><span class="p">())</span>
+    <span class="k">return</span> <span class="n">reach_rule_regexp</span>
+
+
+<span class="n">reach_rule_regexps</span> <span class="o">=</span> <span class="n">_read_reach_rule_regexps</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="determine_reach_subtype"><a class="viewcode-back" href="../../../../modules/sources/reach/index.html#indra.sources.reach.processor.determine_reach_subtype">[docs]</a><span class="k">def</span> <span class="nf">determine_reach_subtype</span><span class="p">(</span><span class="n">event_name</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Returns the category of reach rule from the reach rule instance.</span>
+
+<span class="sd">    Looks at a list of regular</span>
+<span class="sd">    expressions corresponding to reach rule types, and returns the longest</span>
+<span class="sd">    regexp that matches, or None if none of them match.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    evidence: indra.statements.Evidence</span>
+<span class="sd">        A reach evidence object to subtype</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    best_match: str</span>
+<span class="sd">        A regular expression corresponding to the reach rule that was used to</span>
+<span class="sd">        extract this evidence</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">best_match_length</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">best_match</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">ss</span> <span class="ow">in</span> <span class="n">reach_rule_regexps</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">ss</span><span class="p">,</span> <span class="n">event_name</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">best_match</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">ss</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">best_match_length</span><span class="p">:</span>
+                <span class="n">best_match</span> <span class="o">=</span> <span class="n">ss</span>
+                <span class="n">best_match_length</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ss</span><span class="p">)</span>
+</div>
+    <span class="k">return</span> <span class="n">best_match</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

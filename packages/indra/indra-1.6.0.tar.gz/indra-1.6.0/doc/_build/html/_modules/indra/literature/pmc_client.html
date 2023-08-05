@@ -1,0 +1,355 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.literature.pmc_client &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../../index.html"/>
+        <link rel="up" title="indra.literature" href="../literature.html"/> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+          <li><a href="../literature.html">indra.literature</a> &raquo;</li>
+        
+      <li>indra.literature.pmc_client</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.literature.pmc_client</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">xml.etree.ElementTree</span> <span class="k">as</span> <span class="nn">ET</span>
+<span class="kn">import</span> <span class="nn">os.path</span>
+<span class="kn">import</span> <span class="nn">requests</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">indra.literature</span> <span class="k">import</span> <span class="n">pubmed_client</span>
+<span class="kn">from</span> <span class="nn">indra.util</span> <span class="k">import</span> <span class="n">UnicodeXMLTreeBuilder</span> <span class="k">as</span> <span class="n">UTB</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;pmc&#39;</span><span class="p">)</span>
+
+<span class="n">pmc_url</span> <span class="o">=</span> <span class="s1">&#39;https://www.ncbi.nlm.nih.gov/pmc/oai/oai.cgi&#39;</span>
+<span class="n">pmid_convert_url</span> <span class="o">=</span> <span class="s1">&#39;https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/&#39;</span>
+
+<span class="c1"># Paths to resource files</span>
+<span class="n">pmids_fulltext_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">),</span>
+                                   <span class="s1">&#39;pmids_fulltext.txt&#39;</span><span class="p">)</span>
+<span class="n">pmids_oa_xml_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">),</span>
+                                   <span class="s1">&#39;pmids_oa_xml.txt&#39;</span><span class="p">)</span>
+<span class="n">pmids_oa_txt_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">),</span>
+                                   <span class="s1">&#39;pmids_oa_txt.txt&#39;</span><span class="p">)</span>
+<span class="n">pmids_auth_xml_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">),</span>
+                                   <span class="s1">&#39;pmids_auth_xml.txt&#39;</span><span class="p">)</span>
+<span class="c1"># Define global dict containing lists of PMIDs among mineable PMCs</span>
+<span class="c1"># to be lazily initialized</span>
+<span class="n">pmids_fulltext_dict</span> <span class="o">=</span> <span class="p">{}</span>
+
+<div class="viewcode-block" id="id_lookup"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pmc_client.id_lookup">[docs]</a><span class="k">def</span> <span class="nf">id_lookup</span><span class="p">(</span><span class="n">paper_id</span><span class="p">,</span> <span class="n">idtype</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;This function takes a Pubmed ID, Pubmed Central ID, or DOI</span>
+<span class="sd">    and use the Pubmed ID mapping</span>
+<span class="sd">    service and looks up all other IDs from one</span>
+<span class="sd">    of these. The IDs are returned in a dictionary.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">idtype</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">idtype</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;pmid&#39;</span><span class="p">,</span> <span class="s1">&#39;pmcid&#39;</span><span class="p">,</span> <span class="s1">&#39;doi&#39;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Invalid idtype </span><span class="si">%s</span><span class="s2">; must be &#39;pmid&#39;, &#39;pmcid&#39;, &quot;</span>
+                         <span class="s2">&quot;or &#39;doi&#39;.&quot;</span> <span class="o">%</span> <span class="n">idtype</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">paper_id</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;PMC&#39;</span><span class="p">):</span>
+        <span class="n">idtype</span> <span class="o">=</span> <span class="s1">&#39;pmcid&#39;</span>
+    <span class="c1"># Strip off any prefix</span>
+    <span class="k">if</span> <span class="n">paper_id</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;PMID&#39;</span><span class="p">):</span>
+        <span class="n">paper_id</span> <span class="o">=</span> <span class="n">paper_id</span><span class="p">[</span><span class="mi">4</span><span class="p">:]</span>
+    <span class="k">elif</span> <span class="n">paper_id</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;DOI&#39;</span><span class="p">):</span>
+        <span class="n">paper_id</span> <span class="o">=</span> <span class="n">paper_id</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;ids&#39;</span><span class="p">:</span> <span class="n">paper_id</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">idtype</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">data</span><span class="p">[</span><span class="s1">&#39;idtype&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">idtype</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">tree</span> <span class="o">=</span> <span class="n">pubmed_client</span><span class="o">.</span><span class="n">send_request</span><span class="p">(</span><span class="n">pmid_convert_url</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Error looking up PMID in PMC: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">e</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">tree</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+    <span class="n">record</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;record&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">record</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+    <span class="n">doi</span> <span class="o">=</span> <span class="n">record</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;doi&#39;</span><span class="p">)</span>
+    <span class="n">pmid</span> <span class="o">=</span> <span class="n">record</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;pmid&#39;</span><span class="p">)</span>
+    <span class="n">pmcid</span> <span class="o">=</span> <span class="n">record</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;pmcid&#39;</span><span class="p">)</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;doi&#39;</span><span class="p">:</span> <span class="n">doi</span><span class="p">,</span>
+           <span class="s1">&#39;pmid&#39;</span><span class="p">:</span> <span class="n">pmid</span><span class="p">,</span>
+           <span class="s1">&#39;pmcid&#39;</span><span class="p">:</span> <span class="n">pmcid</span><span class="p">}</span></div>
+    <span class="k">return</span> <span class="n">ids</span>
+
+
+<span class="k">def</span> <span class="nf">get_ids</span><span class="p">(</span><span class="n">search_term</span><span class="p">,</span> <span class="n">retmax</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">pubmed_client</span><span class="o">.</span><span class="n">get_ids</span><span class="p">(</span><span class="n">search_term</span><span class="p">,</span> <span class="n">retmax</span><span class="o">=</span><span class="n">retmax</span><span class="p">,</span> <span class="n">db</span><span class="o">=</span><span class="s1">&#39;pmc&#39;</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">get_xml</span><span class="p">(</span><span class="n">pmc_id</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">pmc_id</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;PMC&#39;</span><span class="p">):</span>
+        <span class="n">pmc_id</span> <span class="o">=</span> <span class="n">pmc_id</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span>
+    <span class="c1"># Request params</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">params</span><span class="p">[</span><span class="s1">&#39;verb&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;GetRecord&#39;</span>
+    <span class="n">params</span><span class="p">[</span><span class="s1">&#39;identifier&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;oai:pubmedcentral.nih.gov:</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">pmc_id</span>
+    <span class="n">params</span><span class="p">[</span><span class="s1">&#39;metadataPrefix&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;pmc&#39;</span>
+    <span class="c1"># Submit the request</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">pmc_url</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">res</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Couldn&#39;t download </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="n">pmc_id</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="c1"># Read the bytestream</span>
+    <span class="n">xml_bytes</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">content</span>
+    <span class="c1"># Check for any XML errors; xml_str should still be bytes</span>
+    <span class="n">tree</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">XML</span><span class="p">(</span><span class="n">xml_bytes</span><span class="p">,</span> <span class="n">parser</span><span class="o">=</span><span class="n">UTB</span><span class="p">())</span>
+    <span class="n">xmlns</span> <span class="o">=</span> <span class="s2">&quot;http://www.openarchives.org/OAI/2.0/&quot;</span>
+    <span class="n">err_tag</span> <span class="o">=</span> <span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;{</span><span class="si">%s</span><span class="s1">}error&#39;</span> <span class="o">%</span> <span class="n">xmlns</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">err_tag</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">err_code</span> <span class="o">=</span> <span class="n">err_tag</span><span class="o">.</span><span class="n">attrib</span><span class="p">[</span><span class="s1">&#39;code&#39;</span><span class="p">]</span>
+        <span class="n">err_text</span> <span class="o">=</span> <span class="n">err_tag</span><span class="o">.</span><span class="n">text</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;PMC client returned with error </span><span class="si">%s</span><span class="s1">: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">err_code</span><span class="p">,</span> <span class="n">err_text</span><span class="p">))</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="c1"># If no error, return the XML as a unicode string</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">xml_bytes</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="filter_pmids"><a class="viewcode-back" href="../../../modules/literature/index.html#indra.literature.pmc_client.filter_pmids">[docs]</a><span class="k">def</span> <span class="nf">filter_pmids</span><span class="p">(</span><span class="n">pmid_list</span><span class="p">,</span> <span class="n">source_type</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Filter a list of PMIDs for ones with full text from PMC.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    pmid_list : list</span>
+<span class="sd">        List of PMIDs to filter.</span>
+<span class="sd">    source_type : string</span>
+<span class="sd">        One of &#39;fulltext&#39;, &#39;oa_xml&#39;, &#39;oa_txt&#39;, or &#39;auth_xml&#39;.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list of PMIDs available in the specified source/format type.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">pmids_fulltext_dict</span>
+    <span class="c1"># Check args</span>
+    <span class="k">if</span> <span class="n">source_type</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;fulltext&#39;</span><span class="p">,</span> <span class="s1">&#39;oa_xml&#39;</span><span class="p">,</span> <span class="s1">&#39;oa_txt&#39;</span><span class="p">,</span> <span class="s1">&#39;auth_xml&#39;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;source_type must be one of: &#39;fulltext&#39;, &#39;oa_xml&#39;, &quot;</span>
+                         <span class="s2">&quot;&#39;oa_txt&#39;, or &#39;auth_xml&#39;.&quot;</span><span class="p">)</span>
+    <span class="c1"># Check if we&#39;ve loaded this type, and lazily initialize</span>
+    <span class="k">if</span> <span class="n">pmids_fulltext_dict</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">source_type</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">fulltext_list_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">),</span>
+                                     <span class="s1">&#39;pmids_</span><span class="si">%s</span><span class="s1">.txt&#39;</span> <span class="o">%</span> <span class="n">source_type</span><span class="p">)</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">fulltext_list_path</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">fulltext_list</span> <span class="o">=</span> <span class="nb">set</span><span class="p">([</span><span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+                                 <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">f</span><span class="o">.</span><span class="n">readlines</span><span class="p">()])</span>
+            <span class="n">pmids_fulltext_dict</span><span class="p">[</span><span class="n">source_type</span><span class="p">]</span> <span class="o">=</span> <span class="n">fulltext_list</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">pmid_list</span><span class="p">)</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span></div>
+                                <span class="n">pmids_fulltext_dict</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">source_type</span><span class="p">)))</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

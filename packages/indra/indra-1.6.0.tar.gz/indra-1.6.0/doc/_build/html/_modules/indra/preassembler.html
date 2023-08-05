@@ -1,0 +1,962 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.preassembler &mdash; INDRA 1.6.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../genindex.html"/>
+        <link rel="search" title="Search" href="../../search.html"/>
+    <link rel="top" title="INDRA 1.6.0 documentation" href="../../index.html"/>
+        <link rel="up" title="Module code" href="../index.html"/> 
+
+  
+  <script src="../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.6
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.preassembler</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.preassembler</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">tempfile</span>
+<span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">import</span> <span class="nn">functools</span>
+<span class="kn">import</span> <span class="nn">collections</span>
+<span class="kn">import</span> <span class="nn">networkx</span> <span class="k">as</span> <span class="nn">nx</span>
+<span class="kn">import</span> <span class="nn">multiprocessing</span> <span class="k">as</span> <span class="nn">mp</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">pygraphviz</span> <span class="k">as</span> <span class="nn">pgv</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="k">pass</span>
+<span class="kn">from</span> <span class="nn">indra.util</span> <span class="k">import</span> <span class="n">fast_deepcopy</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">uniprot_client</span>
+<span class="kn">from</span> <span class="nn">indra.assemblers.english_assembler</span> <span class="k">import</span> <span class="n">EnglishAssembler</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;preassembler&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Preassembler"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.Preassembler">[docs]</a><span class="k">class</span> <span class="nc">Preassembler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;De-duplicates statements and arranges them in a specificity hierarchy.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    hierarchies : dict[:py:class:`indra.preassembler.hierarchy_manager`]</span>
+<span class="sd">        A dictionary of hierarchies with keys such as &#39;entity&#39; (hierarchy of</span>
+<span class="sd">        entities, primarily specifying relationships between genes and their</span>
+<span class="sd">        families) and &#39;modification&#39; pointing to HierarchyManagers</span>
+<span class="sd">    stmts : list of :py:class:`indra.statements.Statement` or None</span>
+<span class="sd">        A set of statements to perform pre-assembly on. If None, statements</span>
+<span class="sd">        should be added using the :py:meth:`add_statements` method.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        Starting set of statements for preassembly.</span>
+<span class="sd">    unique_stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        Statements resulting from combining duplicates.</span>
+<span class="sd">    related_stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        Top-level statements after building the refinement hierarchy.</span>
+<span class="sd">    hierarchies : dict[:py:class:`indra.preassembler.hierarchy_manager`]</span>
+<span class="sd">        A dictionary of hierarchies with keys such as &#39;entity&#39; and</span>
+<span class="sd">        &#39;modification&#39; pointing to HierarchyManagers</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hierarchies</span><span class="p">,</span> <span class="n">stmts</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hierarchies</span> <span class="o">=</span> <span class="n">hierarchies</span>
+        <span class="k">if</span> <span class="n">stmts</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Deepcopying stmts in __init__&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span> <span class="o">=</span> <span class="n">fast_deepcopy</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">unique_stmts</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">related_stmts</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="Preassembler.add_statements"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.Preassembler.add_statements">[docs]</a>    <span class="k">def</span> <span class="nf">add_statements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmts</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add to the current list of statements.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">            Statements to add to the current list.</span>
+<span class="sd">        &quot;&quot;&quot;</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stmts</span> <span class="o">+=</span> <span class="n">fast_deepcopy</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Preassembler.combine_duplicates"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.Preassembler.combine_duplicates">[docs]</a>    <span class="k">def</span> <span class="nf">combine_duplicates</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Combine duplicates among `stmts` and save result in `unique_stmts`.</span>
+
+<span class="sd">        A wrapper around the static method :py:meth:`combine_duplicate_stmts`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">unique_stmts</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unique_stmts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">combine_duplicate_stmts</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stmts</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">unique_stmts</span>
+
+<div class="viewcode-block" id="Preassembler.combine_duplicate_stmts"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.Preassembler.combine_duplicate_stmts">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">combine_duplicate_stmts</span><span class="p">(</span><span class="n">stmts</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Combine evidence from duplicate Statements.</span>
+
+<span class="sd">        Statements are deemed to be duplicates if they have the same key</span>
+<span class="sd">        returned by the `matches_key()` method of the Statement class. This</span>
+<span class="sd">        generally means that statements must be identical in terms of their</span>
+<span class="sd">        arguments and can differ only in their associated `Evidence` objects.</span>
+
+<span class="sd">        This function keeps the first instance of each set of duplicate</span>
+<span class="sd">        statements and merges the lists of Evidence from all of the other</span>
+<span class="sd">        statements.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">            Set of statements to de-duplicate.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">            Unique statements with accumulated evidence across duplicates.</span>
+
+<span class="sd">        Examples</span>
+<span class="sd">        --------</span>
+<span class="sd">        De-duplicate and combine evidence for two statements differing only</span>
+<span class="sd">        in their evidence lists:</span>
+
+<span class="sd">        &gt;&gt;&gt; map2k1 = Agent(&#39;MAP2K1&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; mapk1 = Agent(&#39;MAPK1&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; stmt1 = Phosphorylation(map2k1, mapk1, &#39;T&#39;, &#39;185&#39;,</span>
+<span class="sd">        ... evidence=[Evidence(text=&#39;evidence 1&#39;)])</span>
+<span class="sd">        &gt;&gt;&gt; stmt2 = Phosphorylation(map2k1, mapk1, &#39;T&#39;, &#39;185&#39;,</span>
+<span class="sd">        ... evidence=[Evidence(text=&#39;evidence 2&#39;)])</span>
+<span class="sd">        &gt;&gt;&gt; uniq_stmts = Preassembler.combine_duplicate_stmts([stmt1, stmt2])</span>
+<span class="sd">        &gt;&gt;&gt; uniq_stmts</span>
+<span class="sd">        [Phosphorylation(MAP2K1(), MAPK1(), T, 185)]</span>
+<span class="sd">        &gt;&gt;&gt; sorted([e.text for e in uniq_stmts[0].evidence]) # doctest:+IGNORE_UNICODE</span>
+<span class="sd">        [&#39;evidence 1&#39;, &#39;evidence 2&#39;]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">unique_stmts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="c1"># Remove exact duplicates using a set() call, then make copies:</span>
+        <span class="n">st</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">stmts</span><span class="p">))</span>
+        <span class="c1"># Group statements according to whether they are matches (differing</span>
+        <span class="c1"># only in their evidence).</span>
+        <span class="c1"># Sort the statements in place by matches_key()</span>
+        <span class="n">st</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">matches_key</span><span class="p">())</span>
+
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">duplicates</span> <span class="ow">in</span> <span class="n">itertools</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">st</span><span class="p">,</span>
+                                                 <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">matches_key</span><span class="p">()):</span>
+            <span class="c1"># Get the first statement and add the evidence of all subsequent</span>
+            <span class="c1"># Statements to it</span>
+            <span class="k">for</span> <span class="n">stmt_ix</span><span class="p">,</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">duplicates</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">stmt_ix</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">ev_keys</span> <span class="o">=</span> <span class="p">[</span><span class="n">ev</span><span class="o">.</span><span class="n">matches_key</span><span class="p">()</span> <span class="k">for</span> <span class="n">ev</span> <span class="ow">in</span> <span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span><span class="p">]</span>
+                    <span class="n">first_stmt</span> <span class="o">=</span> <span class="n">stmt</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">ev</span> <span class="ow">in</span> <span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span><span class="p">:</span>
+                        <span class="n">key</span> <span class="o">=</span> <span class="n">ev</span><span class="o">.</span><span class="n">matches_key</span><span class="p">()</span>
+                        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ev_keys</span><span class="p">:</span>
+                            <span class="n">first_stmt</span><span class="o">.</span><span class="n">evidence</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ev</span><span class="p">)</span>
+                            <span class="n">ev_keys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="c1"># This should never be None or anything else</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">first_stmt</span><span class="p">,</span> <span class="n">Statement</span><span class="p">)</span>
+            <span class="n">unique_stmts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">first_stmt</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">unique_stmts</span>
+
+<div class="viewcode-block" id="Preassembler.combine_related"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.Preassembler.combine_related">[docs]</a>    <span class="k">def</span> <span class="nf">combine_related</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">return_toplevel</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">poolsize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                        <span class="n">size_cutoff</span><span class="o">=</span><span class="mi">100</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Connect related statements based on their refinement relationships.</span>
+
+<span class="sd">        This function takes as a starting point the unique statements (with</span>
+<span class="sd">        duplicates removed) and returns a modified flat list of statements</span>
+<span class="sd">        containing only those statements which do not represent a refinement of</span>
+<span class="sd">        other existing statements. In other words, the more general versions of</span>
+<span class="sd">        a given statement do not appear at the top level, but instead are</span>
+<span class="sd">        listed in the `supports` field of the top-level statements.</span>
+
+<span class="sd">        If :py:attr:`unique_stmts` has not been initialized with the</span>
+<span class="sd">        de-duplicated statements, :py:meth:`combine_duplicates` is called</span>
+<span class="sd">        internally.</span>
+
+<span class="sd">        After this function is called the attribute :py:attr:`related_stmts` is</span>
+<span class="sd">        set as a side-effect.</span>
+
+<span class="sd">        The procedure for combining statements in this way involves a series</span>
+<span class="sd">        of steps:</span>
+
+<span class="sd">        1. The statements are grouped by type (e.g., Phosphorylation) and</span>
+<span class="sd">           each type is iterated over independently.</span>
+<span class="sd">        2. Statements of the same type are then grouped according to their</span>
+<span class="sd">           Agents&#39; entity hierarchy component identifiers. For instance,</span>
+<span class="sd">           ERK, MAPK1 and MAPK3 are all in the same connected component in the</span>
+<span class="sd">           entity hierarchy and therefore all Statements of the same type</span>
+<span class="sd">           referencing these entities will be grouped. This grouping assures</span>
+<span class="sd">           that relations are only possible within Statement groups and</span>
+<span class="sd">           not among groups. For two Statements to be in the same group at</span>
+<span class="sd">           this step, the Statements must be the same type and the Agents at</span>
+<span class="sd">           each position in the Agent lists must either be in the same</span>
+<span class="sd">           hierarchy component, or if they are not in the hierarchy, must have</span>
+<span class="sd">           identical entity_matches_keys. Statements with None in one of the</span>
+<span class="sd">           Agent list positions are collected separately at this stage.</span>
+<span class="sd">        3. Statements with None at either the first or second position are</span>
+<span class="sd">           iterated over. For a statement with a None as the first Agent,</span>
+<span class="sd">           the second Agent is examined; then the Statement with None is</span>
+<span class="sd">           added to all Statement groups with a corresponding component or</span>
+<span class="sd">           entity_matches_key in the second position. The same procedure is</span>
+<span class="sd">           performed for Statements with None at the second Agent position.</span>
+<span class="sd">        4. The statements within each group are then compared; if one</span>
+<span class="sd">           statement represents a refinement of the other (as defined by the</span>
+<span class="sd">           `refinement_of()` method implemented for the Statement), then the</span>
+<span class="sd">           more refined statement is added to the `supports` field of the more</span>
+<span class="sd">           general statement, and the more general statement is added to the</span>
+<span class="sd">           `supported_by` field of the more refined statement.</span>
+<span class="sd">        5. A new flat list of statements is created that contains only those</span>
+<span class="sd">           statements that have no `supports` entries (statements containing</span>
+<span class="sd">           such entries are not eliminated, because they will be retrievable</span>
+<span class="sd">           from the `supported_by` fields of other statements). This list</span>
+<span class="sd">           is returned to the caller.</span>
+
+<span class="sd">        On multi-core machines, the algorithm can be parallelized by setting</span>
+<span class="sd">        the poolsize argument to the desired number of worker processes.</span>
+<span class="sd">        This feature is only available in Python &gt; 3.4.</span>
+
+<span class="sd">        .. note:: Subfamily relationships must be consistent across arguments</span>
+
+<span class="sd">            For now, we require that merges can only occur if the *isa*</span>
+<span class="sd">            relationships are all in the *same direction for all the agents* in</span>
+<span class="sd">            a Statement. For example, the two statement groups: `RAF_family -&gt;</span>
+<span class="sd">            MEK1` and `BRAF -&gt; MEK_family` would not be merged, since BRAF</span>
+<span class="sd">            *isa* RAF_family, but MEK_family is not a MEK1. In the future this</span>
+<span class="sd">            restriction could be revisited.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        return_toplevel : Optional[bool]</span>
+<span class="sd">            If True only the top level statements are returned.</span>
+<span class="sd">            If False, all statements are returned. Default: True</span>
+<span class="sd">        poolsize : Optional[int]</span>
+<span class="sd">            The number of worker processes to use to parallelize the</span>
+<span class="sd">            comparisons performed by the function. If None (default), no</span>
+<span class="sd">            parallelization is performed. NOTE: Parallelization is only</span>
+<span class="sd">            available on Python 3.4 and above.</span>
+<span class="sd">        size_cutoff : Optional[int]</span>
+<span class="sd">            Groups with size_cutoff or more statements are sent to worker</span>
+<span class="sd">            processes, while smaller groups are compared in the parent process.</span>
+<span class="sd">            Default value is 100. Not relevant when parallelization is not</span>
+<span class="sd">            used.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        list of :py:class:`indra.statement.Statement`</span>
+<span class="sd">            The returned list contains Statements representing the more</span>
+<span class="sd">            concrete/refined versions of the Statements involving particular</span>
+<span class="sd">            entities. The attribute :py:attr:`related_stmts` is also set to</span>
+<span class="sd">            this list. However, if return_toplevel is False then all</span>
+<span class="sd">            statements are returned, irrespective of level of specificity.</span>
+<span class="sd">            In this case the relationships between statements can</span>
+<span class="sd">            be accessed via the supports/supported_by attributes.</span>
+
+<span class="sd">        Examples</span>
+<span class="sd">        --------</span>
+<span class="sd">        A more general statement with no information about a Phosphorylation</span>
+<span class="sd">        site is identified as supporting a more specific statement:</span>
+
+<span class="sd">        &gt;&gt;&gt; from indra.preassembler.hierarchy_manager import hierarchies</span>
+<span class="sd">        &gt;&gt;&gt; braf = Agent(&#39;BRAF&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; map2k1 = Agent(&#39;MAP2K1&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; st1 = Phosphorylation(braf, map2k1)</span>
+<span class="sd">        &gt;&gt;&gt; st2 = Phosphorylation(braf, map2k1, residue=&#39;S&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; pa = Preassembler(hierarchies, [st1, st2])</span>
+<span class="sd">        &gt;&gt;&gt; combined_stmts = pa.combine_related() # doctest:+ELLIPSIS</span>
+<span class="sd">        &gt;&gt;&gt; combined_stmts</span>
+<span class="sd">        [Phosphorylation(BRAF(), MAP2K1(), S)]</span>
+<span class="sd">        &gt;&gt;&gt; combined_stmts[0].supported_by</span>
+<span class="sd">        [Phosphorylation(BRAF(), MAP2K1())]</span>
+<span class="sd">        &gt;&gt;&gt; combined_stmts[0].supported_by[0].supports</span>
+<span class="sd">        [Phosphorylation(BRAF(), MAP2K1(), S)]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">related_stmts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">return_toplevel</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">related_stmts</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">unique_stmts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">unique_stmts</span>
+
+        <span class="c1"># Check arguments relating to multiprocessing</span>
+        <span class="k">if</span> <span class="n">poolsize</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;combine_related: poolsize not set, &#39;</span>
+                        <span class="s1">&#39;not using multiprocessing.&#39;</span><span class="p">)</span>
+            <span class="n">use_mp</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">elif</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">3</span> <span class="ow">and</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">4</span><span class="p">:</span>
+            <span class="n">use_mp</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;combine_related: Python &gt;= 3.4 detected, &#39;</span>
+                        <span class="s1">&#39;using multiprocessing with poolsize </span><span class="si">%d</span><span class="s1">, &#39;</span>
+                        <span class="s1">&#39;size_cutoff </span><span class="si">%d</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">poolsize</span><span class="p">,</span> <span class="n">size_cutoff</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">use_mp</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;combine_related: Python &lt; 3.4 detected, &#39;</span>
+                        <span class="s1">&#39;not using multiprocessing.&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Call combine_duplicates, which lazily initializes self.unique_stmts</span>
+        <span class="n">unique_stmts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">combine_duplicates</span><span class="p">()</span>
+        <span class="n">eh</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hierarchies</span><span class="p">[</span><span class="s1">&#39;entity&#39;</span><span class="p">]</span>
+        <span class="c1"># Make a list of Statement types</span>
+        <span class="n">stmts_by_type</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+        <span class="k">for</span> <span class="n">stmt_ix</span><span class="p">,</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">unique_stmts</span><span class="p">):</span>
+            <span class="n">stmts_by_type</span><span class="p">[</span><span class="nb">type</span><span class="p">(</span><span class="n">stmt</span><span class="p">)]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">stmt_ix</span><span class="p">,</span> <span class="n">stmt</span><span class="p">))</span>
+
+        <span class="n">group_sizes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">largest_group</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">largest_group_size</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">num_stmts</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">unique_stmts</span><span class="p">)</span>
+        <span class="n">related_stmts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">child_proc_groups</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">parent_proc_groups</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="c1"># Each Statement type can be preassembled independently</span>
+        <span class="k">for</span> <span class="n">stmt_type</span><span class="p">,</span> <span class="n">stmts_this_type</span> <span class="ow">in</span> <span class="n">stmts_by_type</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Preassembling </span><span class="si">%s</span><span class="s1"> (</span><span class="si">%s</span><span class="s1">)&#39;</span> <span class="o">%</span>
+                        <span class="p">(</span><span class="n">stmt_type</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">stmts_this_type</span><span class="p">)))</span>
+            <span class="c1"># Dict of stmt group key tuples, indexed by their first Agent</span>
+            <span class="n">stmt_by_first</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+            <span class="c1"># Dict of stmt group key tuples, indexed by their second Agent</span>
+            <span class="n">stmt_by_second</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+            <span class="c1"># Dict of statements with None first, with second Agent as keys</span>
+            <span class="n">none_first</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+            <span class="c1"># Dict of statements with None second, with first Agent as keys</span>
+            <span class="n">none_second</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+            <span class="c1"># The dict of all statement groups, with tuples of components</span>
+            <span class="c1"># or entity_matches_keys as keys</span>
+            <span class="n">stmt_by_group</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+            <span class="c1"># Here we group Statements according to the hierarchy graph</span>
+            <span class="c1"># components that their agents are part of</span>
+            <span class="k">for</span> <span class="n">stmt_tuple</span> <span class="ow">in</span> <span class="n">stmts_this_type</span><span class="p">:</span>
+                <span class="n">stmt_ix</span><span class="p">,</span> <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt_tuple</span>
+                <span class="n">entities</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">a</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">agent_list</span><span class="p">()):</span>
+                    <span class="c1"># Entity is None: add the None to the entities list</span>
+                    <span class="k">if</span> <span class="n">a</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">stmt_type</span> <span class="o">!=</span> <span class="n">Complex</span><span class="p">:</span>
+                        <span class="n">entities</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                    <span class="c1"># Entity is not None, but could be ungrounded or not</span>
+                    <span class="c1"># in a family</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">a_ns</span><span class="p">,</span> <span class="n">a_id</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">get_grounding</span><span class="p">()</span>
+                        <span class="c1"># No grounding available--in this case, use the</span>
+                        <span class="c1"># entity_matches_key</span>
+                        <span class="k">if</span> <span class="n">a_ns</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">a_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                            <span class="n">entities</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">entity_matches_key</span><span class="p">())</span>
+                            <span class="k">continue</span>
+                        <span class="c1"># We have grounding, now check for a component ID</span>
+                        <span class="n">uri</span> <span class="o">=</span> <span class="n">eh</span><span class="o">.</span><span class="n">get_uri</span><span class="p">(</span><span class="n">a_ns</span><span class="p">,</span> <span class="n">a_id</span><span class="p">)</span>
+                        <span class="c1"># This is the component ID corresponding to the agent</span>
+                        <span class="c1"># in the entity hierarchy</span>
+                        <span class="n">component</span> <span class="o">=</span> <span class="n">eh</span><span class="o">.</span><span class="n">components</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">uri</span><span class="p">)</span>
+                        <span class="c1"># If no component ID, use the entity_matches_key()</span>
+                        <span class="k">if</span> <span class="n">component</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                            <span class="n">entities</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">entity_matches_key</span><span class="p">())</span>
+                        <span class="c1"># Component ID, so this is in a family</span>
+                        <span class="k">else</span><span class="p">:</span>
+                            <span class="c1"># We turn the component ID into a string so that</span>
+                            <span class="c1"># we can sort it along with entity_matches_keys</span>
+                            <span class="c1"># for Complexes</span>
+                            <span class="n">entities</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">component</span><span class="p">))</span>
+                <span class="c1"># At this point we have an entity list</span>
+                <span class="c1"># If we&#39;re dealing with Complexes, sort the entities and use</span>
+                <span class="c1"># as dict key</span>
+                <span class="k">if</span> <span class="n">stmt_type</span> <span class="o">==</span> <span class="n">Complex</span><span class="p">:</span>
+                    <span class="c1"># There shouldn&#39;t be any statements of the type</span>
+                    <span class="c1"># e.g., Complex([Foo, None, Bar])</span>
+                    <span class="k">assert</span> <span class="kc">None</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">entities</span>
+                    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+                    <span class="n">entities</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+                    <span class="n">key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">stmt_tuple</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]:</span>
+                        <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt_tuple</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="n">stmt_type</span> <span class="o">==</span> <span class="n">Conversion</span><span class="p">:</span>
+                    <span class="c1"># There shouldn&#39;t be any statements of the type</span>
+                    <span class="c1"># e.g., Complex([Foo, None, Bar])</span>
+                    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+                    <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">entities</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                           <span class="nb">tuple</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">entities</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="nb">len</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">obj_from</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">])),</span>
+                           <span class="nb">tuple</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">entities</span><span class="p">[</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">obj_to</span><span class="p">):])))</span>
+                    <span class="k">if</span> <span class="n">stmt_tuple</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]:</span>
+                        <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt_tuple</span><span class="p">)</span>
+                <span class="c1"># Now look at all other statement types</span>
+                <span class="c1"># All other statements will have one or two entities</span>
+                <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="c1"># If only one entity, we only need the one key</span>
+                    <span class="c1"># It should not be None!</span>
+                    <span class="k">assert</span> <span class="kc">None</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">entities</span>
+                    <span class="n">key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">stmt_tuple</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]:</span>
+                        <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt_tuple</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># Make sure we only have two entities, and they are not both</span>
+                    <span class="c1"># None</span>
+                    <span class="n">key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
+                    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>
+                    <span class="k">assert</span> <span class="n">key</span> <span class="o">!=</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="c1"># First agent is None; add in the statements, indexed by</span>
+                    <span class="c1"># 2nd</span>
+                    <span class="k">if</span> <span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">stmt_tuple</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">none_first</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">]]:</span>
+                        <span class="n">none_first</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt_tuple</span><span class="p">)</span>
+                    <span class="c1"># Second agent is None; add in the statements, indexed by</span>
+                    <span class="c1"># 1st</span>
+                    <span class="k">elif</span> <span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> \
+                         <span class="n">stmt_tuple</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">none_second</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]]:</span>
+                        <span class="n">none_second</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt_tuple</span><span class="p">)</span>
+                    <span class="c1"># Neither entity is None!</span>
+                    <span class="k">elif</span> <span class="kc">None</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">key</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">stmt_tuple</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]:</span>
+                            <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt_tuple</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stmt_by_first</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]]:</span>
+                            <span class="n">stmt_by_first</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stmt_by_second</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">]]:</span>
+                            <span class="n">stmt_by_second</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+            <span class="c1"># When we&#39;ve gotten here, we should have stmt_by_group entries, and</span>
+            <span class="c1"># we may or may not have stmt_by_first/second dicts filled out</span>
+            <span class="c1"># (depending on the statement type).</span>
+            <span class="k">if</span> <span class="n">none_first</span><span class="p">:</span>
+                <span class="c1"># Get the keys associated with stmts having a None first</span>
+                <span class="c1"># argument</span>
+                <span class="k">for</span> <span class="n">second_arg</span><span class="p">,</span> <span class="n">stmts</span> <span class="ow">in</span> <span class="n">none_first</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="c1"># Look for any statements with this second arg</span>
+                    <span class="n">second_arg_keys</span> <span class="o">=</span> <span class="n">stmt_by_second</span><span class="p">[</span><span class="n">second_arg</span><span class="p">]</span>
+                    <span class="c1"># If there are no more specific statements matching this</span>
+                    <span class="c1"># set of statements with a None first arg, then the</span>
+                    <span class="c1"># statements with the None first arg deserve to be in</span>
+                    <span class="c1"># their own group.</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">second_arg_keys</span><span class="p">:</span>
+                        <span class="n">stmt_by_group</span><span class="p">[(</span><span class="kc">None</span><span class="p">,</span> <span class="n">second_arg</span><span class="p">)]</span> <span class="o">=</span> <span class="n">stmts</span>
+                    <span class="c1"># On the other hand, if there are statements with a matching</span>
+                    <span class="c1"># second arg component, we need to add the None first</span>
+                    <span class="c1"># statements to all groups with the matching second arg</span>
+                    <span class="k">for</span> <span class="n">second_arg_key</span> <span class="ow">in</span> <span class="n">second_arg_keys</span><span class="p">:</span>
+                        <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">second_arg_key</span><span class="p">]</span> <span class="o">+=</span> <span class="n">stmts</span>
+            <span class="c1"># Now do the corresponding steps for the statements with None as the</span>
+            <span class="c1"># second argument:</span>
+            <span class="k">if</span> <span class="n">none_second</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">first_arg</span><span class="p">,</span> <span class="n">stmts</span> <span class="ow">in</span> <span class="n">none_second</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="c1"># Look for any statements with this first arg</span>
+                    <span class="n">first_arg_keys</span> <span class="o">=</span> <span class="n">stmt_by_first</span><span class="p">[</span><span class="n">first_arg</span><span class="p">]</span>
+                    <span class="c1"># If there are no more specific statements matching this</span>
+                    <span class="c1"># set of statements with a None second arg, then the</span>
+                    <span class="c1"># statements with the None second arg deserve to be in</span>
+                    <span class="c1"># their own group.</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">first_arg_keys</span><span class="p">:</span>
+                        <span class="n">stmt_by_group</span><span class="p">[(</span><span class="n">first_arg</span><span class="p">,</span> <span class="kc">None</span><span class="p">)]</span> <span class="o">=</span> <span class="n">stmts</span>
+                    <span class="c1"># On the other hand, if there are statements with a matching</span>
+                    <span class="c1"># first arg component, we need to add the None second</span>
+                    <span class="c1"># statements to all groups with the matching first arg</span>
+                    <span class="k">for</span> <span class="n">first_arg_key</span> <span class="ow">in</span> <span class="n">first_arg_keys</span><span class="p">:</span>
+                        <span class="n">stmt_by_group</span><span class="p">[</span><span class="n">first_arg_key</span><span class="p">]</span> <span class="o">+=</span> <span class="n">stmts</span>
+
+            <span class="c1"># Divide statements by group size</span>
+            <span class="c1"># If we&#39;re not using multiprocessing, then all groups are local</span>
+            <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">stmt_by_group</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">use_mp</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">g</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">size_cutoff</span><span class="p">:</span>
+                    <span class="n">child_proc_groups</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">g</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">parent_proc_groups</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">g</span><span class="p">)</span>
+
+        <span class="c1"># Now run preassembly!</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Groups: </span><span class="si">%d</span><span class="s2"> parent, </span><span class="si">%d</span><span class="s2"> worker&quot;</span> <span class="o">%</span>
+                    <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">parent_proc_groups</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">child_proc_groups</span><span class="p">)))</span>
+
+        <span class="c1"># Check if we are running any groups in child processes; note that if</span>
+        <span class="c1"># use_mp is False, child_proc_groups will be empty</span>
+        <span class="k">if</span> <span class="n">child_proc_groups</span><span class="p">:</span>
+            <span class="c1"># Get a multiprocessing context</span>
+            <span class="n">ctx</span> <span class="o">=</span> <span class="n">mp</span><span class="o">.</span><span class="n">get_context</span><span class="p">(</span><span class="s1">&#39;spawn&#39;</span><span class="p">)</span>
+            <span class="n">pool</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">Pool</span><span class="p">(</span><span class="n">poolsize</span><span class="p">)</span>
+            <span class="n">supports_func</span> <span class="o">=</span> <span class="n">functools</span><span class="o">.</span><span class="n">partial</span><span class="p">(</span><span class="n">_set_supports_stmt_pairs</span><span class="p">,</span>
+                                              <span class="n">hierarchies</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">hierarchies</span><span class="p">,</span>
+                                              <span class="n">check_entities_match</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="c1"># Run the large groups remotely</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Running </span><span class="si">%d</span><span class="s2"> groups in child processes&quot;</span> <span class="o">%</span>
+                         <span class="nb">len</span><span class="p">(</span><span class="n">child_proc_groups</span><span class="p">))</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">map_async</span><span class="p">(</span><span class="n">supports_func</span><span class="p">,</span> <span class="n">child_proc_groups</span><span class="p">)</span>
+            <span class="n">workers_ready</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">workers_ready</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="c1"># Run the small groups locally</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Running </span><span class="si">%d</span><span class="s2"> groups in parent process&quot;</span> <span class="o">%</span>
+                     <span class="nb">len</span><span class="p">(</span><span class="n">parent_proc_groups</span><span class="p">))</span>
+        <span class="n">stmt_ix_map</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">stmt_tuples</span> <span class="ow">in</span> <span class="n">parent_proc_groups</span><span class="p">:</span>
+            <span class="n">stmt_ix_map</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_set_supports_stmt_pairs</span><span class="p">(</span><span class="n">stmt_tuples</span><span class="p">,</span>
+                                            <span class="n">hierarchies</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">hierarchies</span><span class="p">))</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Done running parent process groups&quot;</span><span class="p">)</span>
+
+        <span class="k">while</span> <span class="ow">not</span> <span class="n">workers_ready</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Checking child processes&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">ready</span><span class="p">():</span>
+                <span class="n">workers_ready</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Child process group comparisons successful? </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span>
+                             <span class="n">res</span><span class="o">.</span><span class="n">successful</span><span class="p">())</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">res</span><span class="o">.</span><span class="n">successful</span><span class="p">():</span>
+                    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Sorry, there was a problem with &quot;</span>
+                                    <span class="s2">&quot;preassembly in the child processes.&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">stmt_ix_map</span> <span class="o">+=</span> <span class="n">res</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+                <span class="n">pool</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+                <span class="n">pool</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Done.&quot;</span><span class="p">)</span>
+        <span class="c1"># Combine all redundant map edges</span>
+        <span class="n">stmt_ix_map_set</span> <span class="o">=</span> <span class="nb">set</span><span class="p">([])</span>
+        <span class="k">for</span> <span class="n">group_ix_map</span> <span class="ow">in</span> <span class="n">stmt_ix_map</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">ix_pair</span> <span class="ow">in</span> <span class="n">group_ix_map</span><span class="p">:</span>
+                <span class="n">stmt_ix_map_set</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">ix_pair</span><span class="p">)</span>
+        <span class="c1"># Now iterate over all indices and set supports/supported by</span>
+        <span class="k">for</span> <span class="n">ix1</span><span class="p">,</span> <span class="n">ix2</span> <span class="ow">in</span> <span class="n">stmt_ix_map_set</span><span class="p">:</span>
+            <span class="n">unique_stmts</span><span class="p">[</span><span class="n">ix1</span><span class="p">]</span><span class="o">.</span><span class="n">supported_by</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">unique_stmts</span><span class="p">[</span><span class="n">ix2</span><span class="p">])</span>
+            <span class="n">unique_stmts</span><span class="p">[</span><span class="n">ix2</span><span class="p">]</span><span class="o">.</span><span class="n">supports</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">unique_stmts</span><span class="p">[</span><span class="n">ix1</span><span class="p">])</span>
+        <span class="c1"># Get the top level statements</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">related_stmts</span> <span class="o">=</span> <span class="p">[</span><span class="n">st</span> <span class="k">for</span> <span class="n">st</span> <span class="ow">in</span> <span class="n">unique_stmts</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">st</span><span class="o">.</span><span class="n">supports</span><span class="p">]</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%d</span><span class="s1"> top level&#39;</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">related_stmts</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">return_toplevel</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">related_stmts</span>
+        <span class="k">else</span><span class="p">:</span></div></div>
+            <span class="k">return</span> <span class="n">unique_stmts</span>
+
+
+<span class="k">def</span> <span class="nf">_set_supports_stmt_pairs</span><span class="p">(</span><span class="n">stmt_tuples</span><span class="p">,</span> <span class="n">hierarchies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                             <span class="n">check_entities_match</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="n">ix_map</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">stmt_tuple1</span><span class="p">,</span> <span class="n">stmt_tuple2</span> <span class="ow">in</span> <span class="n">itertools</span><span class="o">.</span><span class="n">combinations</span><span class="p">(</span><span class="n">stmt_tuples</span><span class="p">,</span> <span class="mi">2</span><span class="p">):</span>
+        <span class="n">stmt_ix1</span><span class="p">,</span> <span class="n">stmt1</span> <span class="o">=</span> <span class="n">stmt_tuple1</span>
+        <span class="n">stmt_ix2</span><span class="p">,</span> <span class="n">stmt2</span> <span class="o">=</span> <span class="n">stmt_tuple2</span>
+        <span class="k">if</span> <span class="n">check_entities_match</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">stmt1</span><span class="o">.</span><span class="n">entities_match</span><span class="p">(</span><span class="n">stmt2</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">stmt1</span><span class="o">.</span><span class="n">refinement_of</span><span class="p">(</span><span class="n">stmt2</span><span class="p">,</span> <span class="n">hierarchies</span><span class="p">):</span>
+            <span class="n">ix_map</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">stmt_ix1</span><span class="p">,</span> <span class="n">stmt_ix2</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">stmt2</span><span class="o">.</span><span class="n">refinement_of</span><span class="p">(</span><span class="n">stmt1</span><span class="p">,</span> <span class="n">hierarchies</span><span class="p">):</span>
+            <span class="n">ix_map</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">stmt_ix2</span><span class="p">,</span> <span class="n">stmt_ix1</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">ix_map</span>
+
+
+<div class="viewcode-block" id="render_stmt_graph"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.render_stmt_graph">[docs]</a><span class="k">def</span> <span class="nf">render_stmt_graph</span><span class="p">(</span><span class="n">statements</span><span class="p">,</span> <span class="n">reduce</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">english</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">rankdir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                      <span class="n">agent_style</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Render the statement hierarchy as a pygraphviz graph.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        A list of top-level statements with associated supporting statements</span>
+<span class="sd">        resulting from building a statement hierarchy with</span>
+<span class="sd">        :py:meth:`combine_related`.</span>
+<span class="sd">    reduce : bool</span>
+<span class="sd">        Whether to perform a transitive reduction of the edges in the graph.</span>
+<span class="sd">        Default is True.</span>
+<span class="sd">    english : bool</span>
+<span class="sd">        If True, the statements in the graph are represented by their</span>
+<span class="sd">        English-assembled equivalent; otherwise they are represented as</span>
+<span class="sd">        text-formatted Statements.</span>
+<span class="sd">    rank_dir : str or None</span>
+<span class="sd">        Argument to pass through to the  pygraphviz `AGraph` constructor</span>
+<span class="sd">        specifying graph layout direction. In particular, a value of &#39;LR&#39;</span>
+<span class="sd">        specifies a left-to-right direction. If None, the pygraphviz default</span>
+<span class="sd">        is used.</span>
+<span class="sd">    agent_style : dict or None</span>
+<span class="sd">        Dict of attributes specifying the visual properties of nodes. If None,</span>
+<span class="sd">        the following default attributes are used::</span>
+
+<span class="sd">            agent_style = {&#39;color&#39;: &#39;lightgray&#39;, &#39;style&#39;: &#39;filled&#39;,</span>
+<span class="sd">                           &#39;fontname&#39;: &#39;arial&#39;}</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pygraphviz.AGraph</span>
+<span class="sd">        Pygraphviz graph with nodes representing statements and edges pointing</span>
+<span class="sd">        from supported statements to supported_by statements.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    Pattern for getting statements and rendering as a Graphviz graph:</span>
+
+<span class="sd">    &gt;&gt;&gt; from indra.preassembler.hierarchy_manager import hierarchies</span>
+<span class="sd">    &gt;&gt;&gt; braf = Agent(&#39;BRAF&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; map2k1 = Agent(&#39;MAP2K1&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; st1 = Phosphorylation(braf, map2k1)</span>
+<span class="sd">    &gt;&gt;&gt; st2 = Phosphorylation(braf, map2k1, residue=&#39;S&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; pa = Preassembler(hierarchies, [st1, st2])</span>
+<span class="sd">    &gt;&gt;&gt; pa.combine_related() # doctest:+ELLIPSIS</span>
+<span class="sd">    [Phosphorylation(BRAF(), MAP2K1(), S)]</span>
+<span class="sd">    &gt;&gt;&gt; graph = render_stmt_graph(pa.related_stmts)</span>
+<span class="sd">    &gt;&gt;&gt; graph.write(&#39;example_graph.dot&#39;) # To make the DOT file</span>
+<span class="sd">    &gt;&gt;&gt; graph.draw(&#39;example_graph.png&#39;, prog=&#39;dot&#39;) # To make an image</span>
+
+<span class="sd">    Resulting graph:</span>
+
+<span class="sd">    .. image:: /images/example_graph.png</span>
+<span class="sd">        :align: center</span>
+<span class="sd">        :alt: Example statement graph rendered by Graphviz</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">transitive_reduction</span><span class="p">(</span><span class="n">G</span><span class="p">):</span>
+        <span class="c1"># NOTE: Copied from networkx version 2.0 source</span>
+        <span class="n">TR</span> <span class="o">=</span> <span class="n">nx</span><span class="o">.</span><span class="n">DiGraph</span><span class="p">()</span>
+        <span class="n">TR</span><span class="o">.</span><span class="n">add_nodes_from</span><span class="p">(</span><span class="n">G</span><span class="o">.</span><span class="n">nodes</span><span class="p">())</span>
+        <span class="k">for</span> <span class="n">u</span> <span class="ow">in</span> <span class="n">G</span><span class="p">:</span>
+            <span class="n">u_edges</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">G</span><span class="p">[</span><span class="n">u</span><span class="p">])</span>
+            <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">G</span><span class="p">[</span><span class="n">u</span><span class="p">]:</span>
+                <span class="n">u_edges</span> <span class="o">-=</span> <span class="p">{</span><span class="n">y</span> <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">nx</span><span class="o">.</span><span class="n">dfs_edges</span><span class="p">(</span><span class="n">G</span><span class="p">,</span> <span class="n">v</span><span class="p">)}</span>
+            <span class="n">TR</span><span class="o">.</span><span class="n">add_edges_from</span><span class="p">((</span><span class="n">u</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">u_edges</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TR</span>
+
+    <span class="c1"># Set the default agent formatting properties</span>
+    <span class="k">if</span> <span class="n">agent_style</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">agent_style</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;color&#39;</span><span class="p">:</span> <span class="s1">&#39;lightgray&#39;</span><span class="p">,</span> <span class="s1">&#39;style&#39;</span><span class="p">:</span> <span class="s1">&#39;filled&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;fontname&#39;</span><span class="p">:</span> <span class="s1">&#39;arial&#39;</span><span class="p">}</span>
+    <span class="c1"># Sets to store all of the nodes and edges as we recursively process all</span>
+    <span class="c1"># of the statements</span>
+    <span class="n">nodes</span> <span class="o">=</span> <span class="nb">set</span><span class="p">([])</span>
+    <span class="n">edges</span> <span class="o">=</span> <span class="nb">set</span><span class="p">([])</span>
+    <span class="n">stmt_dict</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="c1"># Recursive function for processing all statements</span>
+    <span class="k">def</span> <span class="nf">process_stmt</span><span class="p">(</span><span class="n">stmt</span><span class="p">):</span>
+        <span class="n">nodes</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">matches_key</span><span class="p">()))</span>
+        <span class="n">stmt_dict</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">matches_key</span><span class="p">())]</span> <span class="o">=</span> <span class="n">stmt</span>
+        <span class="k">for</span> <span class="n">sby_ix</span><span class="p">,</span> <span class="n">sby_stmt</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">supported_by</span><span class="p">):</span>
+            <span class="n">edges</span><span class="o">.</span><span class="n">add</span><span class="p">((</span><span class="nb">str</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">matches_key</span><span class="p">()),</span> <span class="nb">str</span><span class="p">(</span><span class="n">sby_stmt</span><span class="o">.</span><span class="n">matches_key</span><span class="p">())))</span>
+            <span class="n">process_stmt</span><span class="p">(</span><span class="n">sby_stmt</span><span class="p">)</span>
+    <span class="c1"># Process all of the top-level statements, getting the supporting statements</span>
+    <span class="c1"># recursively</span>
+    <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="n">statements</span><span class="p">:</span>
+        <span class="n">process_stmt</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+    <span class="c1"># Create a networkx graph from the nodes</span>
+    <span class="n">nx_graph</span> <span class="o">=</span> <span class="n">nx</span><span class="o">.</span><span class="n">DiGraph</span><span class="p">()</span>
+    <span class="n">nx_graph</span><span class="o">.</span><span class="n">add_edges_from</span><span class="p">(</span><span class="n">edges</span><span class="p">)</span>
+    <span class="c1"># Perform transitive reduction if desired</span>
+    <span class="k">if</span> <span class="n">reduce</span><span class="p">:</span>
+        <span class="n">nx_graph</span> <span class="o">=</span> <span class="n">transitive_reduction</span><span class="p">(</span><span class="n">nx_graph</span><span class="p">)</span>
+    <span class="c1"># Create a pygraphviz graph from the nx graph</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">pgv_graph</span> <span class="o">=</span> <span class="n">pgv</span><span class="o">.</span><span class="n">AGraph</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;statements&#39;</span><span class="p">,</span> <span class="n">directed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                               <span class="n">rankdir</span><span class="o">=</span><span class="n">rankdir</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">NameError</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Cannot generate graph because &#39;</span>
+                     <span class="s1">&#39;pygraphviz could not be imported.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">nx_graph</span><span class="o">.</span><span class="n">nodes</span><span class="p">():</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt_dict</span><span class="p">[</span><span class="n">node</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">english</span><span class="p">:</span>
+            <span class="n">ea</span> <span class="o">=</span> <span class="n">EnglishAssembler</span><span class="p">([</span><span class="n">stmt</span><span class="p">])</span>
+            <span class="n">stmt_str</span> <span class="o">=</span> <span class="n">ea</span><span class="o">.</span><span class="n">make_model</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">stmt_str</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="n">pgv_graph</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="n">node</span><span class="p">,</span>
+                           <span class="n">label</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%s</span><span class="s1"> (</span><span class="si">%d</span><span class="s1">)&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">stmt_str</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span><span class="p">)),</span>
+                           <span class="o">**</span><span class="n">agent_style</span><span class="p">)</span>
+    <span class="n">pgv_graph</span><span class="o">.</span><span class="n">add_edges_from</span><span class="p">(</span><span class="n">nx_graph</span><span class="o">.</span><span class="n">edges</span><span class="p">())</span></div>
+    <span class="k">return</span> <span class="n">pgv_graph</span>
+
+
+
+<div class="viewcode-block" id="flatten_stmts"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.flatten_stmts">[docs]</a><span class="k">def</span> <span class="nf">flatten_stmts</span><span class="p">(</span><span class="n">stmts</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return the full set of unique stms in a pre-assembled stmt graph.</span>
+
+<span class="sd">    The flattened list of of statements returned by this function can be</span>
+<span class="sd">    compared to the original set of unique statements to make sure no</span>
+<span class="sd">    statements have been lost during the preassembly process.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        A list of top-level statements with associated supporting statements</span>
+<span class="sd">        resulting from building a statement hierarchy with</span>
+<span class="sd">        :py:meth:`combine_related`.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        List of all statements contained in the hierarchical statement graph.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    Calling :py:meth:`combine_related` on two statements results in one</span>
+<span class="sd">    top-level statement; calling :py:func:`flatten_stmts` recovers both:</span>
+
+<span class="sd">    &gt;&gt;&gt; from indra.preassembler.hierarchy_manager import hierarchies</span>
+<span class="sd">    &gt;&gt;&gt; braf = Agent(&#39;BRAF&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; map2k1 = Agent(&#39;MAP2K1&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; st1 = Phosphorylation(braf, map2k1)</span>
+<span class="sd">    &gt;&gt;&gt; st2 = Phosphorylation(braf, map2k1, residue=&#39;S&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; pa = Preassembler(hierarchies, [st1, st2])</span>
+<span class="sd">    &gt;&gt;&gt; pa.combine_related() # doctest:+ELLIPSIS</span>
+<span class="sd">    [Phosphorylation(BRAF(), MAP2K1(), S)]</span>
+<span class="sd">    &gt;&gt;&gt; flattened = flatten_stmts(pa.related_stmts)</span>
+<span class="sd">    &gt;&gt;&gt; flattened.sort(key=lambda x: x.matches_key())</span>
+<span class="sd">    &gt;&gt;&gt; flattened</span>
+<span class="sd">    [Phosphorylation(BRAF(), MAP2K1()), Phosphorylation(BRAF(), MAP2K1(), S)]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">total_stmts</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="n">stmts</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">stmt</span><span class="o">.</span><span class="n">supported_by</span><span class="p">:</span>
+            <span class="n">children</span> <span class="o">=</span> <span class="n">flatten_stmts</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">supported_by</span><span class="p">)</span>
+            <span class="n">total_stmts</span> <span class="o">=</span> <span class="n">total_stmts</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="n">children</span><span class="p">)</span></div>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">total_stmts</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_flatten_evidence_for_stmt</span><span class="p">(</span><span class="n">stmt</span><span class="p">):</span>
+    <span class="n">total_evidence</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">supp_stmt</span> <span class="ow">in</span> <span class="n">stmt</span><span class="o">.</span><span class="n">supported_by</span><span class="p">:</span>
+        <span class="n">child_evidence</span> <span class="o">=</span> <span class="n">_flatten_evidence_for_stmt</span><span class="p">(</span><span class="n">supp_stmt</span><span class="p">)</span>
+        <span class="n">total_evidence</span> <span class="o">=</span> <span class="n">total_evidence</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="n">child_evidence</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">total_evidence</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="flatten_evidence"><a class="viewcode-back" href="../../modules/preassembler/index.html#indra.preassembler.flatten_evidence">[docs]</a><span class="k">def</span> <span class="nf">flatten_evidence</span><span class="p">(</span><span class="n">stmts</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Add evidence from *supporting* stmts to evidence for *supported* stmts.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        A list of top-level statements with associated supporting statements</span>
+<span class="sd">        resulting from building a statement hierarchy with</span>
+<span class="sd">        :py:meth:`combine_related`.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    stmts : list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">        Statement hierarchy identical to the one passed, but with the</span>
+<span class="sd">        evidence lists for each statement now containing all of the evidence</span>
+<span class="sd">        associated with the statements they are supported by.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    Flattening evidence adds the two pieces of evidence from the supporting</span>
+<span class="sd">    statement to the evidence list of the top-level statement:</span>
+
+<span class="sd">    &gt;&gt;&gt; from indra.preassembler.hierarchy_manager import hierarchies</span>
+<span class="sd">    &gt;&gt;&gt; braf = Agent(&#39;BRAF&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; map2k1 = Agent(&#39;MAP2K1&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; st1 = Phosphorylation(braf, map2k1,</span>
+<span class="sd">    ... evidence=[Evidence(text=&#39;foo&#39;), Evidence(text=&#39;bar&#39;)])</span>
+<span class="sd">    &gt;&gt;&gt; st2 = Phosphorylation(braf, map2k1, residue=&#39;S&#39;,</span>
+<span class="sd">    ... evidence=[Evidence(text=&#39;baz&#39;), Evidence(text=&#39;bak&#39;)])</span>
+<span class="sd">    &gt;&gt;&gt; pa = Preassembler(hierarchies, [st1, st2])</span>
+<span class="sd">    &gt;&gt;&gt; pa.combine_related() # doctest:+ELLIPSIS</span>
+<span class="sd">    [Phosphorylation(BRAF(), MAP2K1(), S)]</span>
+<span class="sd">    &gt;&gt;&gt; [e.text for e in pa.related_stmts[0].evidence] # doctest:+IGNORE_UNICODE</span>
+<span class="sd">    [&#39;baz&#39;, &#39;bak&#39;]</span>
+<span class="sd">    &gt;&gt;&gt; flattened = flatten_evidence(pa.related_stmts)</span>
+<span class="sd">    &gt;&gt;&gt; sorted([e.text for e in flattened[0].evidence]) # doctest:+IGNORE_UNICODE</span>
+<span class="sd">    [&#39;bak&#39;, &#39;bar&#39;, &#39;baz&#39;, &#39;foo&#39;]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Copy all of the statements--these will be the ones where we update</span>
+    <span class="c1"># the evidence lists</span>
+    <span class="n">copied_stmts</span> <span class="o">=</span> <span class="n">fast_deepcopy</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="n">stmts</span><span class="p">:</span>
+        <span class="n">total_evidence</span> <span class="o">=</span> <span class="n">_flatten_evidence_for_stmt</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="n">stmt</span><span class="o">.</span><span class="n">evidence</span> <span class="o">=</span> <span class="n">total_evidence</span></div>
+    <span class="k">return</span> <span class="n">stmts</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../',
+            VERSION:'1.6.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>
