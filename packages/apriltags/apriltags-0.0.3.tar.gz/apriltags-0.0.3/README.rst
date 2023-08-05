@@ -1,0 +1,1 @@
+pip compatible packaging of https://github.com/swatbotics/apriltag'
