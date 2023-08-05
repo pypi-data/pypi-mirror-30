@@ -1,0 +1,90 @@
+import numpy as np
+from .mesh_helper import calculateFaceNormals, calculatePointNormals
+
+class Mesh():
+    """
+    A polygonal mesh. Faces can have varying valence.
+    """
+    
+    def __init__(self, vertices, face_indices, normals=None, colors=None, uvs=None):
+        self.normals = normals
+        self.colors = colors
+        self.uvs = uvs
+        
+        self.face_valence = (face_indices != -1).sum(1)
+
+        minValence = self.face_valence.min(axis = 0)
+        maxValuence = self.face_valence.max(axis = 0)
+        self.uniform_valence = minValence == maxValuence
+        
+        self.is_triangulated = self.uniform_valence and self.face_valence[0] == 3
+
+        self.vertices = vertices
+        self.face_indices = face_indices
+
+    def prepare_render(self):
+        if not self.normals:
+            self.calculateNormals()
+
+        self.triangulate()
+
+        if self.normals: 
+            self.normals.face_remap = self.triangulate_face_to_attribute_face
+        
+        if self.colors:
+            self.colors.face_remap = self.triangulate_face_to_attribute_face
+        
+        if self.uvs:
+            self.uvs.face_remap = self.triangulate_face_to_attribute_face
+
+    def calculateNormals(self, normal_element = 'face'):
+        assert(normal_element is 'face' or normal_element is 'point')
+        
+        if normal_element is 'face':
+            self.normals = calculateFaceNormals(self.vertices, self.face_indices)
+        else:
+            self.normals = calculatePointNormals(self.vertices, self.face_indices)
+
+    def triangulate(self):
+        if self.is_triangulated:
+            self.tri_face_indices = self.face_indices
+            self.triangulate_face_to_attribute_face = np.arange(len(self.face_indices))
+            return
+        
+        new_faces = []
+
+        triangulate_face_to_attribute_face = []
+
+        for fid, face in enumerate(self.face_indices):
+            originVertex = face[0]
+            for in_face_idx in range(2, self.face_valence[fid]):
+                triangulate_face_to_attribute_face.append(fid)
+                new_faces.append([originVertex, face[in_face_idx-1], face[in_face_idx]])
+
+        self.triangulate_face_to_attribute_face = np.array(triangulate_face_to_attribute_face)
+        self.tri_face_indices = np.array(new_faces)
+        
+        self.is_triangulated = True
+        
+        
+
+class PointList():
+    def __init__(self, vertices, colors = None, uvs = None):
+        self.vertices = vertices
+        self.colors = colors
+        self.uvs = uvs
+
+    def prepare_render(self):
+        pass
+
+
+class EdgeList():
+
+    def __init__(self, vertices, edge_indices, colors=None, uvs=None):
+        self.vertices = vertices
+        self.edge_indices = edge_indices
+        self.colors = colors
+        self.uvs = uvs
+
+    def prepare_render(self):
+        pass
