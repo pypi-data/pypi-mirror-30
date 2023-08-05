@@ -1,0 +1,100 @@
+#!/usr/bin/python3.6
+# -*- coding: UTF-8 -*-
+#
+#  Author: kanazuchi <contato@kanazuchi.com>
+#
+#  Bot para listar os mobs do Summoners War
+#  Pra gente como eu não ficar boiando quando alguém falar o nome
+#  do mob despertado e não saber de quem estão falando :3
+#  Ele herdou uma função /tempo de outro bot pra mostrar a previsão
+#  de tempo pra cidade escolhida :)
+#
+
+
+import os
+import telegram
+from bot_wars import list_events, list_mobs, get_info
+from telegram.ext import Updater
+from telegram.ext import CommandHandler
+
+
+if os.path.exists('/usr/local/etc/bot_token'):
+    ntoken = open('/usr/local/etc/bot_token', 'r').read().split('\n')[0]
+else:
+    print("The file with the bot token does not exists, please, be smart!")
+    os.kill(os.getpid(), 9)
+
+bot = telegram.Bot(token=ntoken)
+updater = Updater(token=ntoken)
+dispatcher = updater.dispatcher
+
+
+def skills(bot, update):
+    get_name = update.message['text'][8:].lower()
+    mob_info = get_info(get_name)
+    message_list = []
+    for x in [s for s in mob_info[get_name]['skills']]:
+        message_list.append("*{}*\n_{}_".format(
+            x, mob_info[get_name]['skills'][x]['description']))
+        message_list.append("*Multiplicador:* _{}_".format(
+            mob_info[get_name]['skills'][x]['multiplier']))
+        message_list.append("*Skill Ups:*\n_{}_".format(
+            mob_info[get_name]['skills'][x]['skill_up']))
+    message = "\n".join(message_list)
+    bot.sendMessage(
+        chat_id=update.message.chat_id, text=message, parse_mode="markdown")
+
+
+def info(bot, update):
+    get_name = update.message['text'][6:]
+    mobs = list_mobs()
+    mob = mobs[get_name.lower()]
+    mob_info = get_info(get_name.lower())
+    message = "\n".join([
+        "\nNome: *{}*".format(get_name[0].upper() + get_name[1:].lower()),
+        "Elemento: *{}*".format(mob['element']),
+        "Classe: *{}*".format(mob['class']),
+        "Runas inicio: *{}*".format(mob['early-runes']),
+        "Runas Final: *{}*".format(mob['late-runes']),
+        "Level: *{}*".format(mob_info[get_name.lower()]['stats']['Level']),
+        "Stars: *{}*".format(mob_info[get_name.lower()]['stats']['Stars']),
+        "Atk: *{}*".format(mob_info[get_name.lower()]['stats']['Atk']),
+        "Def: *{}*".format(mob_info[get_name.lower()]['stats']['Def']),
+        "HP: *{}*".format(mob_info[get_name.lower()]['stats']['HP']),
+        "[Link]({})".format(mob['link'])])
+    bot.sendMessage(
+        chat_id=update.message.chat_id, text=message, parse_mode="markdown")
+
+
+def mobs(bot, update):
+    get_name = update.message['text'][6:]
+    mobs = list_mobs()
+    message = "\n".join([
+        "{} -> {}".format(mobs[x]['class'], mobs[x]['name']) for x in mobs
+        if get_name.lower() in mobs[x]['class'].lower()])
+    bot.sendMessage(chat_id=update.message.chat_id, text=message)
+
+
+def start(bot, update):
+    bot.sendMessage(
+            chat_id=update.message.chat_id, text="HI, talk DIRT to me!!!")
+
+
+def event(bot, update):
+    message = list_events()
+    bot.sendMessage(chat_id=update.message.chat_id, text=message)
+
+
+start_handler = CommandHandler('start', start)
+dispatcher.add_handler(start_handler)
+event_handler = CommandHandler('event', event)
+dispatcher.add_handler(event_handler)
+mobs_handler = CommandHandler('mobs', mobs)
+dispatcher.add_handler(mobs_handler)
+info_handler = CommandHandler('info', info)
+dispatcher.add_handler(info_handler)
+skills_handler = CommandHandler('skills', skills)
+dispatcher.add_handler(skills_handler)
+
+
+updater.start_polling()
