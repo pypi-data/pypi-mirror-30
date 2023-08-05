@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+
+import filecmp
+import fnmatch
+import os
+import shutil
+import sys
+
+from copy import copy
+from os import path
+from subprocess import Popen
+
+
+here = path.abspath(path.dirname(__file__))
+
+
+def clone_src(topdir, tempdir, verbose=False):
+    patterns=['*.py']
+    for root, dirs, files in os.walk(topdir):
+        for pattern in patterns:
+            for f in fnmatch.filter(files, pattern):
+                if verbose:
+                    print(f, end='...')
+                infile = path.join(root, f)
+                relpath = path.relpath(root, topdir)
+                outfile = path.join(tempdir, 'tecplot', relpath, f)
+                if not (path.exists(outfile) and
+                        filecmp.cmp(infile, outfile, shallow=False)):
+                    if not path.exists(path.dirname(outfile)):
+                        os.makedirs(path.dirname(outfile))
+                    shutil.copy(infile, outfile)
+                    if verbose:
+                        print('copied')
+                else:
+                    if verbose:
+                        print('no changes')
+
+
+def replace_docs(topdir, docdb, verbose=False):
+    scripts_dir = path.normpath(path.join(here, '..', '..', 'scripts'))
+    if verbose:
+        print('scripts dir:', scripts_dir)
+        print('docs database file:', docdb)
+    cmd = '{} {} {} -t {} -d {}'.format(
+        sys.executable,
+        os.path.join(scripts_dir, 'pytec-docgen'),
+        '-v' if verbose else '',
+        topdir,
+        docdb)
+    env = copy(os.environ)
+    env['PATH'] = scripts_dir + os.pathsep + env['PATH']
+    if verbose:
+        print('replacing doc tags...')
+
+    proc = Popen(cmd, shell=True, env=env)
+
+    proc.wait()
+    if verbose:
+        print('done.')
+
+
+def build_html(topdir, verbose=False):
+    cmds = ['make apidoc', 'make html']
+    env = copy(os.environ)
+    env['PYTHONPATH'] = topdir
+    if verbose:
+        print('building html...')
+    for cmd in cmds:
+        proc = Popen(cmd, shell=True, env=env, cwd=here)
+        retcode = proc.wait()
+    if verbose:
+        print('done.')
+    return retcode
+
+
+if __name__ == '__main__':
+    from argparse import ArgumentParser
+    from tempfile import TemporaryDirectory
+
+    parser = ArgumentParser()
+    parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('-i', '--inplace', action='store_true')
+
+    args = parser.parse_args()
+
+    module_dir = path.normpath(path.join(here, '..', 'tecplot'))
+    if args.verbose:
+        print('source dir:', module_dir)
+
+    if args.inplace:
+        replace_docs(module_dir, path.join('source', 'docdb.yaml'), args.verbose)
+        retcode = build_html(module_dir, args.verbose)
+    else:
+        dsrc = path.join(here, '.src')
+        if args.verbose:
+            print('temp src dir:', dsrc)
+        if not path.exists(dsrc):
+            if args.verbose:
+                print('creating temp src dir', dsrc)
+            os.makedirs(dsrc)
+
+        if args.verbose:
+            print('cloning src into temp src dir...')
+        clone_src(module_dir, dsrc, args.verbose)
+
+        dstaging =path.join(here, '.staging')
+        if not path.exists(dstaging):
+            os.makedirs(dstaging)
+
+        with TemporaryDirectory() as dtmp:
+            dtmpstaging = path.join(dtmp, 'tecplot')
+            shutil.copytree(path.join(dsrc, 'tecplot'), dtmpstaging)
+            replace_docs(dtmpstaging,
+                         path.join('source', 'docdb.yaml'),
+                         args.verbose)
+            for root, dirs, files in os.walk(dtmpstaging):
+                for f in files:
+                    infile = path.join(root, f)
+                    relpath = path.relpath(root, dtmpstaging)
+                    outfile = path.join(dstaging, 'tecplot', relpath, f)
+
+                    if not (path.exists(outfile) and
+                            filecmp.cmp(infile, outfile)):
+                        if not path.exists(path.dirname(outfile)):
+                            os.makedirs(path.dirname(outfile))
+                        if args.verbose:
+                            print(f)
+                        shutil.copy(infile, outfile)
+
+        retcode = build_html(dstaging, args.verbose)
+
+    sys.exit(retcode)
