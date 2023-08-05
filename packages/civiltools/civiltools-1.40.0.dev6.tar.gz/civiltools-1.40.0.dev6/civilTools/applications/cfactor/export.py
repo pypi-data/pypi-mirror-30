@@ -1,0 +1,147 @@
+# -*- coding: utf-8 -*-
+
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from PyQt5.QtPrintSupport import QPrinter
+from PyQt5.QtWebEngineWidgets import QWebEnginePage
+import os
+import pyqtgraph as pg
+from flashtext import KeywordProcessor
+
+
+def getLastSaveDirectory(f):
+    f = str(f)
+    return os.sep.join(f.split(os.sep)[:-1])
+
+class Export:
+
+    def __init__(self, widget, dirty, lastDirectory, html):
+        self.widget = widget
+        self.dirty = dirty
+        self.lastDirectory = lastDirectory
+        self.html = html
+
+    def to_pdf(self):
+        if not self.dirty:
+            QMessageBox.warning(self.widget, u'خروجی', u'نتیجه ای جهت ارسال وجود ندارد.')
+            return
+
+        filters = "pdf(*.pdf)"
+        filename, _ = QFileDialog.getSaveFileName(self.widget, u' Pdf خروجی به',
+                                               self.lastDirectory, filters)
+
+        if filename == '':
+            return
+        self.lastDirectory = getLastSaveDirectory(filename)
+        printer = QPrinter()
+        printer.setPageSize(QPrinter.A4)
+        printer.setResolution(300)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(filename)
+        web = QWebEnginePage()
+        # web.setHtml(self.html)
+        web.printToPdf(self.html)
+
+    def to_word(self):
+        if not self.dirty:
+            QMessageBox.warning(self.widget, u'خروجی', u'نتیجه ای جهت ارسال وجود ندارد')
+            return
+
+        html = self.html
+        html = html.encode('utf-8')
+        filters = "doc(*.doc);;odt(*.odt)"
+        filename, _ = QFileDialog.getSaveFileName(self.widget, u'OpenOffice & Word خروجی به',
+                                               self.lastDirectory, filters)
+        if filename == '':
+            return
+        self.lastDirectory = getLastSaveDirectory(filename)
+        fileSave = QFile(filename)
+        fileSave.open(QIODevice.WriteOnly)
+        fileSave.writeData(html)
+        fileSave.close()
+
+    def to_html(self):
+        if not self.dirty:
+            QMessageBox.warning(self.widget, u'خروجی', u'نتیجه ای جهت ارسال وجود ندارد')
+            return
+
+        html = self.html
+        html = html.encode('utf-8')
+        filters = "html(*.html)"
+        filename, _ = QFileDialog.getSaveFileName(self.widget, u' Html خروجی به',
+                                               self.lastDirectory, filters)
+
+        if filename == '':
+            return
+        self.lastDirectory = getLastSaveDirectory(filename)
+        fileSave = QFile(filename)
+        fileSave.open(QIODevice.WriteOnly)
+        fileSave.writeData(html)
+        fileSave.close()  
+
+    
+class ExportGraph:
+    def __init__(self, widget, lastDirectory, p):
+        self.widget = widget
+        self.lastDirectory = lastDirectory
+        self.p = widget.p
+
+    def to_image(self):
+        filters = "png(*.png);;jpg(*.jpg);;bmp(*.bmp);;eps(*.eps);;tif(*.tif);;jpeg(*.jpeg)"
+        filename, _ = QFileDialog.getSaveFileName(self.widget, u'خروجی منحنی ضریب بازتاب',
+                                               self.lastDirectory, filters)
+        if filename == '':
+            return
+        self.lastDirectory = getLastSaveDirectory(filename)
+        exporter = pg.exporters.ImageExporter(self.p)
+        exporter.parameters()['width'] = 1920   # (note this also affects height parameter)
+        #exporter.parameters()['height'] = 600
+        # save to file
+        exporter.export(filename)
+
+    def to_csv(self):
+        filters = "csv(*.csv)"
+        filename, _ = QFileDialog.getSaveFileName(self.widget, u'خروجی منحنی ضریب بازتاب',
+                                               self.lastDirectory, filters)
+
+        if filename == '':
+            return
+        self.lastDirectory = getLastSaveDirectory(filename)
+        exporter = pg.exporters.CSVExporter(self.p)
+        # save to file
+        exporter.export(filename)
+
+
+class ExportToEtabs:
+    def __init__(self, widget, lastDirectory, _input, ex, kx, ey, ky, ex_drift, kx_drift, ey_drift, ky_drift):
+        self.widget = widget
+        self.lastDirectory = lastDirectory
+        self._input = _input
+        self.EX = f"SHEARCOEFF {ex:.5f}  HEIGHTEXPONENT {kx:.4f}"
+        self.EY = f"SHEARCOEFF {ey:.4f}  HEIGHTEXPONENT {ky:.5f}"
+        self.EXDRIFT = f"SHEARCOEFF {ex_drift:.6f}  HEIGHTEXPONENT {kx_drift:.7f}"
+        self.EYDRIFT = f"SHEARCOEFF {ey_drift:.7f}  HEIGHTEXPONENT {ky_drift:.6f}"
+
+    def to_e2k(self):
+        filters = "e2k(*.e2k)"
+        filename, _ = QFileDialog.getSaveFileName(self.widget, u'خروجی به ایتبز',
+                                               self.lastDirectory, filters)
+
+        if filename == '':
+            return
+        self.lastDirectory = getLastSaveDirectory(filename)
+        keyword_dict = {
+            self.EX: ["SHEARCOEFF EXALL  HEIGHTEXPONENT KXALL", "SHEARCOEFF EX  HEIGHTEXPONENT KX"],
+            self.EY: ["SHEARCOEFF EYALL  HEIGHTEXPONENT KYALL", "SHEARCOEFF EY  HEIGHTEXPONENT KY"],
+            self.EXDRIFT: ["SHEARCOEFF EXDRIFT  HEIGHTEXPONENT KXDRIFT"],
+            self.EYDRIFT: ["SHEARCOEFF EYDRIFT  HEIGHTEXPONENT KYDRIFT"]
+            }
+        keyword_processor = KeywordProcessor()
+        keyword_processor.add_keywords_from_dict(keyword_dict)
+        with open(self._input, 'r') as input_file:
+            lines = input_file.read()
+            with open(filename, 'w') as output_file:
+                keywords_found = keyword_processor.replace_keywords(lines)
+                output_file.write(keywords_found)
+
+    
