@@ -1,0 +1,195 @@
+{
+	"version": 0.1,
+	"checks": {
+		"employee.daily-whrs-capacity.exceed": {
+			"to_validate": {
+				"func": "na3x.validation.validator.aggregate",
+				"params": {
+					"extract": {
+						"db": "db_scrum_api",
+						"match": ["employee", "date"],
+						"collection": "sprint.allocations"
+					},
+					"substitute": {
+						"field": "whrs",
+						"match": ["employee", "date", "key", "group"]					
+					},
+					"aggregate": {
+						"func": "sum",
+						"field": "whrs"
+					}
+				},
+				"default": 0
+			},
+			"constraint": {
+				"func": "na3x.validation.validator.const",
+				"params": {
+					"value": 6
+				}
+			},
+			"compare": {
+				"func": "na3x.validation.validator.limit_exceed",
+				"violation": {
+					"severity": "warning",
+					"message": "Employee max capality ({:g} whrs per day) exceed"
+				}				
+			}			
+		},
+		"group.sprint-whrs-capacity.exceed": {
+			"to_validate": {
+				"func": "na3x.validation.validator.aggregate",
+				"params": {
+					"extract": {
+						"db": "db_scrum_api",						
+						"match": ["group"],
+						"collection": "sprint.allocations"
+					},
+					"substitute": {
+						"field": "whrs",
+						"match": ["employee", "date", "key", "group"]					
+					},
+					"aggregate": {
+						"func": "sum",
+						"field": "whrs"
+					}
+				},
+				"default": 0
+			},		
+			"constraint": {
+				"func": "na3x.validation.validator.extract",
+				"params": {
+					"db": "db_scrum_api",
+					"match": ["group"],
+					"collection": "project.team",			
+					"field": "capacity"
+				},
+				"default": 9999
+			},
+			"compare": {
+				"func": "na3x.validation.validator.limit_exceed",
+				"violation": {
+					"severity": "warning",
+					"message": "Group max capality ({:g} whrs per sprint) exceed"
+				}				
+			}			
+		},
+		"task.originalestimate.exceed": {
+			"to_validate": {
+				"func": "na3x.validation.validator.aggregate",
+				"params": {
+					"extract": {
+						"db": "db_scrum_api",					
+						"match": ["key"],
+						"collection": "sprint.allocations"
+					},
+					"substitute": {
+						"field": "whrs",
+						"match": ["employee", "date", "key", "group"]					
+					},
+					"aggregate": {
+						"func": "sum",
+						"field": "whrs"
+					}
+				},
+				"default": 0
+			},		
+			"constraint": {
+				"func": "na3x.validation.validator.extract",
+				"params": {
+					"db": "db_scrum_api",				
+					"match": ["key"],
+					"collection": "sprint.backlog",			
+					"field": "estimate"
+				},
+				"default": 9999
+			},
+			"compare": {
+				"func": "na3x.validation.validator.limit_exceed",
+				"violation": {
+					"severity": "warning",
+					"message": "Task original estimate ({:g} hrs) exceed"
+				}				
+			}			
+		},
+		"task.duedate.overdue": {
+			"to_validate": {
+				"func": "na3x.validation.validator.return_input",
+				"params": {
+					"field": "date"
+				}
+			},		
+			"constraint": {
+				"func": "na3x.validation.validator.extract",
+				"params": {
+					"db": "db_scrum_api",				
+					"match": ["key"],
+					"collection": "sprint.backlog",			
+					"field": "duedate"
+				},
+				"default": {
+					"value": "9999-12-31",
+					"type": "date"
+				}
+			},
+			"compare": {
+				"func": "na3x.validation.validator.limit_exceed",
+				"violation": {
+					"severity": "warning",
+					"message": "task's due date {:%Y-%m-%d} is passed"
+				}				
+			}	
+		},
+		"allocation.expertise.conflict": {
+			"constraint": {
+				"func": "na3x.validation.validator.extract",
+				"params": {
+					"db": "db_scrum_api",				
+					"match": ["key"],
+					"collection": "sprint.backlog",			
+					"field": "components"
+				},
+				"default": []
+			},		
+			"to_validate": {
+				"func": "na3x.validation.validator.extract",
+				"params": {
+					"db": "db_scrum_api",				
+					"match": ["group"],
+					"collection": "project.team",			
+					"field": "components"
+				},
+				"default": []
+			},
+			"compare": {
+				"func": "na3x.validation.validator.no_intersection",
+				"violation": {
+					"severity": "warning",
+					"message": "Task requires {} component(s) expertise"
+				}				
+			}	
+		},
+		"allocation.blocked.conflict": {
+			"to_validate": {
+				"func": "na3x.validation.validator.return_input",
+				"params": {
+					"field": "date"
+				}
+			},	
+			"constraint": {
+				"func": "ext.validators.get_linked_allocations",
+				"params": {
+					"type": "blocks",
+					"func": "min"
+				},
+				"default": []				
+			},
+			"compare": {
+				"func": "ext.validators.schedule_conflict_too_late",
+				"violation": {
+					"severity": "warning",
+					"message": "Conflict with blocked {} allocation {:%Y-%m-%d}"
+				}				
+			}				
+		}
+	}
+}

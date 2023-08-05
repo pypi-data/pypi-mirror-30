@@ -1,0 +1,158 @@
+{
+	"transformation-sets": {
+		"copy": {
+			"db": {
+				"src.db": "db_scrum_api",
+				"dest.db": "db_jira_export"
+			},
+			"transformations": {
+				"allocations": {
+					"class": "na3x.transformation.transformer.Col2XTransformation",
+					"cfg": {
+						"src.db.load": {
+							"src": "sprint.allocations"
+						},
+						"transform": {
+							"func": "na3x.transformation.transformer.copy"
+						},
+						"dest.db.cleanup": {
+							"target": "sprint.allocations"
+						},
+						"dest.db.save": {
+							"dest": "sprint.allocations"
+						}
+					}
+				},
+				"sprint-all-items": {
+					"class": "na3x.transformation.transformer.Col2XTransformation",
+					"cfg": {
+						"src.db.load": {
+							"src": "sprint.backlog"
+						},
+						"transform": {
+							"func": "na3x.transformation.transformer.copy",
+							"params": {
+								"fields": ["key"]
+							}
+						},
+						"dest.db.cleanup": {
+							"target": "sprint.idx_all_items"
+						},
+						"dest.db.save": {
+							"dest": "sprint.idx_all_items"
+						}
+					}
+				}				
+			}
+		},
+		"transform": {
+			"db": {
+				"src.db": "db_jira_export",
+				"dest.db": "db_jira_export"
+			},
+			"transformations": {
+				"allocations-label": {
+					"class": "na3x.transformation.transformer.Col2XTransformation",
+					"cfg": {
+						"src.db.load": {
+							"src": "sprint.allocations"
+						},
+						"transform": {
+							"func": "na3x.transformation.transformer.format",
+							"params": {
+								"format.string": "{}_{:%Y-%m-%d}",
+								"format.input": [
+									{
+										"field": "group",
+										"type": "string"
+									},									
+									{
+										"field": "date",
+										"type": "date"
+									}									
+								],
+								"result.field": "label" 
+							}								
+						},
+						"dest.db.cleanup": {
+							"target": "sprint.allocations_raw"
+						},
+						"dest.db.save": {
+							"dest": "sprint.allocations_raw"
+						}
+					}
+				},				
+				"sprint-allocation-search-transpose": {
+					"class": "na3x.transformation.transformer.Col2XTransformation",
+					"cfg": {
+						"src.db.load": {
+							"src": "sprint.allocations_raw"
+						},
+						"transform": {
+							"func": "na3x.transformation.transformer.group_singles2array",
+							"params": {
+								"field.key": "key",
+								"field.array": "label",
+								"field.single": "label"								
+							}						
+						},
+						"dest.db.cleanup": {
+							"target": "sprint.allocations_search_labels"
+						},
+						"dest.db.save": {
+							"dest": "sprint.allocations_search_labels"
+						}						
+					}
+				},
+				"sprint-allocation-label-join": {
+					"class": "na3x.transformation.transformer.MultiCol2XTransformation",
+					"cfg": {
+						"src.db.load": {
+							"src": ["sprint.idx_all_items", "sprint.allocations_search_labels"]
+						},
+						"transform": {
+							"func": "na3x.transformation.transformer.left_join",
+							"params": {
+								"col.right": "sprint.idx_all_items",
+								"col.left": "sprint.allocations_search_labels",
+								"field.join": "key"								
+							}						
+						},
+						"dest.db.cleanup": {
+							"target": "sprint.allocations_label"
+						},
+						"dest.db.save": {
+							"dest": "sprint.allocations_label"
+						}						
+					}
+				},
+				"sprint-allocation-label-notnull": {
+					"class": "na3x.transformation.transformer.Col2XTransformation",
+					"cfg": {
+						"src.db.load": {
+							"src": "sprint.allocations_label"
+						},
+						"transform": {
+							"func": "na3x.transformation.transformer.replace",
+							"params": {
+								"replace": [
+									{
+										"field": "label",
+										"value.to_find": null,
+										"value.replace_with": []
+									}
+								]
+							}						
+						},
+						"dest.db.cleanup": {
+							"target": "sprint.allocations_label"
+						},
+						"dest.db.save": {
+							"dest": "sprint.allocations_label"
+						}						
+					}
+				}				
+			}
+		}
+	}
+}
