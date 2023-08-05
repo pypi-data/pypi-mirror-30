@@ -1,0 +1,105 @@
+PyIonic
+========================
+
+.. image:: https://readthedocs.org/projects/pyionic/badge/?version=latest
+   :target: http://pyionic.readthedocs.io/en/latest/?badge=latest
+   :alt: Documentation Status
+
+.. image:: https://travis-ci.org/ion-channel/pyionic.svg?branch=master
+   :target: https://travis-ci.org/ion-channel/pyionic
+
+.. image:: https://img.shields.io/pypi/v/pyionic.svg
+   :target: https://pypi.python.org/pypi/pyionic
+
+PyIonic is a Python library to interact with Ion Channel's API.
+With PyIonic it should be very easy for a user to interact with
+Ion Channel and get their data.
+
+Quick Start
+==================
+
+Install PyIonic:
+
+.. code-block:: console
+
+ pip install pyionic
+
+Set the IONCHANNEL_SECRET_KEY:
+
+.. code-block:: console
+
+ export IONCHANNEL_SECRET_KEY=####IONCHANNEL_SECRET_KEY####
+
+Examples
+=================
+
+Sample code to report the name, id, and source of all of the projects in a team.
+
+.. code-block:: python
+
+  from pyionic import core
+  users = core.Users()
+  team_id = list(users.get_self()['data']['teams'].keys())[0]
+  projects = core.Projects()
+  print('--------------------------------')
+  for project in projects.get_projects(team_id)['data']:
+      print('Name: %s' % project['name'])
+      print('ID: %s' % project['id'])
+      print('Source: %s' % project['source'])
+      print('--------------------------------')
+
+
+Sample code to get an analysis for all projects in a team. Reports the name, id,
+source and if the project passed the last analysis.
+
+.. code-block:: python
+
+  from pyionic import core
+  users = core.Users()
+  team_id = list(users.get_self()['data']['teams'].keys())[0]
+  projects = core.Projects()
+  analysis = core.Analysis()
+  print('--------------------------------')
+  for project in projects.get_projects(team_id)['data']:
+      print('Name: %s' % project['name'])
+      print('ID: %s' % project['id'])
+      print('Source: %s' % project['source'])
+      analysis_id = analysis.get_analysis_summery(
+          team_id=team_id,
+          project_id=project['id']
+      )['data']['id']
+      if analysis.get_analysis(
+          team_id=team_id,
+          project_id=project['id'],
+          analysis_id=analysis_id
+      )['data']['status'] == 'finished':
+          print('Scan is good!')
+      print('--------------------------------')
+
+Sample code to count all of the vulnerabilities for Python 3.4
+
+.. code-block:: python
+
+  from pyionic import core
+  vuln = core.Vulnerability()
+  vulnerabilities = vuln.get_vulnerabilities('python', '3.4')
+  print('%s total vulnerabilities found.' % vulnerabilities['meta']['total_count'])
+
+
+Tests
+==================
+
+To setup tests you must first export a valid token for the pyionic test team:
+
+.. code-block:: console
+
+ export IONCHANNEL_SECRET_KEY=####IONCHANNEL_SECRET_KEY####
+
+
+Then run:
+
+.. code-block:: console
+
+ pipenv run python setup.py test
+
+
