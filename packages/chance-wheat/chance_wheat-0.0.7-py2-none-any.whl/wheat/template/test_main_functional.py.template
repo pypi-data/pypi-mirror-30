@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# File              : wheat/template/test_main_functional.py.template
+# Author            : Jimin Huang <huangjimin@whu.edu.cn>
+# Date              : 06.02.2018
+# Last Modified Date: 06.02.2018
+# Last Modified By  : Jimin Huang <huangjimin@whu.edu.cn>
+# -*- coding: utf-8 -*-
+# File: {FILE_NAME}
+# Author: {AUTHOR_NAME}
+import arrow
+import json
+import mock
+import os
+import sys
+
+from kafka import KafkaConsumer
+from nose.tools import assert_equals
+
+from {PROJECT_NAME} import main
+from {PROJECT_NAME}.constant import KAFKA_EXCEPTIONS_TOPIC
+
+
+class TestMain(object):
+    """Functional test class for ``main.main``
+    """
+    def setUp(self):
+        sys.argv = ['', '--config', 'debug']
+        try:
+            os.environ['KAFKA_HOST']
+        except KeyError:
+            os.environ['KAFKA_HOST'] = 'spotify-kafka'
+
+    def test_main_normal(self):
+        """Check if ``main.main`` works
+        """
+        pass
+
+    @mock.patch.object(main, 'run')
+    def test_main_exception_raised(self, mock_run):
+        """Check if `main.main` works when `main.run` raised exceptions
+
+        Args:
+            mock_run: the mock obj of `main.run`
+        """
+        mock_run.side_effect = KeyError('test')
+
+        expect = [{
+            u'status': u'error', u'service': u'{SERVICE_NAME}',
+            u'finish_time': None,
+            u'start_time': arrow.now().format('YYYY-MM-DD'),
+            u'instance_id': u'',
+            u'exception_info': u"'test'",
+            u'theme': u'{PROJECT_NAME}'
+        }]
+        consumer = KafkaConsumer(
+            KAFKA_EXCEPTIONS_TOPIC, bootstrap_servers=['spotify-kafka:9092'],
+            consumer_timeout_ms=5000, group_id='test',
+            auto_offset_reset='earliest',
+        )
+
+        main.main()
+
+        exceptions = [json.loads(msg.value) for msg in consumer]
+        for key in [u'instance_id', u'finish_time', u'start_time']:
+            expect[0][key] = exceptions[0][key]
+
+        assert_equals(expect, exceptions)
+        consumer.close()
