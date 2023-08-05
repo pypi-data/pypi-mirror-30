@@ -1,0 +1,43 @@
+- hosts: [all]
+  become: true
+  become_user: root
+  gather_facts: false
+  pre_tasks:
+  - name: Install python for Ansible
+    raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+    changed_when: False
+  - name: Enable IP Forwarding
+    raw: sysctl -w net.ipv4.ip_forward=1 || sysctl -p
+  - setup: # aka gather_facts
+  roles:
+    - { role: ansible-role-strongswan }
+  vars:
+    - strongswan_config_setup:
+        strictcrlpolicy: 'no'
+        charondebug: all
+    - strongswan_conn_default:
+        ikelifetime: 60m
+        keylife: 20m
+        rekeymargin: 3m
+        keyingtries: 1
+        keyexchange: ikev2
+        keyingtries: '%forever'
+    - strongswan_conns:
+        conn1:
+            authby: secret
+            auto: start
+            type: tunnel
+            left: '{{ local_ip }}'
+            leftid:  '{{ local_public_ip }}'
+            leftsubnet: '{{ local_subnet }}'
+            leftauth: psk
+            right: '{{ remote_public_ip }}'
+            rightsubnet: '{{ remote_subnet }}'
+            rightauth: psk
+            ike: aes128-sha1-modp1024
+            esp: aes128-sha1-modp1024
+    - strongswan_secrets:
+        - left: '{{ local_public_ip }}'
+          right: '{{ remote_public_ip }}'
+          type: PSK
+          credentials: '{{ psk }}'
