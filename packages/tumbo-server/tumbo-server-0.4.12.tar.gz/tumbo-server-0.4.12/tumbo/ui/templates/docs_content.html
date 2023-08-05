@@ -1,0 +1,318 @@
+<h1>User Guide</h1>
+<hr>
+<h2>Base</h2>
+<p>A Base is a runtime unit and is running in an isolated environment. It can have multiple Execs.</p>
+<h3>Start and Stop</h3>
+<p>The Base needs to run to execute Execs and to deliver static files to the client.</p>
+<h3>Export and Import</h3>
+<p>On the Base page you can export the configuration into a zip file. Later you
+can create or update the base on the same or on other platform.</p>
+<blockquote>
+<p>If a Base contains a lot of static files, export and import might fail because of timeouts!</p>
+</blockquote>
+<hr>
+<h2>CLI</h2>
+<p>The CLI is an alternative to the Web UI and support almost the same features. It can help you to automate tasks.</p>
+<pre><code>$ tumbo-cli.py
+Usage:
+tumbo-cli.py server dev run [--ngrok-hostname=host] [--ngrok-authtoken=token] [--autostart] [--coverage] [--settings=tumbo.dev]
+tumbo-cli.py server kubernetes run [--context=context] [--ingress]
+tumbo-cli.py server kubernetes delete [--context=context]
+tumbo-cli.py server docker run [--stop-after=&lt;seconds&gt;] [--ngrok-hostname=host] [--ngrok-authtoken=token]
+tumbo-cli.py server docker stop
+tumbo-cli.py server docker build
+tumbo-cli.py server docker pull
+tumbo-cli.py server docker url
+tumbo-cli.py server docker logs
+tumbo-cli.py env list
+tumbo-cli.py env &lt;env-id&gt; login &lt;url&gt;
+tumbo-cli.py env &lt;env-id&gt; logout
+tumbo-cli.py env &lt;env-id&gt; active
+tumbo-cli.py env &lt;env-id&gt; open
+tumbo-cli.py project list [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; show [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; open [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; start [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; stop [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; restart [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; destroy [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; delete [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; create [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; function &lt;function-name&gt; execute [--async] [--public] [--nocolor] [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; function &lt;function-name&gt; create [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; function &lt;function-name&gt; edit [--env=&lt;env&gt;]
+tumbo-cli.py project &lt;base-name&gt; transactions [--tid=&lt;tid&gt;]  [--logs] [--cut=&lt;cut&gt;] [--nocolor] [--env=&lt;env&gt;]
+</code></pre>
+<hr>
+<h2>Static Files</h2>
+<p>Place static files in a folder <code>static</code> on the Dropbox base directory. When a static file is
+accessed, the file is read from your Dropbox and then cached on Tumbo for {{ TUMBO_STATIC_CACHE_SECONDS }} seconds.</p>
+<p>{% verbatim %}
+Static files can be accessed over <code>https://HOST/userland/USERNAME/PROJECT_NAME/static/FILE</code>.
+The URL until the word <em>static</em> is available as variable in HTML files as {{ TUMBO_STATIC_URL }}.
+{% endverbatim %}</p>
+<p>Files are loaded from following locations (first match is served):</p>
+<h3>Dropbox App Directory</h3>
+<p>{% verbatim %}
+After connecting your Dropbox Account with Tumbo you find a directory {{ TUMBO_DROPBOX_APP_NAME }}. When creating a project a directory is created. Place in it a directory static with files.
+{% endverbatim %}</p>
+<h3>Python Module installed in Worker</h3>
+<p>Create a Python Module with a directory static in it and install the module in your worker:</p>
+<pre><code>def func(self, r=""):
+    import os, sys
+    module = "-e " + self.settings.GIT_URL
+    pip = os.path.join(os.path.dirname(sys.executable), "pip")
+        r=os.popen("%s install --upgrade %s" % (pip, module)).read()
+    return r
+</code></pre>
+<h3></h3>
+<hr>
+<h2>Exec</h2>
+<p>An Exec is function, which can be called by an HTTP Request to <code>https://HOST/userland/USERNAME/johndoe/helloworld/api/apy/greet</code>.</p>
+<h3>Editing</h3>
+<p>You can edit the Execs in the browser editor or in the Dropbox base folder.</p>
+<p>An Exec is always a function named <code>func</code> with an argument:</p>
+<pre><code>def func(self):
+    return True
+</code></pre>
+<p>The single argument, here called self, contains data about the request and has functions attached:</p>
+<p>If the Exec has changed on Dropbox, it will be refreshed on <em>Tumbo</em> automatically. This can take up to 30 seconds.</p>
+<h3>Initialize</h3>
+<p>If you need to install i.e. Python modules or do any specific work in a base after startup, you can use this feature. On startup of a base the exec with the name <code>init</code> is called with a HTTP GET Request.</p>
+<h3>Logging</h3>
+<p>From within python code write log messages with following line:</p>
+<p><code>self.error(self.rid, "error")</code></p>
+<p><code>self.warn(self.rid, "warn")</code></p>
+<p><code>self.info(self.rid, "info")</code></p>
+<p><code>self.debug(self.rid, "debug")</code></p>
+<p>The log messages are attached to the transaction and Tumbo's <em>CLi</em> displays the log:</p>
+<pre><code>tumbo-cli.py project helloworld transactions
+</code></pre>
+<h3>Install packages</h3>
+<p>Often your application has dependencies of other software. Tumbo provides following two methods to install software. Both methods return the command's output.</p>
+<h4>OS Packages</h4>
+<pre><code>self.package_install("packageA")
+</code></pre>
+<h4>Python Packages</h4>
+<pre><code>self.pip_install("packageA")
+</code></pre>
+<p>or</p>
+<pre><code>self.pip_install("packageA==0.2.1")
+</code></pre>
+<h3>Siblings</h3>
+<p>Siblings are Exec's in the same base and are available for execution on <code>self.siblings.NAME</code>.</p>
+<pre><code>def func(self):
+    return self.siblings.another_exec(self)
+</code></pre>
+<h3>Request Arguments</h3>
+<p>In the Exec following request data is available:</p>
+<ul>
+<li>
+<p>HTTP Request Method <code>self.method</code></p>
+</li>
+<li>
+<p>HTTP Header Content-Type <code>self.content_type</code></p>
+</li>
+<li>
+<p>GET parameters <code>self.GET</code></p>
+</li>
+<li>
+<p>POST parameters <code>self.POST</code></p>
+</li>
+<li>
+<p>Clients IP Address <code>self.REMOTE_ADDR</code></p>
+</li>
+<li>
+<p>Users identity</p>
+</li>
+</ul>
+<p>The users identity call is available on <code>self.identiy</code> as dictionary:</p>
+<pre><code>{
+    "username": "user1",
+    "type": "AuthenticatedUser",
+    "email": "user1@example.com",
+    "internalid": "177899378"
+}
+</code></pre>
+<p>Type can be AuthenticatedUser or AnonymousUser.</p>
+<h3>Responses</h3>
+<h4>HTML (text/html)</h4>
+<pre><code>def func(self):
+    return self.responses.HTMLResponse("&lt;html&gt;&lt;body&gt;Hello World&lt;/body&gt;&lt;/html&gt;")
+</code></pre>
+<h4>JSON (application/json)</h4>
+<pre><code>def func(self):
+    return self.responses.JSONResponse("{'a': 'b'}")
+</code></pre>
+<h4>XML (application/xml)</h4>
+<pre><code>def func(self):
+    return self.responses.XMLResponse("&lt;note&gt;&lt;text&gt;hello&lt;/text&gt;&lt;/note&gt;")
+</code></pre>
+<h4>HTTP Redirect</h4>
+<pre><code>def func(self):
+    return self.responses.RedirectResponse("http://another-url")
+</code></pre>
+<h3>Actions</h3>
+<p>On a response an action with the string "RESTART" can be added to restart the Base.</p>
+<pre><code>def func(self):
+    return self.responses.JSONResponse({'status': "installed"}, action="RESTART")
+</code></pre>
+<h3>Sharing</h3>
+<h4>Shared Exec's</h4>
+<p>You can make an Exec public. Public Exec's can be related to a Base.</p>
+<p>Related Exec's are available at <code>self.foreigns</code> as attribute.</p>
+<pre><code>def func(self):
+    return self.foreigns.yum_install(self)
+</code></pre>
+<h3>With Shared Key</h3>
+<p>Every base has a Shared-Key. Non-public bases can be used for anonymous users with providing a Querystring <code>shared_key</code>.</p>
+<h3>Public</h3>
+<p>A public base can be accessed and used by anonymous users.
+This configuration setting is for security reasons not exported. A base must be made public explicit.</p>
+<h3>Execution</h3>
+<h4>Curl</h4>
+<pre><code> curl -L -v "https://tumbo.example.com/userland/admin/base/hello-world/exec/echo/?json=&amp;shared_key=f241fcab-0323-42b5-ac17-94bfefd5df72"
+ {
+   "status": "OK",
+   "exception": null,
+   "returned": null,
+   "response_class": null,
+   "time_ms": "98",
+   "exception_message": null,
+   "rid": 17941542,
+   "id": "echo"
+ }
+</code></pre>
+<p>If the Exec raises an Exception the response status is <code>NOK</code>.</p>
+<pre><code> curl -L -v "https://tumbo.example.com/userland/base/hello-world/exec/echo/?json=&amp;shared_key=f241fcab-0323-42b5-ac17-94bfefd5df72"
+ {
+   "status": "NOK",
+   "exception": "Exception",
+   "returned": null,
+   "response_class": null,
+   "time_ms": "344",
+   "exception_message": "this text is raised",
+   "rid": 41447693,
+   "id": "echo"
+ }
+</code></pre>
+<h4>Browser</h4>
+<p>With the button <em>execute</em> the exec is always executed with a HTTP GET request. The response is visible in the log window.</p>
+<h4>Asynchronous</h4>
+<p><code>&amp;async</code></p>
+<p>When the key <em>async</em> is specified as query string, the client receives immediately a  'HTTP response status code 301 Moved Permanently' response.
+The response refers to a location which is enriched with a query string <code>rid</code> (request id). With this URL the client can poll and
+wait until the <code>status</code> is <code>FINISHED</code>.</p>
+<h3>Schedules</h3>
+<p>Add in the UI a configuration for a scheduled execution of a function. For example <code>0 */5 * * *</code> for every five minutes. (<code>second minute hour day_of_week</code>).</p>
+<hr>
+<h2>Settings</h2>
+<p>{% verbatim %}
+The settings you configured in a Base are rendered in static files ending with <code>.html</code> when used as <code>{{ SETTING_KEY }}</code> or
+in python code in a exec as <code>self.settings.SETTING_KEY</code>.
+{% endverbatim %}</p>
+<hr>
+<h2>Access Control</h2>
+<p><em>TODO</em></p>
+<h3>Core</h3>
+<h3>Userland</h3>
+<h3>Static</h3>
+<h3>Apy's</h3>
+<h2>Service Port</h2>
+<p>For every worker a service port is reserved. This let's you for example to run a webserver or any other daemon.</p>
+<h3>Port</h3>
+<pre><code>print os.environ['SERVICE_PORT']
+</code></pre>
+<h3>IP</h3>
+<p>To know on which IP address the service is reachable, get the following variable:</p>
+<pre><code>print os.environ['SERVICE_IP']
+</code></pre>
+<p>Use <code>SERVICE_IP6</code> for the IPv6 address.</p>
+<h3>DNS</h3>
+<p>A host record is registered in a DNS zone in the form:</p>
+<pre><code>USERNAME-BASENAME-INSTANCE_NUM[-V4,-V6].ZONE
+</code></pre>
+<p>Examples:</p>
+<p>IPv4 (A) and IPv6 (AAAA) record:</p>
+<pre><code>print os.environ['SERVICE_DNS']
+johndoe-helloworld-0.ZONE
+</code></pre>
+<p>IPv4 only:</p>
+<pre><code>print os.environ['SERVICE_DNS_V4']
+johndoe-helloworld-0-v4.ZONE
+</code></pre>
+<p>IPv6 only:</p>
+<pre><code>print os.environ['SERVICE_DNS_V6']
+johndoe-helloworld-0-v6.ZONE
+</code></pre>
+<hr>
+<h2>Datastore</h2>
+<p>The datastore lets you store and access data per base. The data get retained over base lifecycle.
+On <code>init</code> the datastore is not yet available.</p>
+<h3>API</h3>
+<h4>Store JSON data</h4>
+<pre><code>data = {"name": "Rolf"}
+self.datastore.write_dict(data)
+</code></pre>
+<h4>Get all stored data</h4>
+<pre><code>results = self.datastore.all()
+for row in results:
+     print row
+</code></pre>
+<h4>Filter data</h4>
+<p>Per value in key</p>
+<pre><code>self.datastore.filter("name", "Rolf")
+</code></pre>
+<h5>Get one row</h5>
+<pre><code>self.datastore.get("name", "Rolf")
+</code></pre>
+<h4>Update one row</h4>
+<pre><code>result_obj = self.datastore.get("function", "setUp")
+result_obj.data['function'] = "tearDown"
+self.datastore.save(result_obj)
+</code></pre>
+<h4>Delete one row</h4>
+<pre><code>row = self.datastore.get("name", "Rolf")
+self.datastore.delete(row)
+</code></pre>
+<h3>Static Files</h3>
+<p>You can access the data in the static files. The data is rendered on server-side.</p>
+<p>{% verbatim %}</p>
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;body&gt;
+    &lt;h1&gt;Hello World&lt;/h1&gt;
+    &lt;ul&gt;
+    {% for obj in datastore.all %}
+        &lt;li&gt;
+        Obj: {{ obj.data.name }} ({{ obj.created_on }})
+        &lt;/li&gt;
+    {% endfor %}
+    &lt;/ul&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+<p>{% endverbatim %}</p>
+<p>For querying only data for a logged in user, use the templatetag ˋdata_for_userˋ:</p>
+<p>{% verbatim %}
+    {% load datastore %}
+    {% data_for_user as data %}
+{% endverbatim %}</p>
+<hr>
+<h2>Transport</h2>
+<p>Transporting from one <em>Tumbo</em> platform to another uses internally the export and import feature.
+On the source platform you have to configure the transport endpoint, the token and how to handle settings.</p>
+<p>Then you can transport a Base to the target platform from the base page.</p>
+<pre><code>https://HOST/fastapp/api/base/import/
+</code></pre>
+<hr>
+<h2>Development</h2>
+<p>How you can run <em>Tumbo</em> as lite-version on your machine is documented on <a href="https://github.com/sahlinet/tumbo-server">github.com/sahlinet/tumbo-server</a></p>
+<h2>HTTP API</h2>
+<h3>Authorization</h3>
+<p>The API uses an authentication mechanism with a per user token. HTTP-Requests to the API must include a header like:</p>
+<pre><code>Authorization: Token YOUR-TOKEN
+</code></pre>
+<p>The token can be grabbed from your profile page.</p>
+<h3>API Docs</h3>
+<p><a target="_blank" href="{% url 'api-docs' %}#!/api">API Documentation</a></p>
