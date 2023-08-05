@@ -1,0 +1,33 @@
+import abc
+from typing import List, Any
+
+from Cipher.core.connection import Connection
+
+
+class Target(abc.ABC):
+    type: str
+
+    def __init__(self, conn: Connection) -> None: ...
+    conn: Connection
+
+    async def send_message(self, message: str, source: str='') -> None: ...
+    def get_message_maxlen(self) -> int: ...
+    def get_message_maxlines(self) -> int: ...
+
+class User(Target):
+    names: List[str]
+
+    def __init__(self, username: str, conn: Connection) -> None: ...
+    username: str
+    channels: List[Channel]
+
+    def __str__(self) -> str: ...
+    def __eq__(self, other: Any) -> bool: ...
+
+class Channel(Target):
+    def __init__(self, name: str, conn: Connection) -> None: ...
+    name: str
+    users: List[User]
+
+    def __str__(self) -> str: ...
+    def __eq__(self, other: Any) -> bool: ...
