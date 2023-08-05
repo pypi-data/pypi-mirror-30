@@ -1,0 +1,662 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.worker.request &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/worker/request.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.worker.request</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Task request.</span>
+
+<span class="sd">This module defines the :class:`Request` class, that specifies</span>
+<span class="sd">how tasks are executed.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">datetime</span>
+<span class="kn">from</span> <span class="nn">time</span> <span class="k">import</span> <span class="n">time</span>
+<span class="kn">from</span> <span class="nn">weakref</span> <span class="k">import</span> <span class="n">ref</span>
+
+<span class="kn">from</span> <span class="nn">billiard.common</span> <span class="k">import</span> <span class="n">TERM_SIGNAME</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.encoding</span> <span class="k">import</span> <span class="n">safe_repr</span><span class="p">,</span> <span class="n">safe_str</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.objects</span> <span class="k">import</span> <span class="n">cached_property</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">signals</span>
+<span class="kn">from</span> <span class="nn">celery.app.trace</span> <span class="k">import</span> <span class="n">trace_task</span><span class="p">,</span> <span class="n">trace_task_ret</span>
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="p">(</span><span class="n">Ignore</span><span class="p">,</span> <span class="n">InvalidTaskError</span><span class="p">,</span> <span class="n">Reject</span><span class="p">,</span> <span class="n">Retry</span><span class="p">,</span>
+                               <span class="n">TaskRevokedError</span><span class="p">,</span> <span class="n">Terminated</span><span class="p">,</span>
+                               <span class="n">TimeLimitExceeded</span><span class="p">,</span> <span class="n">WorkerLostError</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">monotonic</span><span class="p">,</span> <span class="n">python_2_unicode_compatible</span><span class="p">,</span> <span class="n">string</span>
+<span class="kn">from</span> <span class="nn">celery.platforms</span> <span class="k">import</span> <span class="n">signals</span> <span class="k">as</span> <span class="n">_signals</span>
+<span class="kn">from</span> <span class="nn">celery.utils.functional</span> <span class="k">import</span> <span class="n">maybe</span><span class="p">,</span> <span class="n">noop</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">celery.utils.nodenames</span> <span class="k">import</span> <span class="n">gethostname</span>
+<span class="kn">from</span> <span class="nn">celery.utils.serialization</span> <span class="k">import</span> <span class="n">get_pickled_exception</span>
+<span class="kn">from</span> <span class="nn">celery.utils.time</span> <span class="k">import</span> <span class="n">maybe_iso8601</span><span class="p">,</span> <span class="n">maybe_make_aware</span><span class="p">,</span> <span class="n">timezone</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="k">import</span> <span class="n">state</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Request&#39;</span><span class="p">,)</span>
+
+<span class="c1"># pylint: disable=redefined-outer-name</span>
+<span class="c1"># We cache globals and attribute lookups, so disable this warning.</span>
+
+<span class="n">IS_PYPY</span> <span class="o">=</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span> <span class="s1">&#39;pypy_version_info&#39;</span><span class="p">)</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="n">debug</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">warn</span><span class="p">,</span> <span class="n">error</span> <span class="o">=</span> <span class="p">(</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">,</span> <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">,</span>
+                            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">,</span> <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">)</span>
+<span class="n">_does_info</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="n">_does_debug</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<span class="k">def</span> <span class="nf">__optimize__</span><span class="p">():</span>
+    <span class="c1"># this is also called by celery.app.trace.setup_worker_optimizations</span>
+    <span class="k">global</span> <span class="n">_does_debug</span>
+    <span class="k">global</span> <span class="n">_does_info</span>
+    <span class="n">_does_debug</span> <span class="o">=</span> <span class="n">logger</span><span class="o">.</span><span class="n">isEnabledFor</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+    <span class="n">_does_info</span> <span class="o">=</span> <span class="n">logger</span><span class="o">.</span><span class="n">isEnabledFor</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+
+
+<span class="n">__optimize__</span><span class="p">()</span>  <span class="c1"># noqa: E305</span>
+
+<span class="c1"># Localize</span>
+<span class="n">tz_or_local</span> <span class="o">=</span> <span class="n">timezone</span><span class="o">.</span><span class="n">tz_or_local</span>
+<span class="n">send_revoked</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">task_revoked</span><span class="o">.</span><span class="n">send</span>
+
+<span class="n">task_accepted</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">task_accepted</span>
+<span class="n">task_ready</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">task_ready</span>
+<span class="n">revoked_tasks</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">revoked</span>
+
+
+<div class="viewcode-block" id="Request"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request">[docs]</a><span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">Request</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A request for task execution.&quot;&quot;&quot;</span>
+
+    <span class="n">acknowledged</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">time_start</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">worker_pid</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">time_limits</span> <span class="o">=</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">_already_revoked</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">_terminate_on_ack</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_apply_result</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_tzlocal</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">IS_PYPY</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+        <span class="vm">__slots__</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s1">&#39;app&#39;</span><span class="p">,</span> <span class="s1">&#39;type&#39;</span><span class="p">,</span> <span class="s1">&#39;name&#39;</span><span class="p">,</span> <span class="s1">&#39;id&#39;</span><span class="p">,</span> <span class="s1">&#39;root_id&#39;</span><span class="p">,</span> <span class="s1">&#39;parent_id&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;on_ack&#39;</span><span class="p">,</span> <span class="s1">&#39;body&#39;</span><span class="p">,</span> <span class="s1">&#39;hostname&#39;</span><span class="p">,</span> <span class="s1">&#39;eventer&#39;</span><span class="p">,</span> <span class="s1">&#39;connection_errors&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;task&#39;</span><span class="p">,</span> <span class="s1">&#39;eta&#39;</span><span class="p">,</span> <span class="s1">&#39;expires&#39;</span><span class="p">,</span> <span class="s1">&#39;request_dict&#39;</span><span class="p">,</span> <span class="s1">&#39;on_reject&#39;</span><span class="p">,</span> <span class="s1">&#39;utc&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;content_type&#39;</span><span class="p">,</span> <span class="s1">&#39;content_encoding&#39;</span><span class="p">,</span> <span class="s1">&#39;argsrepr&#39;</span><span class="p">,</span> <span class="s1">&#39;kwargsrepr&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;_decoded&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;__weakref__&#39;</span><span class="p">,</span> <span class="s1">&#39;__dict__&#39;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="n">on_ack</span><span class="o">=</span><span class="n">noop</span><span class="p">,</span>
+                 <span class="n">hostname</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">eventer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">connection_errors</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">request_dict</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">task</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">on_reject</span><span class="o">=</span><span class="n">noop</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">decoded</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">utc</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                 <span class="n">maybe_make_aware</span><span class="o">=</span><span class="n">maybe_make_aware</span><span class="p">,</span>
+                 <span class="n">maybe_iso8601</span><span class="o">=</span><span class="n">maybe_iso8601</span><span class="p">,</span> <span class="o">**</span><span class="n">opts</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">headers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">headers</span> <span class="o">=</span> <span class="n">message</span><span class="o">.</span><span class="n">headers</span>
+        <span class="k">if</span> <span class="n">body</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">body</span> <span class="o">=</span> <span class="n">message</span><span class="o">.</span><span class="n">body</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">message</span> <span class="o">=</span> <span class="n">message</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">body</span> <span class="o">=</span> <span class="n">body</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">utc</span> <span class="o">=</span> <span class="n">utc</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_decoded</span> <span class="o">=</span> <span class="n">decoded</span>
+        <span class="k">if</span> <span class="n">decoded</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">content_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">content_encoding</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">content_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">content_encoding</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">message</span><span class="o">.</span><span class="n">content_type</span><span class="p">,</span> <span class="n">message</span><span class="o">.</span><span class="n">content_encoding</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="n">headers</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+        <span class="nb">type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">headers</span><span class="p">[</span><span class="s1">&#39;task&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">root_id</span> <span class="o">=</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;root_id&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">parent_id</span> <span class="o">=</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;parent_id&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;shadow&#39;</span> <span class="ow">in</span> <span class="n">headers</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">headers</span><span class="p">[</span><span class="s1">&#39;shadow&#39;</span><span class="p">]</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+        <span class="k">if</span> <span class="s1">&#39;timelimit&#39;</span> <span class="ow">in</span> <span class="n">headers</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">time_limits</span> <span class="o">=</span> <span class="n">headers</span><span class="p">[</span><span class="s1">&#39;timelimit&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">argsrepr</span> <span class="o">=</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;argsrepr&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">kwargsrepr</span> <span class="o">=</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;kwargsrepr&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_ack</span> <span class="o">=</span> <span class="n">on_ack</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_reject</span> <span class="o">=</span> <span class="n">on_reject</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hostname</span> <span class="o">=</span> <span class="n">hostname</span> <span class="ow">or</span> <span class="n">gethostname</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eventer</span> <span class="o">=</span> <span class="n">eventer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">connection_errors</span> <span class="o">=</span> <span class="n">connection_errors</span> <span class="ow">or</span> <span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task</span> <span class="o">=</span> <span class="n">task</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="nb">type</span><span class="p">]</span>
+
+        <span class="c1"># timezone means the message is timezone-aware, and the only timezone</span>
+        <span class="c1"># supported at this point is UTC.</span>
+        <span class="n">eta</span> <span class="o">=</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;eta&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">eta</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">eta</span> <span class="o">=</span> <span class="n">maybe_iso8601</span><span class="p">(</span><span class="n">eta</span><span class="p">)</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">InvalidTaskError</span><span class="p">(</span>
+                    <span class="s1">&#39;invalid ETA value </span><span class="si">{0!r}</span><span class="s1">: </span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">eta</span><span class="p">,</span> <span class="n">exc</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">eta</span> <span class="o">=</span> <span class="n">maybe_make_aware</span><span class="p">(</span><span class="n">eta</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">tzlocal</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">eta</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">expires</span> <span class="o">=</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;expires&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">expires</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">expires</span> <span class="o">=</span> <span class="n">maybe_iso8601</span><span class="p">(</span><span class="n">expires</span><span class="p">)</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">InvalidTaskError</span><span class="p">(</span>
+                    <span class="s1">&#39;invalid expires value </span><span class="si">{0!r}</span><span class="s1">: </span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="n">exc</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="o">=</span> <span class="n">maybe_make_aware</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">tzlocal</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">delivery_info</span> <span class="o">=</span> <span class="n">message</span><span class="o">.</span><span class="n">delivery_info</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">properties</span> <span class="o">=</span> <span class="n">message</span><span class="o">.</span><span class="n">properties</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">headers</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+            <span class="s1">&#39;reply_to&#39;</span><span class="p">:</span> <span class="n">properties</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;reply_to&#39;</span><span class="p">),</span>
+            <span class="s1">&#39;correlation_id&#39;</span><span class="p">:</span> <span class="n">properties</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;correlation_id&#39;</span><span class="p">),</span>
+            <span class="s1">&#39;delivery_info&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;exchange&#39;</span><span class="p">:</span> <span class="n">delivery_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;exchange&#39;</span><span class="p">),</span>
+                <span class="s1">&#39;routing_key&#39;</span><span class="p">:</span> <span class="n">delivery_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;routing_key&#39;</span><span class="p">),</span>
+                <span class="s1">&#39;priority&#39;</span><span class="p">:</span> <span class="n">properties</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;priority&#39;</span><span class="p">),</span>
+                <span class="s1">&#39;redelivered&#39;</span><span class="p">:</span> <span class="n">delivery_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;redelivered&#39;</span><span class="p">),</span>
+            <span class="p">}</span>
+
+        <span class="p">})</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span> <span class="o">=</span> <span class="n">headers</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">delivery_info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span><span class="p">[</span><span class="s1">&#39;delivery_info&#39;</span><span class="p">]</span>
+
+<div class="viewcode-block" id="Request.execute_using_pool"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.execute_using_pool">[docs]</a>    <span class="k">def</span> <span class="nf">execute_using_pool</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pool</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Used by the worker to send this task to the pool.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            pool (~celery.concurrency.base.TaskPool): The execution pool</span>
+<span class="sd">                used to execute this request.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            celery.exceptions.TaskRevokedError: if the task was revoked.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">task_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span>
+        <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">revoked</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="n">TaskRevokedError</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+
+        <span class="n">time_limit</span><span class="p">,</span> <span class="n">soft_time_limit</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">time_limits</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span>
+            <span class="n">trace_task_ret</span><span class="p">,</span>
+            <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">body</span><span class="p">,</span>
+                  <span class="bp">self</span><span class="o">.</span><span class="n">content_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">content_encoding</span><span class="p">),</span>
+            <span class="n">accept_callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_accepted</span><span class="p">,</span>
+            <span class="n">timeout_callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_timeout</span><span class="p">,</span>
+            <span class="n">callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_success</span><span class="p">,</span>
+            <span class="n">error_callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_failure</span><span class="p">,</span>
+            <span class="n">soft_timeout</span><span class="o">=</span><span class="n">soft_time_limit</span> <span class="ow">or</span> <span class="n">task</span><span class="o">.</span><span class="n">soft_time_limit</span><span class="p">,</span>
+            <span class="n">timeout</span><span class="o">=</span><span class="n">time_limit</span> <span class="ow">or</span> <span class="n">task</span><span class="o">.</span><span class="n">time_limit</span><span class="p">,</span>
+            <span class="n">correlation_id</span><span class="o">=</span><span class="n">task_id</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="c1"># cannot create weakref to None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_apply_result</span> <span class="o">=</span> <span class="n">maybe</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span></div>
+
+<div class="viewcode-block" id="Request.execute"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.execute">[docs]</a>    <span class="k">def</span> <span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Execute the task in a :func:`~celery.app.trace.trace_task`.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            loglevel (int): The loglevel used by the task.</span>
+<span class="sd">            logfile (str): The logfile used by the task.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">revoked</span><span class="p">():</span>
+            <span class="k">return</span>
+
+        <span class="c1"># acknowledge task as being processed.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">acks_late</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+
+        <span class="n">request</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span>
+        <span class="c1"># pylint: disable=unpacking-non-sequence</span>
+        <span class="c1">#    payload is a property, so pylint doesn&#39;t think it&#39;s a tuple.</span>
+        <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">embed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_payload</span>
+        <span class="n">request</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+            <span class="s1">&#39;loglevel&#39;</span><span class="p">:</span> <span class="n">loglevel</span><span class="p">,</span>
+            <span class="s1">&#39;logfile&#39;</span><span class="p">:</span> <span class="n">logfile</span><span class="p">,</span>
+            <span class="s1">&#39;hostname&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">hostname</span><span class="p">,</span>
+            <span class="s1">&#39;is_eager&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s1">&#39;args&#39;</span><span class="p">:</span> <span class="n">args</span><span class="p">,</span>
+            <span class="s1">&#39;kwargs&#39;</span><span class="p">:</span> <span class="n">kwargs</span>
+        <span class="p">},</span> <span class="o">**</span><span class="n">embed</span> <span class="ow">or</span> <span class="p">{})</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="n">trace_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span>
+                            <span class="n">hostname</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">hostname</span><span class="p">,</span> <span class="n">loader</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">loader</span><span class="p">,</span>
+                            <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">retval</span></div>
+
+<div class="viewcode-block" id="Request.maybe_expire"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.maybe_expire">[docs]</a>    <span class="k">def</span> <span class="nf">maybe_expire</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;If expired, mark the task as revoked.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">:</span>
+            <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="o">.</span><span class="n">tzinfo</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">now</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">:</span>
+                <span class="n">revoked_tasks</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+                <span class="k">return</span> <span class="kc">True</span></div>
+
+<div class="viewcode-block" id="Request.terminate"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.terminate">[docs]</a>    <span class="k">def</span> <span class="nf">terminate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pool</span><span class="p">,</span> <span class="n">signal</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">signal</span> <span class="o">=</span> <span class="n">_signals</span><span class="o">.</span><span class="n">signum</span><span class="p">(</span><span class="n">signal</span> <span class="ow">or</span> <span class="n">TERM_SIGNAME</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">time_start</span><span class="p">:</span>
+            <span class="n">pool</span><span class="o">.</span><span class="n">terminate_job</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">worker_pid</span><span class="p">,</span> <span class="n">signal</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_announce_revoked</span><span class="p">(</span><span class="s1">&#39;terminated&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="n">signal</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_terminate_on_ack</span> <span class="o">=</span> <span class="n">pool</span><span class="p">,</span> <span class="n">signal</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">obj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_result</span><span class="p">()</span>  <span class="c1"># is a weakref</span>
+            <span class="k">if</span> <span class="n">obj</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">obj</span><span class="o">.</span><span class="n">terminate</span><span class="p">(</span><span class="n">signal</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_announce_revoked</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reason</span><span class="p">,</span> <span class="n">terminated</span><span class="p">,</span> <span class="n">signum</span><span class="p">,</span> <span class="n">expired</span><span class="p">):</span>
+        <span class="n">task_ready</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">send_event</span><span class="p">(</span><span class="s1">&#39;task-revoked&#39;</span><span class="p">,</span>
+                        <span class="n">terminated</span><span class="o">=</span><span class="n">terminated</span><span class="p">,</span> <span class="n">signum</span><span class="o">=</span><span class="n">signum</span><span class="p">,</span> <span class="n">expired</span><span class="o">=</span><span class="n">expired</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">backend</span><span class="o">.</span><span class="n">mark_as_revoked</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">reason</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">store_result</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">store_errors</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_already_revoked</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">send_revoked</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span>
+                     <span class="n">terminated</span><span class="o">=</span><span class="n">terminated</span><span class="p">,</span> <span class="n">signum</span><span class="o">=</span><span class="n">signum</span><span class="p">,</span> <span class="n">expired</span><span class="o">=</span><span class="n">expired</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Request.revoked"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.revoked">[docs]</a>    <span class="k">def</span> <span class="nf">revoked</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;If revoked, skip task and mark state.&quot;&quot;&quot;</span>
+        <span class="n">expired</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_already_revoked</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">:</span>
+            <span class="n">expired</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">maybe_expire</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="ow">in</span> <span class="n">revoked_tasks</span><span class="p">:</span>
+            <span class="n">info</span><span class="p">(</span><span class="s1">&#39;Discarding revoked task: </span><span class="si">%s</span><span class="s1">[</span><span class="si">%s</span><span class="s1">]&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_announce_revoked</span><span class="p">(</span>
+                <span class="s1">&#39;expired&#39;</span> <span class="k">if</span> <span class="n">expired</span> <span class="k">else</span> <span class="s1">&#39;revoked&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">expired</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">return</span> <span class="kc">False</span></div>
+
+<div class="viewcode-block" id="Request.send_event"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.send_event">[docs]</a>    <span class="k">def</span> <span class="nf">send_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">type</span><span class="p">,</span> <span class="o">**</span><span class="n">fields</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">eventer</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">eventer</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">send_events</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">eventer</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="nb">type</span><span class="p">,</span> <span class="n">uuid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="o">**</span><span class="n">fields</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Request.on_accepted"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.on_accepted">[docs]</a>    <span class="k">def</span> <span class="nf">on_accepted</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pid</span><span class="p">,</span> <span class="n">time_accepted</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Handler called when task is accepted by worker pool.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">=</span> <span class="n">pid</span>
+        <span class="c1"># Convert monotonic time_accepted to absolute time</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">time_start</span> <span class="o">=</span> <span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="p">(</span><span class="n">monotonic</span><span class="p">()</span> <span class="o">-</span> <span class="n">time_accepted</span><span class="p">)</span>
+        <span class="n">task_accepted</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">acks_late</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">send_event</span><span class="p">(</span><span class="s1">&#39;task-started&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">_does_debug</span><span class="p">:</span>
+            <span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Task accepted: </span><span class="si">%s</span><span class="s1">[</span><span class="si">%s</span><span class="s1">] pid:</span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">pid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_terminate_on_ack</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">terminate</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">_terminate_on_ack</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Request.on_timeout"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.on_timeout">[docs]</a>    <span class="k">def</span> <span class="nf">on_timeout</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">soft</span><span class="p">,</span> <span class="n">timeout</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Handler called if the task times out.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">soft</span><span class="p">:</span>
+            <span class="n">warn</span><span class="p">(</span><span class="s1">&#39;Soft time limit (</span><span class="si">%s</span><span class="s1">s) exceeded for </span><span class="si">%s</span><span class="s1">[</span><span class="si">%s</span><span class="s1">]&#39;</span><span class="p">,</span>
+                 <span class="n">timeout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">task_ready</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+            <span class="n">error</span><span class="p">(</span><span class="s1">&#39;Hard time limit (</span><span class="si">%s</span><span class="s1">s) exceeded for </span><span class="si">%s</span><span class="s1">[</span><span class="si">%s</span><span class="s1">]&#39;</span><span class="p">,</span>
+                  <span class="n">timeout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+            <span class="n">exc</span> <span class="o">=</span> <span class="n">TimeLimitExceeded</span><span class="p">(</span><span class="n">timeout</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">backend</span><span class="o">.</span><span class="n">mark_as_failure</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">store_result</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">store_errors</span><span class="p">,</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">acks_late</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Request.on_success"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.on_success">[docs]</a>    <span class="k">def</span> <span class="nf">on_success</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">failed__retval__runtime</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Handler called if the task was successfully processed.&quot;&quot;&quot;</span>
+        <span class="n">failed</span><span class="p">,</span> <span class="n">retval</span><span class="p">,</span> <span class="n">runtime</span> <span class="o">=</span> <span class="n">failed__retval__runtime</span>
+        <span class="k">if</span> <span class="n">failed</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">retval</span><span class="o">.</span><span class="n">exception</span><span class="p">,</span> <span class="p">(</span><span class="ne">SystemExit</span><span class="p">,</span> <span class="ne">KeyboardInterrupt</span><span class="p">)):</span>
+                <span class="k">raise</span> <span class="n">retval</span><span class="o">.</span><span class="n">exception</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_failure</span><span class="p">(</span><span class="n">retval</span><span class="p">,</span> <span class="n">return_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">task_ready</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">acks_late</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">send_event</span><span class="p">(</span><span class="s1">&#39;task-succeeded&#39;</span><span class="p">,</span> <span class="n">result</span><span class="o">=</span><span class="n">retval</span><span class="p">,</span> <span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Request.on_retry"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.on_retry">[docs]</a>    <span class="k">def</span> <span class="nf">on_retry</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_info</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Handler called if the task should be retried.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">acks_late</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">send_event</span><span class="p">(</span><span class="s1">&#39;task-retried&#39;</span><span class="p">,</span>
+                        <span class="n">exception</span><span class="o">=</span><span class="n">safe_repr</span><span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span><span class="o">.</span><span class="n">exc</span><span class="p">),</span>
+                        <span class="n">traceback</span><span class="o">=</span><span class="n">safe_str</span><span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">traceback</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="Request.on_failure"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.on_failure">[docs]</a>    <span class="k">def</span> <span class="nf">on_failure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_info</span><span class="p">,</span> <span class="n">send_failed_event</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">return_ok</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Handler called if the task raised an exception.&quot;&quot;&quot;</span>
+        <span class="n">task_ready</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span><span class="p">,</span> <span class="ne">MemoryError</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">MemoryError</span><span class="p">(</span><span class="s1">&#39;Process got: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span><span class="p">,))</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span><span class="p">,</span> <span class="n">Reject</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">reject</span><span class="p">(</span><span class="n">requeue</span><span class="o">=</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span><span class="o">.</span><span class="n">requeue</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span><span class="p">,</span> <span class="n">Ignore</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+
+        <span class="n">exc</span> <span class="o">=</span> <span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">Retry</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_retry</span><span class="p">(</span><span class="n">exc_info</span><span class="p">)</span>
+
+        <span class="c1"># These are special cases where the process wouldn&#39;t&#39;ve had</span>
+        <span class="c1"># time to write the result.</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">Terminated</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_announce_revoked</span><span class="p">(</span>
+                <span class="s1">&#39;terminated&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="n">string</span><span class="p">(</span><span class="n">exc</span><span class="p">),</span> <span class="kc">False</span><span class="p">)</span>
+            <span class="n">send_failed_event</span> <span class="o">=</span> <span class="kc">False</span>  <span class="c1"># already sent revoked event</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">WorkerLostError</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">return_ok</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">backend</span><span class="o">.</span><span class="n">mark_as_failure</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">store_result</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">store_errors</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="c1"># (acks_late) acknowledge after result stored.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">acks_late</span><span class="p">:</span>
+            <span class="n">requeue</span> <span class="o">=</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">delivery_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;redelivered&#39;</span><span class="p">)</span>
+            <span class="n">reject</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">reject_on_worker_lost</span> <span class="ow">and</span>
+                <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">WorkerLostError</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">reject</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">reject</span><span class="p">(</span><span class="n">requeue</span><span class="o">=</span><span class="n">requeue</span><span class="p">)</span>
+                <span class="n">send_failed_event</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">send_failed_event</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">send_event</span><span class="p">(</span>
+                <span class="s1">&#39;task-failed&#39;</span><span class="p">,</span>
+                <span class="n">exception</span><span class="o">=</span><span class="n">safe_repr</span><span class="p">(</span><span class="n">get_pickled_exception</span><span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exception</span><span class="p">)),</span>
+                <span class="n">traceback</span><span class="o">=</span><span class="n">exc_info</span><span class="o">.</span><span class="n">traceback</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">return_ok</span><span class="p">:</span>
+            <span class="n">error</span><span class="p">(</span><span class="s1">&#39;Task handler raised error: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span>
+                  <span class="n">exc_info</span><span class="o">=</span><span class="n">exc_info</span><span class="o">.</span><span class="n">exc_info</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Request.acknowledge"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.acknowledge">[docs]</a>    <span class="k">def</span> <span class="nf">acknowledge</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Acknowledge task.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">acknowledged</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_ack</span><span class="p">(</span><span class="n">logger</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection_errors</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">acknowledged</span> <span class="o">=</span> <span class="kc">True</span></div>
+
+<div class="viewcode-block" id="Request.reject"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.reject">[docs]</a>    <span class="k">def</span> <span class="nf">reject</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">requeue</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">acknowledged</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_reject</span><span class="p">(</span><span class="n">logger</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection_errors</span><span class="p">,</span> <span class="n">requeue</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">acknowledged</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">send_event</span><span class="p">(</span><span class="s1">&#39;task-rejected&#39;</span><span class="p">,</span> <span class="n">requeue</span><span class="o">=</span><span class="n">requeue</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Request.info"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.info">[docs]</a>    <span class="k">def</span> <span class="nf">info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">safe</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+            <span class="s1">&#39;args&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">argsrepr</span><span class="p">,</span>
+            <span class="s1">&#39;kwargs&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">kwargsrepr</span><span class="p">,</span>
+            <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">,</span>
+            <span class="s1">&#39;hostname&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">hostname</span><span class="p">,</span>
+            <span class="s1">&#39;time_start&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">time_start</span><span class="p">,</span>
+            <span class="s1">&#39;acknowledged&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">acknowledged</span><span class="p">,</span>
+            <span class="s1">&#39;delivery_info&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">delivery_info</span><span class="p">,</span>
+            <span class="s1">&#39;worker_pid&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">worker_pid</span><span class="p">,</span>
+        <span class="p">}</span></div>
+
+<div class="viewcode-block" id="Request.humaninfo"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.humaninfo">[docs]</a>    <span class="k">def</span> <span class="nf">humaninfo</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;</span><span class="si">{0.name}</span><span class="s1">[</span><span class="si">{0.id}</span><span class="s1">]&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;``str(self)``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">humaninfo</span><span class="p">(),</span>
+            <span class="s1">&#39; ETA:[</span><span class="si">{0}</span><span class="s1">]&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">eta</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">eta</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+            <span class="s1">&#39; expires:[</span><span class="si">{0}</span><span class="s1">]&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+        <span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;``repr(self)``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;&lt;</span><span class="si">{0}</span><span class="s1">: </span><span class="si">{1}</span><span class="s1"> </span><span class="si">{2}</span><span class="s1"> </span><span class="si">{3}</span><span class="s1">&gt;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">humaninfo</span><span class="p">(),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">argsrepr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">kwargsrepr</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">tzlocal</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tzlocal</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tzlocal</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">timezone</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tzlocal</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">store_errors</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">ignore_result</span> <span class="ow">or</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">store_errors_even_if_ignored</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">task_id</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># XXX compat</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span>
+
+    <span class="nd">@task_id</span><span class="o">.</span><span class="n">setter</span>  <span class="c1"># noqa</span>
+    <span class="k">def</span> <span class="nf">task_id</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="n">value</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">task_name</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># XXX compat</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+
+    <span class="nd">@task_name</span><span class="o">.</span><span class="n">setter</span>  <span class="c1"># noqa</span>
+    <span class="k">def</span> <span class="nf">task_name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">value</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">reply_to</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># used by rpc backend when failures reported by parent process</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span><span class="p">[</span><span class="s1">&#39;reply_to&#39;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">correlation_id</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># used similarly to reply_to</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span><span class="p">[</span><span class="s1">&#39;correlation_id&#39;</span><span class="p">]</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">_payload</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">body</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_decoded</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">message</span><span class="o">.</span><span class="n">payload</span>
+
+<div class="viewcode-block" id="Request.chord"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.chord">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">chord</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># used by backend.mark_as_failure when failure is reported</span>
+        <span class="c1"># by parent process</span>
+        <span class="c1"># pylint: disable=unpacking-non-sequence</span>
+        <span class="c1">#    payload is a property, so pylint doesn&#39;t think it&#39;s a tuple.</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">embed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_payload</span>
+        <span class="k">return</span> <span class="n">embed</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;chord&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Request.errbacks"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.errbacks">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">errbacks</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># used by backend.mark_as_failure when failure is reported</span>
+        <span class="c1"># by parent process</span>
+        <span class="c1"># pylint: disable=unpacking-non-sequence</span>
+        <span class="c1">#    payload is a property, so pylint doesn&#39;t think it&#39;s a tuple.</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">embed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_payload</span>
+        <span class="k">return</span> <span class="n">embed</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;errbacks&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Request.group"><a class="viewcode-back" href="../../../reference/celery.worker.request.html#celery.worker.request.Request.group">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">group</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># used by backend.on_chord_part_return when failures reported</span>
+        <span class="c1"># by parent process</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span><span class="p">[</span><span class="s1">&#39;group&#39;</span><span class="p">]</span></div></div>
+
+
+<span class="k">def</span> <span class="nf">create_request_cls</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">pool</span><span class="p">,</span> <span class="n">hostname</span><span class="p">,</span> <span class="n">eventer</span><span class="p">,</span>
+                       <span class="n">ref</span><span class="o">=</span><span class="n">ref</span><span class="p">,</span> <span class="n">revoked_tasks</span><span class="o">=</span><span class="n">revoked_tasks</span><span class="p">,</span>
+                       <span class="n">task_ready</span><span class="o">=</span><span class="n">task_ready</span><span class="p">,</span> <span class="n">trace</span><span class="o">=</span><span class="n">trace_task_ret</span><span class="p">):</span>
+    <span class="n">default_time_limit</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">time_limit</span>
+    <span class="n">default_soft_time_limit</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">soft_time_limit</span>
+    <span class="n">apply_async</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">apply_async</span>
+    <span class="n">acks_late</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">acks_late</span>
+    <span class="n">events</span> <span class="o">=</span> <span class="n">eventer</span> <span class="ow">and</span> <span class="n">eventer</span><span class="o">.</span><span class="n">enabled</span>
+
+    <span class="k">class</span> <span class="nc">Request</span><span class="p">(</span><span class="n">base</span><span class="p">):</span>
+
+        <span class="k">def</span> <span class="nf">execute_using_pool</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pool</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="n">task_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span>
+            <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="ow">or</span> <span class="n">task_id</span> <span class="ow">in</span> <span class="n">revoked_tasks</span><span class="p">)</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">revoked</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="n">TaskRevokedError</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+
+            <span class="n">time_limit</span><span class="p">,</span> <span class="n">soft_time_limit</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">time_limits</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">apply_async</span><span class="p">(</span>
+                <span class="n">trace</span><span class="p">,</span>
+                <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_dict</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">body</span><span class="p">,</span>
+                      <span class="bp">self</span><span class="o">.</span><span class="n">content_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">content_encoding</span><span class="p">),</span>
+                <span class="n">accept_callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_accepted</span><span class="p">,</span>
+                <span class="n">timeout_callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_timeout</span><span class="p">,</span>
+                <span class="n">callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_success</span><span class="p">,</span>
+                <span class="n">error_callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_failure</span><span class="p">,</span>
+                <span class="n">soft_timeout</span><span class="o">=</span><span class="n">soft_time_limit</span> <span class="ow">or</span> <span class="n">default_soft_time_limit</span><span class="p">,</span>
+                <span class="n">timeout</span><span class="o">=</span><span class="n">time_limit</span> <span class="ow">or</span> <span class="n">default_time_limit</span><span class="p">,</span>
+                <span class="n">correlation_id</span><span class="o">=</span><span class="n">task_id</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="c1"># cannot create weakref to None</span>
+            <span class="c1"># pylint: disable=attribute-defined-outside-init</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_apply_result</span> <span class="o">=</span> <span class="n">maybe</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">result</span>
+
+        <span class="k">def</span> <span class="nf">on_success</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">failed__retval__runtime</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="n">failed</span><span class="p">,</span> <span class="n">retval</span><span class="p">,</span> <span class="n">runtime</span> <span class="o">=</span> <span class="n">failed__retval__runtime</span>
+            <span class="k">if</span> <span class="n">failed</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">retval</span><span class="o">.</span><span class="n">exception</span><span class="p">,</span> <span class="p">(</span>
+                        <span class="ne">SystemExit</span><span class="p">,</span> <span class="ne">KeyboardInterrupt</span><span class="p">)):</span>
+                    <span class="k">raise</span> <span class="n">retval</span><span class="o">.</span><span class="n">exception</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_failure</span><span class="p">(</span><span class="n">retval</span><span class="p">,</span> <span class="n">return_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">task_ready</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">acks_late</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="n">events</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">send_event</span><span class="p">(</span>
+                    <span class="s1">&#39;task-succeeded&#39;</span><span class="p">,</span> <span class="n">result</span><span class="o">=</span><span class="n">retval</span><span class="p">,</span> <span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">,</span>
+                <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">Request</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

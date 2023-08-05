@@ -1,0 +1,1128 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.app.task &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/app/task.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.app.task</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Task implementation: request context and the task base class.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">sys</span>
+
+<span class="kn">from</span> <span class="nn">billiard.einfo</span> <span class="k">import</span> <span class="n">ExceptionInfo</span>
+<span class="kn">from</span> <span class="nn">kombu.exceptions</span> <span class="k">import</span> <span class="n">OperationalError</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.uuid</span> <span class="k">import</span> <span class="n">uuid</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">current_app</span><span class="p">,</span> <span class="n">group</span><span class="p">,</span> <span class="n">states</span>
+<span class="kn">from</span> <span class="nn">celery._state</span> <span class="k">import</span> <span class="n">_task_stack</span>
+<span class="kn">from</span> <span class="nn">celery.canvas</span> <span class="k">import</span> <span class="n">signature</span>
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="p">(</span><span class="n">Ignore</span><span class="p">,</span> <span class="n">ImproperlyConfigured</span><span class="p">,</span>
+                               <span class="n">MaxRetriesExceededError</span><span class="p">,</span> <span class="n">Reject</span><span class="p">,</span> <span class="n">Retry</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="n">python_2_unicode_compatible</span>
+<span class="kn">from</span> <span class="nn">celery.local</span> <span class="k">import</span> <span class="n">class_property</span>
+<span class="kn">from</span> <span class="nn">celery.result</span> <span class="k">import</span> <span class="n">EagerResult</span><span class="p">,</span> <span class="n">denied_join_result</span>
+<span class="kn">from</span> <span class="nn">celery.utils</span> <span class="k">import</span> <span class="n">abstract</span>
+<span class="kn">from</span> <span class="nn">celery.utils.functional</span> <span class="k">import</span> <span class="n">mattrgetter</span><span class="p">,</span> <span class="n">maybe_list</span>
+<span class="kn">from</span> <span class="nn">celery.utils.imports</span> <span class="k">import</span> <span class="n">instantiate</span>
+<span class="kn">from</span> <span class="nn">celery.utils.nodenames</span> <span class="k">import</span> <span class="n">gethostname</span>
+<span class="kn">from</span> <span class="nn">celery.utils.serialization</span> <span class="k">import</span> <span class="n">raise_with_context</span>
+
+<span class="kn">from</span> <span class="nn">.annotations</span> <span class="k">import</span> <span class="n">resolve_all</span> <span class="k">as</span> <span class="n">resolve_all_annotations</span>
+<span class="kn">from</span> <span class="nn">.registry</span> <span class="k">import</span> <span class="n">_unpickle_task_v2</span>
+<span class="kn">from</span> <span class="nn">.utils</span> <span class="k">import</span> <span class="n">appstr</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Context&#39;</span><span class="p">,</span> <span class="s1">&#39;Task&#39;</span><span class="p">)</span>
+
+<span class="c1">#: extracts attributes related to publishing a message from an object.</span>
+<span class="n">extract_exec_options</span> <span class="o">=</span> <span class="n">mattrgetter</span><span class="p">(</span>
+    <span class="s1">&#39;queue&#39;</span><span class="p">,</span> <span class="s1">&#39;routing_key&#39;</span><span class="p">,</span> <span class="s1">&#39;exchange&#39;</span><span class="p">,</span> <span class="s1">&#39;priority&#39;</span><span class="p">,</span> <span class="s1">&#39;expires&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;serializer&#39;</span><span class="p">,</span> <span class="s1">&#39;delivery_mode&#39;</span><span class="p">,</span> <span class="s1">&#39;compression&#39;</span><span class="p">,</span> <span class="s1">&#39;time_limit&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;soft_time_limit&#39;</span><span class="p">,</span> <span class="s1">&#39;immediate&#39;</span><span class="p">,</span> <span class="s1">&#39;mandatory&#39;</span><span class="p">,</span>  <span class="c1"># imm+man is deprecated</span>
+<span class="p">)</span>
+
+<span class="c1"># We take __repr__ very seriously around here ;)</span>
+<span class="n">R_BOUND_TASK</span> <span class="o">=</span> <span class="s1">&#39;&lt;class </span><span class="si">{0.__name__}</span><span class="s1"> of </span><span class="si">{app}{flags}</span><span class="s1">&gt;&#39;</span>
+<span class="n">R_UNBOUND_TASK</span> <span class="o">=</span> <span class="s1">&#39;&lt;unbound </span><span class="si">{0.__name__}{flags}</span><span class="s1">&gt;&#39;</span>
+<span class="n">R_SELF_TASK</span> <span class="o">=</span> <span class="s1">&#39;&lt;@task </span><span class="si">{0.name}</span><span class="s1"> bound to other </span><span class="si">{0.__self__}</span><span class="s1">&gt;&#39;</span>
+<span class="n">R_INSTANCE</span> <span class="o">=</span> <span class="s1">&#39;&lt;@task: </span><span class="si">{0.name}</span><span class="s1"> of </span><span class="si">{app}{flags}</span><span class="s1">&gt;&#39;</span>
+
+<span class="c1">#: Here for backwards compatibility as tasks no longer use a custom meta-class.</span>
+<span class="n">TaskType</span> <span class="o">=</span> <span class="nb">type</span>
+
+
+<span class="k">def</span> <span class="nf">_strflags</span><span class="p">(</span><span class="n">flags</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">flags</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s1">&#39; (</span><span class="si">{0}</span><span class="s1">)&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">flags</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">default</span>
+
+
+<span class="k">def</span> <span class="nf">_reprtask</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">flags</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">flags</span><span class="p">)</span> <span class="k">if</span> <span class="n">flags</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">[]</span>
+    <span class="n">flags</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;v2 compatible&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">__v2_compat__</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">fmt</span><span class="p">:</span>
+        <span class="n">fmt</span> <span class="o">=</span> <span class="n">R_BOUND_TASK</span> <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">_app</span> <span class="k">else</span> <span class="n">R_UNBOUND_TASK</span>
+    <span class="k">return</span> <span class="n">fmt</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">task</span><span class="p">,</span> <span class="n">flags</span><span class="o">=</span><span class="n">_strflags</span><span class="p">(</span><span class="n">flags</span><span class="p">),</span>
+        <span class="n">app</span><span class="o">=</span><span class="n">appstr</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">_app</span><span class="p">)</span> <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">_app</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<div class="viewcode-block" id="Context"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Context">[docs]</a><span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">Context</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Task request variables (Task.request).&quot;&quot;&quot;</span>
+
+    <span class="n">logfile</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">loglevel</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">hostname</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="nb">id</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">retries</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">eta</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">expires</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">is_eager</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">headers</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">delivery_info</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">reply_to</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">root_id</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">parent_id</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">correlation_id</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">taskset</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># compat alias to group</span>
+    <span class="n">group</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">chord</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">chain</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">utc</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">called_directly</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">callbacks</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">errbacks</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">timelimit</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">origin</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_children</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># see property</span>
+    <span class="n">_protected</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">clear</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;&lt;Context: </span><span class="si">{0!r}</span><span class="s1">&gt;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">vars</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">as_execution_options</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">limit_hard</span><span class="p">,</span> <span class="n">limit_soft</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">timelimit</span> <span class="ow">or</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="s1">&#39;root_id&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">root_id</span><span class="p">,</span>
+            <span class="s1">&#39;parent_id&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">parent_id</span><span class="p">,</span>
+            <span class="s1">&#39;group_id&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">group</span><span class="p">,</span>
+            <span class="s1">&#39;chord&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">chord</span><span class="p">,</span>
+            <span class="s1">&#39;chain&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">chain</span><span class="p">,</span>
+            <span class="s1">&#39;link&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">callbacks</span><span class="p">,</span>
+            <span class="s1">&#39;link_error&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">errbacks</span><span class="p">,</span>
+            <span class="s1">&#39;expires&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">,</span>
+            <span class="s1">&#39;soft_time_limit&#39;</span><span class="p">:</span> <span class="n">limit_soft</span><span class="p">,</span>
+            <span class="s1">&#39;time_limit&#39;</span><span class="p">:</span> <span class="n">limit_hard</span><span class="p">,</span>
+            <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">headers</span><span class="p">,</span>
+            <span class="s1">&#39;retries&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">retries</span><span class="p">,</span>
+            <span class="s1">&#39;reply_to&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">reply_to</span><span class="p">,</span>
+            <span class="s1">&#39;origin&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">origin</span><span class="p">,</span>
+        <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">children</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># children must be an empty list for every thread</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_children</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_children</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_children</span></div>
+
+
+<div class="viewcode-block" id="Task"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task">[docs]</a><span class="nd">@abstract</span><span class="o">.</span><span class="n">CallableTask</span><span class="o">.</span><span class="n">register</span>
+<span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">Task</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Task base class.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        When called tasks apply the :meth:`run` method.  This method must</span>
+<span class="sd">        be defined by all tasks (that is unless the :meth:`__call__` method</span>
+<span class="sd">        is overridden).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">__trace__</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">__v2_compat__</span> <span class="o">=</span> <span class="kc">False</span>  <span class="c1"># set by old base in celery.task.base</span>
+
+    <span class="n">MaxRetriesExceededError</span> <span class="o">=</span> <span class="n">MaxRetriesExceededError</span>
+    <span class="n">OperationalError</span> <span class="o">=</span> <span class="n">OperationalError</span>
+
+    <span class="c1">#: Execution strategy used, or the qualified name of one.</span>
+    <span class="n">Strategy</span> <span class="o">=</span> <span class="s1">&#39;celery.worker.strategy:default&#39;</span>
+
+    <span class="c1">#: Request class used, or the qualified name of one.</span>
+    <span class="n">Request</span> <span class="o">=</span> <span class="s1">&#39;celery.worker.request:Request&#39;</span>
+
+    <span class="c1">#: This is the instance bound to if the task is a method of a class.</span>
+    <span class="vm">__self__</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: The application instance associated with this task class.</span>
+    <span class="n">_app</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Name of the task.</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Enable argument checking.</span>
+    <span class="c1">#: You can set this to false if you don&#39;t want the signature to be</span>
+    <span class="c1">#: checked when calling the task.</span>
+    <span class="c1">#: Defaults to :attr:`app.strict_typing &lt;@Celery.strict_typing&gt;`.</span>
+    <span class="n">typing</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Maximum number of retries before giving up.  If set to :const:`None`,</span>
+    <span class="c1">#: it will **never** stop retrying.</span>
+    <span class="n">max_retries</span> <span class="o">=</span> <span class="mi">3</span>
+
+    <span class="c1">#: Default time in seconds before a retry of the task should be</span>
+    <span class="c1">#: executed.  3 minutes by default.</span>
+    <span class="n">default_retry_delay</span> <span class="o">=</span> <span class="mi">3</span> <span class="o">*</span> <span class="mi">60</span>
+
+    <span class="c1">#: Rate limit for this task type.  Examples: :const:`None` (no rate</span>
+    <span class="c1">#: limit), `&#39;100/s&#39;` (hundred tasks a second), `&#39;100/m&#39;` (hundred tasks</span>
+    <span class="c1">#: a minute),`&#39;100/h&#39;` (hundred tasks an hour)</span>
+    <span class="n">rate_limit</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: If enabled the worker won&#39;t store task state and return values</span>
+    <span class="c1">#: for this task.  Defaults to the :setting:`task_ignore_result`</span>
+    <span class="c1">#: setting.</span>
+    <span class="n">ignore_result</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: If enabled the request will keep track of subtasks started by</span>
+    <span class="c1">#: this task, and this information will be sent with the result</span>
+    <span class="c1">#: (``result.children``).</span>
+    <span class="n">trail</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1">#: If enabled the worker will send monitoring events related to</span>
+    <span class="c1">#: this task (but only if the worker is configured to send</span>
+    <span class="c1">#: task related events).</span>
+    <span class="c1">#: Note that this has no effect on the task-failure event case</span>
+    <span class="c1">#: where a task is not registered (as it will have no task class</span>
+    <span class="c1">#: to check this flag).</span>
+    <span class="n">send_events</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1">#: When enabled errors will be stored even if the task is otherwise</span>
+    <span class="c1">#: configured to ignore results.</span>
+    <span class="n">store_errors_even_if_ignored</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: The name of a serializer that are registered with</span>
+    <span class="c1">#: :mod:`kombu.serialization.registry`.  Default is `&#39;pickle&#39;`.</span>
+    <span class="n">serializer</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Hard time limit.</span>
+    <span class="c1">#: Defaults to the :setting:`task_time_limit` setting.</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Soft time limit.</span>
+    <span class="c1">#: Defaults to the :setting:`task_soft_time_limit` setting.</span>
+    <span class="n">soft_time_limit</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: The result store backend used for this task.</span>
+    <span class="n">backend</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: If disabled this task won&#39;t be registered automatically.</span>
+    <span class="n">autoregister</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1">#: If enabled the task will report its status as &#39;started&#39; when the task</span>
+    <span class="c1">#: is executed by a worker.  Disabled by default as the normal behavior</span>
+    <span class="c1">#: is to not report that level of granularity.  Tasks are either pending,</span>
+    <span class="c1">#: finished, or waiting to be retried.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: Having a &#39;started&#39; status can be useful for when there are long</span>
+    <span class="c1">#: running tasks and there&#39;s a need to report what task is currently</span>
+    <span class="c1">#: running.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: The application default can be overridden using the</span>
+    <span class="c1">#: :setting:`task_track_started` setting.</span>
+    <span class="n">track_started</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: When enabled messages for this task will be acknowledged **after**</span>
+    <span class="c1">#: the task has been executed, and not *just before* (the</span>
+    <span class="c1">#: default behavior).</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: Please note that this means the task may be executed twice if the</span>
+    <span class="c1">#: worker crashes mid execution.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: The application default can be overridden with the</span>
+    <span class="c1">#: :setting:`task_acks_late` setting.</span>
+    <span class="n">acks_late</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Even if :attr:`acks_late` is enabled, the worker will</span>
+    <span class="c1">#: acknowledge tasks when the worker process executing them abruptly</span>
+    <span class="c1">#: exits or is signaled (e.g., :sig:`KILL`/:sig:`INT`, etc).</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: Setting this to true allows the message to be re-queued instead,</span>
+    <span class="c1">#: so that the task will execute again by the same worker, or another</span>
+    <span class="c1">#: worker.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: Warning: Enabling this can cause message loops; make sure you know</span>
+    <span class="c1">#: what you&#39;re doing.</span>
+    <span class="n">reject_on_worker_lost</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Tuple of expected exceptions.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: These are errors that are expected in normal operation</span>
+    <span class="c1">#: and that shouldn&#39;t be regarded as a real error by the worker.</span>
+    <span class="c1">#: Currently this means that the state will be updated to an error</span>
+    <span class="c1">#: state, but the worker won&#39;t log the event as an error.</span>
+    <span class="n">throws</span> <span class="o">=</span> <span class="p">()</span>
+
+    <span class="c1">#: Default task expiry time.</span>
+    <span class="n">expires</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Max length of result representation used in logs and events.</span>
+    <span class="n">resultrepr_maxsize</span> <span class="o">=</span> <span class="mi">1024</span>
+
+    <span class="c1">#: Task request stack, the current request will be the topmost.</span>
+    <span class="n">request_stack</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Some may expect a request to exist even if the task hasn&#39;t been</span>
+    <span class="c1">#: called.  This should probably be deprecated.</span>
+    <span class="n">_default_request</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Deprecated attribute ``abstract`` here for compatibility.</span>
+    <span class="n">abstract</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="n">_exec_options</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">__bound__</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">from_config</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="p">(</span><span class="s1">&#39;serializer&#39;</span><span class="p">,</span> <span class="s1">&#39;task_serializer&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;rate_limit&#39;</span><span class="p">,</span> <span class="s1">&#39;task_default_rate_limit&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;track_started&#39;</span><span class="p">,</span> <span class="s1">&#39;task_track_started&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;acks_late&#39;</span><span class="p">,</span> <span class="s1">&#39;task_acks_late&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;reject_on_worker_lost&#39;</span><span class="p">,</span> <span class="s1">&#39;task_reject_on_worker_lost&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;ignore_result&#39;</span><span class="p">,</span> <span class="s1">&#39;task_ignore_result&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;store_errors_even_if_ignored&#39;</span><span class="p">,</span> <span class="s1">&#39;task_store_errors_even_if_ignored&#39;</span><span class="p">),</span>
+    <span class="p">)</span>
+
+    <span class="n">_backend</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># set by backend property.</span>
+
+    <span class="c1"># - Tasks are lazily bound, so that configuration is not set</span>
+    <span class="c1"># - until the task is actually used</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">bind</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
+        <span class="n">was_bound</span><span class="p">,</span> <span class="bp">cls</span><span class="o">.</span><span class="n">__bound__</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">__bound__</span><span class="p">,</span> <span class="kc">True</span>
+        <span class="bp">cls</span><span class="o">.</span><span class="n">_app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="n">conf</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">conf</span>
+        <span class="bp">cls</span><span class="o">.</span><span class="n">_exec_options</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># clear option cache</span>
+
+        <span class="k">if</span> <span class="bp">cls</span><span class="o">.</span><span class="n">typing</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">typing</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">strict_typing</span>
+
+        <span class="k">for</span> <span class="n">attr_name</span><span class="p">,</span> <span class="n">config_name</span> <span class="ow">in</span> <span class="bp">cls</span><span class="o">.</span><span class="n">from_config</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">attr_name</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="nb">setattr</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">attr_name</span><span class="p">,</span> <span class="n">conf</span><span class="p">[</span><span class="n">config_name</span><span class="p">])</span>
+
+        <span class="c1"># decorate with annotations from config.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">was_bound</span><span class="p">:</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">annotate</span><span class="p">()</span>
+
+            <span class="kn">from</span> <span class="nn">celery.utils.threads</span> <span class="k">import</span> <span class="n">LocalStack</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">request_stack</span> <span class="o">=</span> <span class="n">LocalStack</span><span class="p">()</span>
+
+        <span class="c1"># PeriodicTask uses this to add itself to the PeriodicTask schedule.</span>
+        <span class="bp">cls</span><span class="o">.</span><span class="n">on_bound</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">app</span>
+
+<div class="viewcode-block" id="Task.on_bound"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.on_bound">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">on_bound</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Called when the task is bound to an app.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This class method can be defined to do additional actions when</span>
+<span class="sd">            the task class is bound to an app.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">_get_app</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_app</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">_app</span> <span class="o">=</span> <span class="n">current_app</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">cls</span><span class="o">.</span><span class="n">__bound__</span><span class="p">:</span>
+            <span class="c1"># The app property&#39;s __set__  method is not called</span>
+            <span class="c1"># if Task.app is set (on the class), so must bind on use.</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">bind</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">_app</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_app</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">class_property</span><span class="p">(</span><span class="n">_get_app</span><span class="p">,</span> <span class="n">bind</span><span class="p">)</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">annotate</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">resolve_all_annotations</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">annotations</span><span class="p">,</span> <span class="bp">cls</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;@&#39;</span><span class="p">):</span>
+                    <span class="bp">cls</span><span class="o">.</span><span class="n">add_around</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="n">value</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="nb">setattr</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">add_around</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">attr</span><span class="p">,</span> <span class="n">around</span><span class="p">):</span>
+        <span class="n">orig</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">attr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">orig</span><span class="p">,</span> <span class="s1">&#39;__wrapped__&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span>
+            <span class="n">orig</span> <span class="o">=</span> <span class="n">orig</span><span class="o">.</span><span class="n">__wrapped__</span>
+        <span class="n">meth</span> <span class="o">=</span> <span class="n">around</span><span class="p">(</span><span class="n">orig</span><span class="p">)</span>
+        <span class="n">meth</span><span class="o">.</span><span class="n">__wrapped__</span> <span class="o">=</span> <span class="n">orig</span>
+        <span class="nb">setattr</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">attr</span><span class="p">,</span> <span class="n">meth</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">_task_stack</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">push_request</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># add self if this is a bound task</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__self__</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="vm">__self__</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pop_request</span><span class="p">()</span>
+            <span class="n">_task_stack</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">__reduce__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># - tasks are pickled into the name of the task only, and the receiver</span>
+        <span class="c1"># - simply grabs it from the local registry.</span>
+        <span class="c1"># - in later versions the module of the task is also included,</span>
+        <span class="c1"># - and the receiving side tries to import that module so that</span>
+        <span class="c1"># - it will work even if the task hasn&#39;t been registered.</span>
+        <span class="n">mod</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="vm">__module__</span>
+        <span class="n">mod</span> <span class="o">=</span> <span class="n">mod</span> <span class="k">if</span> <span class="n">mod</span> <span class="ow">and</span> <span class="n">mod</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">modules</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">_unpickle_task_v2</span><span class="p">,</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">mod</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Task.run"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;The body of the task executed by workers.&quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Tasks must define the run method.&#39;</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">start_strategy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">,</span> <span class="n">consumer</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">instantiate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">Strategy</span><span class="p">,</span> <span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">,</span> <span class="n">consumer</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Task.delay"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.delay">[docs]</a>    <span class="k">def</span> <span class="nf">delay</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Star argument version of :meth:`apply_async`.</span>
+
+<span class="sd">        Does not support the extra options enabled by :meth:`apply_async`.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            *args (Any): Positional arguments passed on to the task.</span>
+<span class="sd">            **kwargs (Any): Keyword arguments passed on to the task.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            celery.result.AsyncResult: Future promise.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.apply_async"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.apply_async">[docs]</a>    <span class="k">def</span> <span class="nf">apply_async</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">producer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">link</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">link_error</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">shadow</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Apply tasks asynchronously by sending a message.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            args (Tuple): The positional arguments to pass on to the task.</span>
+
+<span class="sd">            kwargs (Dict): The keyword arguments to pass on to the task.</span>
+
+<span class="sd">            countdown (float): Number of seconds into the future that the</span>
+<span class="sd">                task should execute.  Defaults to immediate execution.</span>
+
+<span class="sd">            eta (~datetime.datetime): Absolute time and date of when the task</span>
+<span class="sd">                should be executed.  May not be specified if `countdown`</span>
+<span class="sd">                is also supplied.</span>
+
+<span class="sd">            expires (float, ~datetime.datetime): Datetime or</span>
+<span class="sd">                seconds in the future for the task should expire.</span>
+<span class="sd">                The task won&#39;t be executed after the expiration time.</span>
+
+<span class="sd">            shadow (str): Override task name used in logs/monitoring.</span>
+<span class="sd">                Default is retrieved from :meth:`shadow_name`.</span>
+
+<span class="sd">            connection (kombu.Connection): Re-use existing broker connection</span>
+<span class="sd">                instead of acquiring one from the connection pool.</span>
+
+<span class="sd">            retry (bool): If enabled sending of the task message will be</span>
+<span class="sd">                retried in the event of connection loss or failure.</span>
+<span class="sd">                Default is taken from the :setting:`task_publish_retry`</span>
+<span class="sd">                setting.  Note that you need to handle the</span>
+<span class="sd">                producer/connection manually for this to work.</span>
+
+<span class="sd">            retry_policy (Mapping): Override the retry policy used.</span>
+<span class="sd">                See the :setting:`task_publish_retry_policy` setting.</span>
+
+<span class="sd">            queue (str, kombu.Queue): The queue to route the task to.</span>
+<span class="sd">                This must be a key present in :setting:`task_queues`, or</span>
+<span class="sd">                :setting:`task_create_missing_queues` must be</span>
+<span class="sd">                enabled.  See :ref:`guide-routing` for more</span>
+<span class="sd">                information.</span>
+
+<span class="sd">            exchange (str, kombu.Exchange): Named custom exchange to send the</span>
+<span class="sd">                task to.  Usually not used in combination with the ``queue``</span>
+<span class="sd">                argument.</span>
+
+<span class="sd">            routing_key (str): Custom routing key used to route the task to a</span>
+<span class="sd">                worker server.  If in combination with a ``queue`` argument</span>
+<span class="sd">                only used to specify custom routing keys to topic exchanges.</span>
+
+<span class="sd">            priority (int): The task priority, a number between 0 and 9.</span>
+<span class="sd">                Defaults to the :attr:`priority` attribute.</span>
+
+<span class="sd">            serializer (str): Serialization method to use.</span>
+<span class="sd">                Can be `pickle`, `json`, `yaml`, `msgpack` or any custom</span>
+<span class="sd">                serialization method that&#39;s been registered</span>
+<span class="sd">                with :mod:`kombu.serialization.registry`.</span>
+<span class="sd">                Defaults to the :attr:`serializer` attribute.</span>
+
+<span class="sd">            compression (str): Optional compression method</span>
+<span class="sd">                to use.  Can be one of ``zlib``, ``bzip2``,</span>
+<span class="sd">                or any custom compression methods registered with</span>
+<span class="sd">                :func:`kombu.compression.register`.</span>
+<span class="sd">                Defaults to the :setting:`task_compression` setting.</span>
+
+<span class="sd">            link (~@Signature): A single, or a list of tasks signatures</span>
+<span class="sd">                to apply if the task returns successfully.</span>
+
+<span class="sd">            link_error (~@Signature): A single, or a list of task signatures</span>
+<span class="sd">                to apply if an error occurs while executing the task.</span>
+
+<span class="sd">            producer (kombu.Producer): custom producer to use when publishing</span>
+<span class="sd">                the task.</span>
+
+<span class="sd">            add_to_parent (bool): If set to True (default) and the task</span>
+<span class="sd">                is applied while executing another task, then the result</span>
+<span class="sd">                will be appended to the parent tasks ``request.children``</span>
+<span class="sd">                attribute.  Trailing can also be disabled by default using the</span>
+<span class="sd">                :attr:`trail` attribute</span>
+
+<span class="sd">            publisher (kombu.Producer): Deprecated alias to ``producer``.</span>
+
+<span class="sd">            headers (Dict): Message headers to be included in the message.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            celery.result.AsyncResult: Promise of future evaluation.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            TypeError: If not enough arguments are passed, or too many</span>
+<span class="sd">                arguments are passed.  Note that signature checks may</span>
+<span class="sd">                be disabled by specifying ``@task(typing=False)``.</span>
+<span class="sd">            kombu.exceptions.OperationalError: If a connection to the</span>
+<span class="sd">               transport cannot be made, or if the connection is lost.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            Also supports all keyword arguments supported by</span>
+<span class="sd">            :meth:`kombu.Producer.publish`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">typing</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">check_arguments</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__header__</span>
+            <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+                <span class="k">pass</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">check_arguments</span><span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="n">args</span> <span class="ow">or</span> <span class="p">()),</span> <span class="o">**</span><span class="p">(</span><span class="n">kwargs</span> <span class="ow">or</span> <span class="p">{}))</span>
+
+        <span class="n">app</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_app</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_always_eager</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">denied_join_result</span><span class="p">():</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="n">task_id</span> <span class="ow">or</span> <span class="n">uuid</span><span class="p">(),</span>
+                                  <span class="n">link</span><span class="o">=</span><span class="n">link</span><span class="p">,</span> <span class="n">link_error</span><span class="o">=</span><span class="n">link_error</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">)</span>
+        <span class="c1"># add &#39;self&#39; if this is a &quot;task_method&quot;.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__self__</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="n">args</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span> <span class="k">else</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">args</span> <span class="ow">or</span> <span class="p">())</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="vm">__self__</span><span class="p">,)</span> <span class="o">+</span> <span class="n">args</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">__v2_compat__</span><span class="p">:</span>
+            <span class="n">shadow</span> <span class="o">=</span> <span class="n">shadow</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">shadow_name</span><span class="p">(</span><span class="bp">self</span><span class="p">(),</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">shadow</span> <span class="o">=</span> <span class="n">shadow</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">shadow_name</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
+
+        <span class="n">preopts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_exec_options</span><span class="p">()</span>
+        <span class="n">options</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">preopts</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">)</span> <span class="k">if</span> <span class="n">options</span> <span class="k">else</span> <span class="n">preopts</span>
+        <span class="k">return</span> <span class="n">app</span><span class="o">.</span><span class="n">send_task</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="n">task_id</span><span class="p">,</span> <span class="n">producer</span><span class="o">=</span><span class="n">producer</span><span class="p">,</span>
+            <span class="n">link</span><span class="o">=</span><span class="n">link</span><span class="p">,</span> <span class="n">link_error</span><span class="o">=</span><span class="n">link_error</span><span class="p">,</span> <span class="n">result_cls</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">AsyncResult</span><span class="p">,</span>
+            <span class="n">shadow</span><span class="o">=</span><span class="n">shadow</span><span class="p">,</span> <span class="n">task_type</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">options</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.shadow_name"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.shadow_name">[docs]</a>    <span class="k">def</span> <span class="nf">shadow_name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">options</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Override for custom task name in worker logs/monitoring.</span>
+
+<span class="sd">        Example:</span>
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                from celery.utils.imports import qualname</span>
+
+<span class="sd">                def shadow_name(task, args, kwargs, options):</span>
+<span class="sd">                    return qualname(args[0])</span>
+
+<span class="sd">                @app.task(shadow_name=shadow_name, serializer=&#39;pickle&#39;)</span>
+<span class="sd">                def apply_function_async(fun, *args, **kwargs):</span>
+<span class="sd">                    return fun(*args, **kwargs)</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            args (Tuple): Task positional arguments.</span>
+<span class="sd">            kwargs (Dict): Task keyword arguments.</span>
+<span class="sd">            options (Dict): Task execution options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+    <span class="k">def</span> <span class="nf">signature_from_request</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                               <span class="n">queue</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">extra_options</span><span class="p">):</span>
+        <span class="n">request</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span> <span class="k">if</span> <span class="n">request</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">request</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">args</span> <span class="k">if</span> <span class="n">args</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">args</span>
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">kwargs</span> <span class="k">if</span> <span class="n">kwargs</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">kwargs</span>
+        <span class="n">options</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">as_execution_options</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">queue</span><span class="p">:</span>
+            <span class="n">options</span><span class="p">[</span><span class="s1">&#39;queue&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">queue</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">delivery_info</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">delivery_info</span> <span class="ow">or</span> <span class="p">{}</span>
+            <span class="n">exchange</span> <span class="o">=</span> <span class="n">delivery_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;exchange&#39;</span><span class="p">)</span>
+            <span class="n">routing_key</span> <span class="o">=</span> <span class="n">delivery_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;routing_key&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">exchange</span> <span class="o">==</span> <span class="s1">&#39;&#39;</span> <span class="ow">and</span> <span class="n">routing_key</span><span class="p">:</span>
+                <span class="c1"># sent to anon-exchange</span>
+                <span class="n">options</span><span class="p">[</span><span class="s1">&#39;queue&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">routing_key</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">options</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">delivery_info</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span>
+            <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">options</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">extra_options</span>
+        <span class="p">)</span>
+    <span class="n">subtask_from_request</span> <span class="o">=</span> <span class="n">signature_from_request</span>  <span class="c1"># XXX compat</span>
+
+<div class="viewcode-block" id="Task.retry"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.retry">[docs]</a>    <span class="k">def</span> <span class="nf">retry</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">exc</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">throw</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+              <span class="n">eta</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">countdown</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_retries</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Retry the task.</span>
+
+<span class="sd">        Example:</span>
+<span class="sd">            &gt;&gt;&gt; from imaginary_twitter_lib import Twitter</span>
+<span class="sd">            &gt;&gt;&gt; from proj.celery import app</span>
+
+<span class="sd">            &gt;&gt;&gt; @app.task(bind=True)</span>
+<span class="sd">            ... def tweet(self, auth, message):</span>
+<span class="sd">            ...     twitter = Twitter(oauth=auth)</span>
+<span class="sd">            ...     try:</span>
+<span class="sd">            ...         twitter.post_status_update(message)</span>
+<span class="sd">            ...     except twitter.FailWhale as exc:</span>
+<span class="sd">            ...         # Retry in 5 minutes.</span>
+<span class="sd">            ...         raise self.retry(countdown=60 * 5, exc=exc)</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            Although the task will never return above as `retry` raises an</span>
+<span class="sd">            exception to notify the worker, we use `raise` in front of the</span>
+<span class="sd">            retry to convey that the rest of the block won&#39;t be executed.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            args (Tuple): Positional arguments to retry with.</span>
+<span class="sd">            kwargs (Dict): Keyword arguments to retry with.</span>
+<span class="sd">            exc (Exception): Custom exception to report when the max retry</span>
+<span class="sd">                limit has been exceeded (default:</span>
+<span class="sd">                :exc:`~@MaxRetriesExceededError`).</span>
+
+<span class="sd">                If this argument is set and retry is called while</span>
+<span class="sd">                an exception was raised (``sys.exc_info()`` is set)</span>
+<span class="sd">                it will attempt to re-raise the current exception.</span>
+
+<span class="sd">                If no exception was raised it will raise the ``exc``</span>
+<span class="sd">                argument provided.</span>
+<span class="sd">            countdown (float): Time in seconds to delay the retry for.</span>
+<span class="sd">            eta (~datetime.datetime): Explicit time and date to run the</span>
+<span class="sd">                retry at.</span>
+<span class="sd">            max_retries (int): If set, overrides the default retry limit for</span>
+<span class="sd">                this execution.  Changes to this parameter don&#39;t propagate to</span>
+<span class="sd">                subsequent task retry attempts.  A value of :const:`None`,</span>
+<span class="sd">                means &quot;use the default&quot;, so if you want infinite retries you&#39;d</span>
+<span class="sd">                have to set the :attr:`max_retries` attribute of the task to</span>
+<span class="sd">                :const:`None` first.</span>
+<span class="sd">            time_limit (int): If set, overrides the default time limit.</span>
+<span class="sd">            soft_time_limit (int): If set, overrides the default soft</span>
+<span class="sd">                time limit.</span>
+<span class="sd">            throw (bool): If this is :const:`False`, don&#39;t raise the</span>
+<span class="sd">                :exc:`~@Retry` exception, that tells the worker to mark</span>
+<span class="sd">                the task as being retried.  Note that this means the task</span>
+<span class="sd">                will be marked as failed if the task raises an exception,</span>
+<span class="sd">                or successful if it returns after the retry call.</span>
+<span class="sd">            **options (Any): Extra options to pass on to :meth:`apply_async`.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            celery.exceptions.Retry:</span>
+<span class="sd">                To tell the worker that the task has been re-sent for retry.</span>
+<span class="sd">                This always happens, unless the `throw` keyword argument</span>
+<span class="sd">                has been explicitly set to :const:`False`, and is considered</span>
+<span class="sd">                normal operation.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">request</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span>
+        <span class="n">retries</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">retries</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">max_retries</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_retries</span> <span class="k">if</span> <span class="n">max_retries</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">max_retries</span>
+
+        <span class="c1"># Not in worker or emulated by (apply/always_eager),</span>
+        <span class="c1"># so just raise the original exception.</span>
+        <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">called_directly</span><span class="p">:</span>
+            <span class="c1"># raises orig stack if PyErr_Occurred,</span>
+            <span class="c1"># and augments with exc&#39; if that argument is defined.</span>
+            <span class="n">raise_with_context</span><span class="p">(</span><span class="n">exc</span> <span class="ow">or</span> <span class="n">Retry</span><span class="p">(</span><span class="s1">&#39;Task can be retried&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">eta</span> <span class="ow">and</span> <span class="n">countdown</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">countdown</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_retry_delay</span>
+
+        <span class="n">is_eager</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">is_eager</span>
+        <span class="n">S</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">signature_from_request</span><span class="p">(</span>
+            <span class="n">request</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span>
+            <span class="n">countdown</span><span class="o">=</span><span class="n">countdown</span><span class="p">,</span> <span class="n">eta</span><span class="o">=</span><span class="n">eta</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="n">retries</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">options</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">max_retries</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">retries</span> <span class="o">&gt;</span> <span class="n">max_retries</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="c1"># On Py3: will augment any current exception with</span>
+                <span class="c1"># the exc&#39; argument provided (raise exc from orig)</span>
+                <span class="n">raise_with_context</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="bp">self</span><span class="o">.</span><span class="n">MaxRetriesExceededError</span><span class="p">(</span>
+                <span class="s2">&quot;Can&#39;t retry </span><span class="si">{0}</span><span class="s2">[</span><span class="si">{1}</span><span class="s2">] args:</span><span class="si">{2}</span><span class="s2"> kwargs:</span><span class="si">{3}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">request</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">S</span><span class="o">.</span><span class="n">args</span><span class="p">,</span> <span class="n">S</span><span class="o">.</span><span class="n">kwargs</span><span class="p">))</span>
+
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">Retry</span><span class="p">(</span><span class="n">exc</span><span class="o">=</span><span class="n">exc</span><span class="p">,</span> <span class="n">when</span><span class="o">=</span><span class="n">eta</span> <span class="ow">or</span> <span class="n">countdown</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">is_eager</span><span class="p">:</span>
+            <span class="c1"># if task was executed eagerly using apply(),</span>
+            <span class="c1"># then the retry must also be executed eagerly.</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">apply</span><span class="p">()</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">throw</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">ret</span>
+            <span class="k">return</span> <span class="n">ret</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">apply_async</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">Reject</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">requeue</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">throw</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">ret</span>
+        <span class="k">return</span> <span class="n">ret</span></div>
+
+<div class="viewcode-block" id="Task.apply"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.apply">[docs]</a>    <span class="k">def</span> <span class="nf">apply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+              <span class="n">link</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">link_error</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+              <span class="n">task_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">throw</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+              <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Execute this task locally, by blocking until the task returns.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            args (Tuple): positional arguments passed on to the task.</span>
+<span class="sd">            kwargs (Dict): keyword arguments passed on to the task.</span>
+<span class="sd">            throw (bool): Re-raise task exceptions.</span>
+<span class="sd">                Defaults to the :setting:`task_eager_propagates` setting.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            celery.result.EagerResult: pre-evaluated result.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># trace imports Task, so need to import inline.</span>
+        <span class="kn">from</span> <span class="nn">celery.app.trace</span> <span class="k">import</span> <span class="n">build_tracer</span>
+
+        <span class="n">app</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_app</span><span class="p">()</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="n">args</span> <span class="ow">or</span> <span class="p">()</span>
+        <span class="c1"># add &#39;self&#39; if this is a bound method.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__self__</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="vm">__self__</span><span class="p">,)</span> <span class="o">+</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="n">kwargs</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">task_id</span> <span class="o">=</span> <span class="n">task_id</span> <span class="ow">or</span> <span class="n">uuid</span><span class="p">()</span>
+        <span class="n">retries</span> <span class="o">=</span> <span class="n">retries</span> <span class="ow">or</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="n">throw</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">throw</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_eager_propagates</span>
+
+        <span class="c1"># Make sure we get the task instance, not class.</span>
+        <span class="n">task</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">_tasks</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">]</span>
+
+        <span class="n">request</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+            <span class="s1">&#39;retries&#39;</span><span class="p">:</span> <span class="n">retries</span><span class="p">,</span>
+            <span class="s1">&#39;is_eager&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s1">&#39;logfile&#39;</span><span class="p">:</span> <span class="n">logfile</span><span class="p">,</span>
+            <span class="s1">&#39;loglevel&#39;</span><span class="p">:</span> <span class="n">loglevel</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="s1">&#39;hostname&#39;</span><span class="p">:</span> <span class="n">gethostname</span><span class="p">(),</span>
+            <span class="s1">&#39;callbacks&#39;</span><span class="p">:</span> <span class="n">maybe_list</span><span class="p">(</span><span class="n">link</span><span class="p">),</span>
+            <span class="s1">&#39;errbacks&#39;</span><span class="p">:</span> <span class="n">maybe_list</span><span class="p">(</span><span class="n">link_error</span><span class="p">),</span>
+            <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="n">headers</span><span class="p">,</span>
+            <span class="s1">&#39;delivery_info&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;is_eager&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+        <span class="p">}</span>
+        <span class="n">tb</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">tracer</span> <span class="o">=</span> <span class="n">build_tracer</span><span class="p">(</span>
+            <span class="n">task</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">eager</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">propagate</span><span class="o">=</span><span class="n">throw</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_app</span><span class="p">(),</span>
+        <span class="p">)</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">tracer</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">request</span><span class="p">)</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="n">ret</span><span class="o">.</span><span class="n">retval</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">retval</span><span class="p">,</span> <span class="n">ExceptionInfo</span><span class="p">):</span>
+            <span class="n">retval</span><span class="p">,</span> <span class="n">tb</span> <span class="o">=</span> <span class="n">retval</span><span class="o">.</span><span class="n">exception</span><span class="p">,</span> <span class="n">retval</span><span class="o">.</span><span class="n">traceback</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="n">states</span><span class="o">.</span><span class="n">SUCCESS</span> <span class="k">if</span> <span class="n">ret</span><span class="o">.</span><span class="n">info</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">ret</span><span class="o">.</span><span class="n">info</span><span class="o">.</span><span class="n">state</span>
+        <span class="k">return</span> <span class="n">EagerResult</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">retval</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">traceback</span><span class="o">=</span><span class="n">tb</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.AsyncResult"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.AsyncResult">[docs]</a>    <span class="k">def</span> <span class="nf">AsyncResult</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get AsyncResult instance for this kind of task.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            task_id (str): Task id to get result for.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_app</span><span class="p">()</span><span class="o">.</span><span class="n">AsyncResult</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">backend</span><span class="p">,</span>
+                                           <span class="n">task_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.signature"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.signature">[docs]</a>    <span class="k">def</span> <span class="nf">signature</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="n">starargs</span><span class="p">,</span> <span class="o">**</span><span class="n">starkwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create signature.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            :class:`~celery.signature`:  object for</span>
+<span class="sd">                this task, wrapping arguments and execution options</span>
+<span class="sd">                for a single task invocation.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">starkwargs</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s1">&#39;app&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">signature</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="o">*</span><span class="n">starargs</span><span class="p">,</span> <span class="o">**</span><span class="n">starkwargs</span><span class="p">)</span></div>
+    <span class="n">subtask</span> <span class="o">=</span> <span class="n">signature</span>
+
+<div class="viewcode-block" id="Task.s"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.s">[docs]</a>    <span class="k">def</span> <span class="nf">s</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create signature.</span>
+
+<span class="sd">        Shortcut for ``.s(*a, **k) -&gt; .signature(a, k)``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.si"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.si">[docs]</a>    <span class="k">def</span> <span class="nf">si</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create immutable signature.</span>
+
+<span class="sd">        Shortcut for ``.si(*a, **k) -&gt; .signature(a, k, immutable=True)``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">immutable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.chunks"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.chunks">[docs]</a>    <span class="k">def</span> <span class="nf">chunks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">it</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create a :class:`~celery.canvas.chunks` task for this task.&quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">chunks</span>
+        <span class="k">return</span> <span class="n">chunks</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">s</span><span class="p">(),</span> <span class="n">it</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.map"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.map">[docs]</a>    <span class="k">def</span> <span class="nf">map</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">it</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create a :class:`~celery.canvas.xmap` task from ``it``.&quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">xmap</span>
+        <span class="k">return</span> <span class="n">xmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">s</span><span class="p">(),</span> <span class="n">it</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.starmap"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.starmap">[docs]</a>    <span class="k">def</span> <span class="nf">starmap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">it</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create a :class:`~celery.canvas.xstarmap` task from ``it``.&quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">xstarmap</span>
+        <span class="k">return</span> <span class="n">xstarmap</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">s</span><span class="p">(),</span> <span class="n">it</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.send_event"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.send_event">[docs]</a>    <span class="k">def</span> <span class="nf">send_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">type_</span><span class="p">,</span> <span class="n">retry</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">fields</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Send monitoring event message.</span>
+
+<span class="sd">        This can be used to add custom event types in :pypi:`Flower`</span>
+<span class="sd">        and other monitors.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            type_ (str):  Type of event, e.g. ``&quot;task-failed&quot;``.</span>
+
+<span class="sd">        Keyword Arguments:</span>
+<span class="sd">            retry (bool):  Retry sending the message</span>
+<span class="sd">                if the connection is lost.  Default is taken from the</span>
+<span class="sd">                :setting:`task_publish_retry` setting.</span>
+<span class="sd">            retry_policy (Mapping): Retry settings.  Default is taken</span>
+<span class="sd">                from the :setting:`task_publish_retry_policy` setting.</span>
+<span class="sd">            **fields (Any): Map containing information about the event.</span>
+<span class="sd">                Must be JSON serializable.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span>
+        <span class="k">if</span> <span class="n">retry_policy</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">retry_policy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_publish_retry_policy</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">events</span><span class="o">.</span><span class="n">default_dispatcher</span><span class="p">(</span><span class="n">hostname</span><span class="o">=</span><span class="n">req</span><span class="o">.</span><span class="n">hostname</span><span class="p">)</span> <span class="k">as</span> <span class="n">d</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">d</span><span class="o">.</span><span class="n">send</span><span class="p">(</span>
+                <span class="n">type_</span><span class="p">,</span>
+                <span class="n">uuid</span><span class="o">=</span><span class="n">req</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">retry</span><span class="o">=</span><span class="n">retry</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="n">retry_policy</span><span class="p">,</span> <span class="o">**</span><span class="n">fields</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.replace"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.replace">[docs]</a>    <span class="k">def</span> <span class="nf">replace</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Replace this task, with a new task inheriting the task id.</span>
+
+<span class="sd">        .. versionadded:: 4.0</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            sig (~@Signature): signature to replace with.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ~@Ignore: This is always raised, so the best practice</span>
+<span class="sd">            is to always use ``raise self.replace(...)`` to convey</span>
+<span class="sd">            to the reader that the task won&#39;t continue after being replaced.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">chord</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">chord</span>
+        <span class="k">if</span> <span class="s1">&#39;chord&#39;</span> <span class="ow">in</span> <span class="n">sig</span><span class="o">.</span><span class="n">options</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">ImproperlyConfigured</span><span class="p">(</span>
+                <span class="s2">&quot;A signature replacing a task must not be part of a chord&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">group</span><span class="p">):</span>
+            <span class="n">sig</span> <span class="o">|=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="s1">&#39;celery.accumulate&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">s</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">set</span><span class="p">(</span>
+                <span class="n">link</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">callbacks</span><span class="p">,</span>
+                <span class="n">link_error</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">errbacks</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">chain</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">chain</span><span class="p">):</span>
+                <span class="n">sig</span> <span class="o">|=</span> <span class="n">signature</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span>
+
+        <span class="n">sig</span><span class="o">.</span><span class="n">set</span><span class="p">(</span>
+            <span class="n">chord</span><span class="o">=</span><span class="n">chord</span><span class="p">,</span>
+            <span class="n">group_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">group</span><span class="p">,</span>
+            <span class="n">root_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">root_id</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">sig</span><span class="o">.</span><span class="n">freeze</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+
+        <span class="n">sig</span><span class="o">.</span><span class="n">delay</span><span class="p">()</span>
+        <span class="k">raise</span> <span class="n">Ignore</span><span class="p">(</span><span class="s1">&#39;Replaced by new task&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.add_to_chord"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.add_to_chord">[docs]</a>    <span class="k">def</span> <span class="nf">add_to_chord</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">lazy</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add signature to the chord the current task is a member of.</span>
+
+<span class="sd">        .. versionadded:: 4.0</span>
+
+<span class="sd">        Currently only supported by the Redis result backend.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            sig (~@Signature): Signature to extend chord with.</span>
+<span class="sd">            lazy (bool): If enabled the new task won&#39;t actually be called,</span>
+<span class="sd">                and ``sig.delay()`` must be called manually.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Current task is not member of any chord&#39;</span><span class="p">)</span>
+        <span class="n">sig</span><span class="o">.</span><span class="n">set</span><span class="p">(</span>
+            <span class="n">group_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">group</span><span class="p">,</span>
+            <span class="n">chord</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">,</span>
+            <span class="n">root_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">root_id</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">sig</span><span class="o">.</span><span class="n">freeze</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">backend</span><span class="o">.</span><span class="n">add_to_chord</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">group</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">sig</span><span class="o">.</span><span class="n">delay</span><span class="p">()</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">lazy</span> <span class="k">else</span> <span class="n">sig</span></div>
+
+<div class="viewcode-block" id="Task.update_state"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.update_state">[docs]</a>    <span class="k">def</span> <span class="nf">update_state</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Update task state.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            task_id (str): Id of the task to update.</span>
+<span class="sd">                Defaults to the id of the current task.</span>
+<span class="sd">            state (str): New state.</span>
+<span class="sd">            meta (Dict): State meta-data.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">task_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">task_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">backend</span><span class="o">.</span><span class="n">store_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Task.on_success"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.on_success">[docs]</a>    <span class="k">def</span> <span class="nf">on_success</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">retval</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Success handler.</span>
+
+<span class="sd">        Run by the worker if the task executes successfully.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            retval (Any): The return value of the task.</span>
+<span class="sd">            task_id (str): Unique id of the executed task.</span>
+<span class="sd">            args (Tuple): Original arguments for the executed task.</span>
+<span class="sd">            kwargs (Dict): Original keyword arguments for the executed task.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: The return value of this handler is ignored.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="Task.on_retry"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.on_retry">[docs]</a>    <span class="k">def</span> <span class="nf">on_retry</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">einfo</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Retry handler.</span>
+
+<span class="sd">        This is run by the worker when the task is to be retried.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            exc (Exception): The exception sent to :meth:`retry`.</span>
+<span class="sd">            task_id (str): Unique id of the retried task.</span>
+<span class="sd">            args (Tuple): Original arguments for the retried task.</span>
+<span class="sd">            kwargs (Dict): Original keyword arguments for the retried task.</span>
+<span class="sd">            einfo (~billiard.einfo.ExceptionInfo): Exception information.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: The return value of this handler is ignored.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="Task.on_failure"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.on_failure">[docs]</a>    <span class="k">def</span> <span class="nf">on_failure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">einfo</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Error handler.</span>
+
+<span class="sd">        This is run by the worker when the task fails.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            exc (Exception): The exception raised by the task.</span>
+<span class="sd">            task_id (str): Unique id of the failed task.</span>
+<span class="sd">            args (Tuple): Original arguments for the task that failed.</span>
+<span class="sd">            kwargs (Dict): Original keyword arguments for the task that failed.</span>
+<span class="sd">            einfo (~billiard.einfo.ExceptionInfo): Exception information.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: The return value of this handler is ignored.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="Task.after_return"><a class="viewcode-back" href="../../../reference/celery.app.task.html#celery.app.task.Task.after_return">[docs]</a>    <span class="k">def</span> <span class="nf">after_return</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span> <span class="n">retval</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">einfo</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Handler called after the task returns.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            status (str): Current task state.</span>
+<span class="sd">            retval (Any): Task return value/exception.</span>
+<span class="sd">            task_id (str): Unique id of the task.</span>
+<span class="sd">            args (Tuple): Original arguments for the task.</span>
+<span class="sd">            kwargs (Dict): Original keyword arguments for the task.</span>
+<span class="sd">            einfo (~billiard.einfo.ExceptionInfo): Exception information.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: The return value of this handler is ignored.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+    <span class="k">def</span> <span class="nf">add_trail</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">trail</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">children</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">push_request</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">request_stack</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="n">Context</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">pop_request</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">request_stack</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;``repr(task)``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_reprtask</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">R_SELF_TASK</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__self__</span> <span class="k">else</span> <span class="n">R_INSTANCE</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_request</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get current request object.&quot;&quot;&quot;</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_stack</span><span class="o">.</span><span class="n">top</span>
+        <span class="k">if</span> <span class="n">req</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># task was not called, but some may still expect a request</span>
+            <span class="c1"># to be there, perhaps that should be deprecated.</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_default_request</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_default_request</span> <span class="o">=</span> <span class="n">Context</span><span class="p">()</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_default_request</span>
+        <span class="k">return</span> <span class="n">req</span>
+    <span class="n">request</span> <span class="o">=</span> <span class="nb">property</span><span class="p">(</span><span class="n">_get_request</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_exec_options</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_exec_options</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_exec_options</span> <span class="o">=</span> <span class="n">extract_exec_options</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_exec_options</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">backend</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">backend</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_backend</span>
+        <span class="k">if</span> <span class="n">backend</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">backend</span>
+        <span class="k">return</span> <span class="n">backend</span>
+
+    <span class="nd">@backend</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">backend</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>  <span class="c1"># noqa</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_backend</span> <span class="o">=</span> <span class="n">value</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">__name__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span></div>
+
+
+<span class="n">BaseTask</span> <span class="o">=</span> <span class="n">Task</span>  <span class="c1"># noqa: E305 XXX compat alias</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

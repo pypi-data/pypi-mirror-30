@@ -1,0 +1,347 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Optimizing &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="copyright" title="Copyright" href="../copyright.html" />
+    <link rel="next" title="Debugging" href="debugging.html" />
+    <link rel="prev" title="Security" href="security.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="debugging.html" title="Debugging"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="security.html" title="Security"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">User Guide</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/userguide/optimizing.html">go here</a>.
+        </p>
+    
+
+</div>
+    <div class="section" id="optimizing">
+<span id="guide-optimizing"></span><h1>Optimizing<a class="headerlink" href="#optimizing" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The default configuration makes a lot of compromises. It’s not optimal for
+any single case, but works well enough for most situations.</p>
+<p>There are optimizations that can be applied based on specific use cases.</p>
+<p>Optimizations can apply to different properties of the running environment,
+be it the time tasks take to execute, the amount of memory used, or
+responsiveness at times of high load.</p>
+</div>
+<div class="section" id="ensuring-operations">
+<h2>Ensuring Operations<a class="headerlink" href="#ensuring-operations" title="Permalink to this headline">¶</a></h2>
+<p>In the book <a class="reference external" href="http://www.cs.bell-labs.com/cm/cs/pearls/">Programming Pearls</a>, Jon Bentley presents the concept of
+back-of-the-envelope calculations by asking the question;</p>
+<blockquote>
+<div>❝ How much water flows out of the Mississippi River in a day? ❞</div></blockquote>
+<p>The point of this exercise <a class="footnote-reference" href="#id4" id="id1">[*]</a> is to show that there’s a limit
+to how much data a system can process in a timely manner.
+Back of the envelope calculations can be used as a means to plan for this
+ahead of time.</p>
+<p>In Celery; If a task takes 10 minutes to complete,
+and there are 10 new tasks coming in every minute, the queue will never
+be empty. This is why it’s very important
+that you monitor queue lengths!</p>
+<p>A way to do this is by <a class="reference internal" href="monitoring.html#monitoring-munin"><span class="std std-ref">using Munin</span></a>.
+You should set up alerts, that’ll notify you as soon as any queue has
+reached an unacceptable size. This way you can take appropriate action
+like adding new worker nodes, or revoking unnecessary tasks.</p>
+</div>
+<div class="section" id="general-settings">
+<span id="optimizing-general-settings"></span><h2>General Settings<a class="headerlink" href="#general-settings" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="librabbitmq">
+<span id="optimizing-librabbitmq"></span><h3>librabbitmq<a class="headerlink" href="#librabbitmq" title="Permalink to this headline">¶</a></h3>
+<p>If you’re using RabbitMQ (AMQP) as the broker then you can install the
+<a class="reference external" href="https://pypi.python.org/pypi/librabbitmq/">librabbitmq</a> module to use an optimized client written in C:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$</span> pip install librabbitmq
+</pre></div>
+</div>
+<p>The ‘amqp’ transport will automatically use the librabbitmq module if it’s
+installed, or you can also specify the transport you want directly by using
+the <code class="docutils literal notranslate"><span class="pre">pyamqp://</span></code> or <code class="docutils literal notranslate"><span class="pre">librabbitmq://</span></code> prefixes.</p>
+</div>
+<div class="section" id="broker-connection-pools">
+<span id="optimizing-connection-pools"></span><h3>Broker Connection Pools<a class="headerlink" href="#broker-connection-pools" title="Permalink to this headline">¶</a></h3>
+<p>The broker connection pool is enabled by default since version 2.5.</p>
+<p>You can tweak the <a class="reference internal" href="configuration.html#std:setting-broker_pool_limit"><code class="xref std std-setting docutils literal notranslate"><span class="pre">broker_pool_limit</span></code></a> setting to minimize
+contention, and the value should be based on the number of
+active threads/green-threads using broker connections.</p>
+</div>
+<div class="section" id="using-transient-queues">
+<span id="optimizing-transient-queues"></span><h3>Using Transient Queues<a class="headerlink" href="#using-transient-queues" title="Permalink to this headline">¶</a></h3>
+<p>Queues created by Celery are persistent by default. This means that
+the broker will write messages to disk to ensure that the tasks will
+be executed even if the broker is restarted.</p>
+<p>But in some cases it’s fine that the message is lost, so not all tasks
+require durability. You can create a <em>transient</em> queue for these tasks
+to improve performance:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">kombu</span> <span class="kn">import</span> <span class="n">Exchange</span><span class="p">,</span> <span class="n">Queue</span>
+
+<span class="n">task_queues</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">Queue</span><span class="p">(</span><span class="s1">&#39;celery&#39;</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="s1">&#39;celery&#39;</span><span class="p">),</span>
+    <span class="n">Queue</span><span class="p">(</span><span class="s1">&#39;transient&#39;</span><span class="p">,</span> <span class="n">Exchange</span><span class="p">(</span><span class="s1">&#39;transient&#39;</span><span class="p">,</span> <span class="n">delivery_mode</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+          <span class="n">routing_key</span><span class="o">=</span><span class="s1">&#39;transient&#39;</span><span class="p">,</span> <span class="n">durable</span><span class="o">=</span><span class="bp">False</span><span class="p">),</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>or by using <a class="reference internal" href="configuration.html#std:setting-task_routes"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_routes</span></code></a>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">task_routes</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;proj.tasks.add&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;queue&#39;</span><span class="p">:</span> <span class="s1">&#39;celery&#39;</span><span class="p">,</span> <span class="s1">&#39;delivery_mode&#39;</span><span class="p">:</span> <span class="s1">&#39;transient&#39;</span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">delivery_mode</span></code> changes how the messages to this queue are delivered.
+A value of one means that the message won’t be written to disk, and a value
+of two (default) means that the message can be written to disk.</p>
+<p>To direct a task to your new transient queue you can specify the queue
+argument (or use the <a class="reference internal" href="configuration.html#std:setting-task_routes"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_routes</span></code></a> setting):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">task</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">queue</span><span class="o">=</span><span class="s1">&#39;transient&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>For more information see the <a class="reference internal" href="routing.html#guide-routing"><span class="std std-ref">routing guide</span></a>.</p>
+</div>
+</div>
+<div class="section" id="worker-settings">
+<span id="optimizing-worker-settings"></span><h2>Worker Settings<a class="headerlink" href="#worker-settings" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="prefetch-limits">
+<span id="optimizing-prefetch-limit"></span><h3>Prefetch Limits<a class="headerlink" href="#prefetch-limits" title="Permalink to this headline">¶</a></h3>
+<p><em>Prefetch</em> is a term inherited from AMQP that’s often misunderstood
+by users.</p>
+<p>The prefetch limit is a <strong>limit</strong> for the number of tasks (messages) a worker
+can reserve for itself. If it is zero, the worker will keep
+consuming messages, not respecting that there may be other
+available worker nodes that may be able to process them sooner <a class="footnote-reference" href="#id5" id="id2">[†]</a>,
+or that the messages may not even fit in memory.</p>
+<p>The workers’ default prefetch count is the
+<a class="reference internal" href="configuration.html#std:setting-worker_prefetch_multiplier"><code class="xref std std-setting docutils literal notranslate"><span class="pre">worker_prefetch_multiplier</span></code></a> setting multiplied by the number
+of concurrency slots <a class="footnote-reference" href="#id6" id="id3">[‡]</a> (processes/threads/green-threads).</p>
+<p>If you have many tasks with a long duration you want
+the multiplier value to be <em>one</em>: meaning it’ll only reserve one
+task per worker process at a time.</p>
+<p>However – If you have many short-running tasks, and throughput/round trip
+latency is important to you, this number should be large. The worker is
+able to process more tasks per second if the messages have already been
+prefetched, and is available in memory. You may have to experiment to find
+the best value that works for you. Values like 50 or 150 might make sense in
+these circumstances. Say 64, or 128.</p>
+<p>If you have a combination of long- and short-running tasks, the best option
+is to use two worker nodes that are configured separately, and route
+the tasks according to the run-time (see <a class="reference internal" href="routing.html#guide-routing"><span class="std std-ref">Routing Tasks</span></a>).</p>
+</div>
+<div class="section" id="reserve-one-task-at-a-time">
+<h3>Reserve one task at a time<a class="headerlink" href="#reserve-one-task-at-a-time" title="Permalink to this headline">¶</a></h3>
+<p>The task message is only deleted from the queue after the task is
+<a class="reference internal" href="../glossary.html#term-acknowledged"><span class="xref std std-term">acknowledged</span></a>, so if the worker crashes before acknowledging the task,
+it can be redelivered to another worker (or the same after recovery).</p>
+<p>When using the default of early acknowledgment, having a prefetch multiplier setting
+of <em>one</em>, means the worker will reserve at most one extra task for every
+worker process: or in other words, if the worker is started with
+<a class="reference internal" href="../reference/celery.bin.worker.html#cmdoption-celery-worker-c"><code class="xref std std-option docutils literal notranslate"><span class="pre">-c</span> <span class="pre">10</span></code></a>, the worker may reserve at most 20
+tasks (10 unacknowledged tasks executing, and 10 unacknowledged reserved
+tasks) at any time.</p>
+<p>Often users ask if disabling “prefetching of tasks” is possible, but what
+they really mean by that, is to have a worker only reserve as many tasks as
+there are worker processes (10 unacknowledged tasks for
+<a class="reference internal" href="../reference/celery.bin.worker.html#cmdoption-celery-worker-c"><code class="xref std std-option docutils literal notranslate"><span class="pre">-c</span> <span class="pre">10</span></code></a>)</p>
+<p>That’s possible, but not without also enabling
+<a class="reference internal" href="../glossary.html#term-late-acknowledgment"><span class="xref std std-term">late acknowledgment</span></a>. Using this option over the
+default behavior means a task that’s already started executing will be
+retried in the event of a power failure or the worker instance being killed
+abruptly, so this also means the task must be <a class="reference internal" href="../glossary.html#term-idempotent"><span class="xref std std-term">idempotent</span></a></p>
+<div class="admonition seealso">
+<p class="first admonition-title">See also</p>
+<p class="last">Notes at <a class="reference internal" href="../faq.html#faq-acks-late-vs-retry"><span class="std std-ref">Should I use retry or acks_late?</span></a>.</p>
+</div>
+<p>You can enable this behavior by using the following configuration options:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">task_acks_late</span> <span class="o">=</span> <span class="bp">True</span>
+<span class="n">worker_prefetch_multiplier</span> <span class="o">=</span> <span class="mi">1</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="prefork-pool-prefetch-settings">
+<span id="prefork-pool-prefetch"></span><h3>Prefork pool prefetch settings<a class="headerlink" href="#prefork-pool-prefetch-settings" title="Permalink to this headline">¶</a></h3>
+<p>The prefork pool will asynchronously send as many tasks to the processes
+as it can and this means that the processes are, in effect, prefetching
+tasks.</p>
+<p>This benefits performance but it also means that tasks may be stuck
+waiting for long running tasks to complete:</p>
+<div class="highlight-python3 notranslate"><div class="highlight"><pre><span></span><span class="o">-&gt;</span> <span class="n">send</span> <span class="n">task</span> <span class="n">T1</span> <span class="n">to</span> <span class="n">process</span> <span class="n">A</span>
+<span class="c1"># A executes T1</span>
+<span class="o">-&gt;</span> <span class="n">send</span> <span class="n">task</span> <span class="n">T2</span> <span class="n">to</span> <span class="n">process</span> <span class="n">B</span>
+<span class="c1"># B executes T2</span>
+<span class="o">&lt;-</span> <span class="n">T2</span> <span class="n">complete</span> <span class="n">sent</span> <span class="n">by</span> <span class="n">process</span> <span class="n">B</span>
+
+<span class="o">-&gt;</span> <span class="n">send</span> <span class="n">task</span> <span class="n">T3</span> <span class="n">to</span> <span class="n">process</span> <span class="n">A</span>
+<span class="c1"># A still executing T1, T3 stuck in local buffer and won&#39;t start until</span>
+<span class="c1"># T1 returns, and other queued tasks won&#39;t be sent to idle processes</span>
+<span class="o">&lt;-</span> <span class="n">T1</span> <span class="n">complete</span> <span class="n">sent</span> <span class="n">by</span> <span class="n">process</span> <span class="n">A</span>
+<span class="c1"># A executes T3</span>
+</pre></div>
+</div>
+<p>The worker will send tasks to the process as long as the pipe buffer is
+writable. The pipe buffer size varies based on the operating system: some may
+have a buffer as small as 64KB but on recent Linux versions the buffer
+size is 1MB (can only be changed system wide).</p>
+<p>You can disable this prefetching behavior by enabling the
+<a class="reference internal" href="../reference/celery.bin.worker.html#cmdoption-celery-worker-o"><code class="xref std std-option docutils literal notranslate"><span class="pre">-Ofair</span></code></a> worker option:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$</span> celery -A proj worker -l info -Ofair
+</pre></div>
+</div>
+<p>With this option enabled the worker will only write to processes that are
+available for work, disabling the prefetch behavior:</p>
+<div class="highlight-python3 notranslate"><div class="highlight"><pre><span></span><span class="o">-&gt;</span> <span class="n">send</span> <span class="n">task</span> <span class="n">T1</span> <span class="n">to</span> <span class="n">process</span> <span class="n">A</span>
+<span class="c1"># A executes T1</span>
+<span class="o">-&gt;</span> <span class="n">send</span> <span class="n">task</span> <span class="n">T2</span> <span class="n">to</span> <span class="n">process</span> <span class="n">B</span>
+<span class="c1"># B executes T2</span>
+<span class="o">&lt;-</span> <span class="n">T2</span> <span class="n">complete</span> <span class="n">sent</span> <span class="n">by</span> <span class="n">process</span> <span class="n">B</span>
+
+<span class="o">-&gt;</span> <span class="n">send</span> <span class="n">T3</span> <span class="n">to</span> <span class="n">process</span> <span class="n">B</span>
+<span class="c1"># B executes T3</span>
+
+<span class="o">&lt;-</span> <span class="n">T3</span> <span class="n">complete</span> <span class="n">sent</span> <span class="n">by</span> <span class="n">process</span> <span class="n">B</span>
+<span class="o">&lt;-</span> <span class="n">T1</span> <span class="n">complete</span> <span class="n">sent</span> <span class="n">by</span> <span class="n">process</span> <span class="n">A</span>
+</pre></div>
+</div>
+<p class="rubric">Footnotes</p>
+<table class="docutils footnote" frame="void" id="id4" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id1">[*]</a></td><td>The chapter is available to read for free here:
+<a class="reference external" href="http://books.google.com/books?id=kse_7qbWbjsC&amp;pg=PA67">The back of the envelope</a>. The book is a classic text. Highly
+recommended.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="id5" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id2">[†]</a></td><td>RabbitMQ and other brokers deliver messages round-robin,
+so this doesn’t apply to an active system. If there’s no prefetch
+limit and you restart the cluster, there will be timing delays between
+nodes starting. If there are 3 offline nodes and one active node,
+all messages will be delivered to the active node.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="id6" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id3">[‡]</a></td><td>This is the concurrency setting; <a class="reference internal" href="configuration.html#std:setting-worker_concurrency"><code class="xref std std-setting docutils literal notranslate"><span class="pre">worker_concurrency</span></code></a> or the
+<a class="reference internal" href="../reference/celery.bin.worker.html#cmdoption-celery-worker-c"><code class="xref std std-option docutils literal notranslate"><span class="pre">celery</span> <span class="pre">worker</span> <span class="pre">-c</span></code></a> option.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../index.html">
+              <img class="logo" src="../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="security.html"
+                        title="previous chapter">Security</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="debugging.html"
+                        title="next chapter">Debugging</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userguide/optimizing.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="debugging.html" title="Debugging"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="security.html" title="Security"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >User Guide</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,263 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.apps.beat &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/apps/beat.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.apps.beat</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Beat command-line program.</span>
+
+<span class="sd">This module is the &#39;program-version&#39; of :mod:`celery.beat`.</span>
+
+<span class="sd">It does everything necessary to run that module</span>
+<span class="sd">as an actual application, like installing signal handlers</span>
+<span class="sd">and so on.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">numbers</span>
+<span class="kn">import</span> <span class="nn">socket</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">datetime</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">VERSION_BANNER</span><span class="p">,</span> <span class="n">beat</span><span class="p">,</span> <span class="n">platforms</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">text_t</span>
+<span class="kn">from</span> <span class="nn">celery.utils.imports</span> <span class="k">import</span> <span class="n">qualname</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">LOG_LEVELS</span><span class="p">,</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">celery.utils.time</span> <span class="k">import</span> <span class="n">humanize_seconds</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Beat&#39;</span><span class="p">,)</span>
+
+<span class="n">STARTUP_INFO_FMT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">LocalTime -&gt; </span><span class="si">{timestamp}</span><span class="s2"></span>
+<span class="s2">Configuration -&gt;</span>
+<span class="s2">    . broker -&gt; </span><span class="si">{conninfo}</span><span class="s2"></span>
+<span class="s2">    . loader -&gt; </span><span class="si">{loader}</span><span class="s2"></span>
+<span class="s2">    . scheduler -&gt; </span><span class="si">{scheduler}</span><span class="s2"></span>
+<span class="si">{scheduler_info}</span><span class="s2"></span>
+<span class="s2">    . logfile -&gt; </span><span class="si">{logfile}</span><span class="s2">@%</span><span class="si">{loglevel}</span><span class="s2"></span>
+<span class="s2">    . maxinterval -&gt; </span><span class="si">{hmax_interval}</span><span class="s2"> (</span><span class="si">{max_interval}</span><span class="s2">s)</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s1">&#39;celery.beat&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Beat"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat">[docs]</a><span class="k">class</span> <span class="nc">Beat</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Beat as a service.&quot;&quot;&quot;</span>
+
+    <span class="n">Service</span> <span class="o">=</span> <span class="n">beat</span><span class="o">.</span><span class="n">Service</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_interval</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">socket_timeout</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">pidfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no_color</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">loglevel</span><span class="o">=</span><span class="s1">&#39;WARN&#39;</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">schedule</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">scheduler</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">scheduler_cls</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># XXX use scheduler</span>
+                 <span class="n">redirect_stdouts</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">redirect_stdouts_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span> <span class="o">=</span> <span class="n">app</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span>
+        <span class="n">either</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">either</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span> <span class="o">=</span> <span class="n">loglevel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logfile</span> <span class="o">=</span> <span class="n">logfile</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">schedule</span> <span class="o">=</span> <span class="n">either</span><span class="p">(</span><span class="s1">&#39;beat_schedule_filename&#39;</span><span class="p">,</span> <span class="n">schedule</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scheduler_cls</span> <span class="o">=</span> <span class="n">either</span><span class="p">(</span>
+            <span class="s1">&#39;beat_scheduler&#39;</span><span class="p">,</span> <span class="n">scheduler</span><span class="p">,</span> <span class="n">scheduler_cls</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">redirect_stdouts</span> <span class="o">=</span> <span class="n">either</span><span class="p">(</span>
+            <span class="s1">&#39;worker_redirect_stdouts&#39;</span><span class="p">,</span> <span class="n">redirect_stdouts</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">redirect_stdouts_level</span> <span class="o">=</span> <span class="n">either</span><span class="p">(</span>
+            <span class="s1">&#39;worker_redirect_stdouts_level&#39;</span><span class="p">,</span> <span class="n">redirect_stdouts_level</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_interval</span> <span class="o">=</span> <span class="n">max_interval</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">socket_timeout</span> <span class="o">=</span> <span class="n">socket_timeout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">no_color</span> <span class="o">=</span> <span class="n">no_color</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">colored</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">colored</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logfile</span><span class="p">,</span>
+            <span class="n">enabled</span><span class="o">=</span><span class="ow">not</span> <span class="n">no_color</span> <span class="k">if</span> <span class="n">no_color</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">no_color</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pidfile</span> <span class="o">=</span> <span class="n">pidfile</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span><span class="p">,</span> <span class="n">numbers</span><span class="o">.</span><span class="n">Integral</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span> <span class="o">=</span> <span class="n">LOG_LEVELS</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span><span class="o">.</span><span class="n">upper</span><span class="p">()]</span>
+
+<div class="viewcode-block" id="Beat.run"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">cyan</span><span class="p">(</span>
+            <span class="s1">&#39;celery beat v</span><span class="si">{0}</span><span class="s1"> is starting.&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">VERSION_BANNER</span><span class="p">))))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">init_loader</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_process_title</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">start_scheduler</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Beat.setup_logging"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.setup_logging">[docs]</a>    <span class="k">def</span> <span class="nf">setup_logging</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">colorize</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">no_color</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">colorize</span> <span class="o">=</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">no_color</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">setup</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">logfile</span><span class="p">,</span>
+                           <span class="bp">self</span><span class="o">.</span><span class="n">redirect_stdouts</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">redirect_stdouts_level</span><span class="p">,</span>
+                           <span class="n">colorize</span><span class="o">=</span><span class="n">colorize</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Beat.start_scheduler"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.start_scheduler">[docs]</a>    <span class="k">def</span> <span class="nf">start_scheduler</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pidfile</span><span class="p">:</span>
+            <span class="n">platforms</span><span class="o">.</span><span class="n">create_pidlock</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">pidfile</span><span class="p">)</span>
+        <span class="n">service</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">Service</span><span class="p">(</span>
+            <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">,</span>
+            <span class="n">max_interval</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">max_interval</span><span class="p">,</span>
+            <span class="n">scheduler_cls</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scheduler_cls</span><span class="p">,</span>
+            <span class="n">schedule_filename</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">schedule</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">banner</span><span class="p">(</span><span class="n">service</span><span class="p">))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">setup_logging</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">socket_timeout</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Setting default socket timeout to </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span>
+                         <span class="bp">self</span><span class="o">.</span><span class="n">socket_timeout</span><span class="p">)</span>
+            <span class="n">socket</span><span class="o">.</span><span class="n">setdefaulttimeout</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">socket_timeout</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">install_sync_handler</span><span class="p">(</span><span class="n">service</span><span class="p">)</span>
+            <span class="n">service</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">critical</span><span class="p">(</span><span class="s1">&#39;beat raised exception </span><span class="si">%s</span><span class="s1">: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span>
+                            <span class="n">exc</span><span class="o">.</span><span class="vm">__class__</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span>
+                            <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">raise</span></div>
+
+<div class="viewcode-block" id="Beat.banner"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.banner">[docs]</a>    <span class="k">def</span> <span class="nf">banner</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">service</span><span class="p">):</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">colored</span>
+        <span class="k">return</span> <span class="n">text_t</span><span class="p">(</span>  <span class="c1"># flake8: noqa</span>
+            <span class="n">c</span><span class="o">.</span><span class="n">blue</span><span class="p">(</span><span class="s1">&#39;__    &#39;</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">magenta</span><span class="p">(</span><span class="s1">&#39;-&#39;</span><span class="p">),</span>
+                   <span class="n">c</span><span class="o">.</span><span class="n">blue</span><span class="p">(</span><span class="s1">&#39;    ... __   &#39;</span><span class="p">),</span> <span class="n">c</span><span class="o">.</span><span class="n">magenta</span><span class="p">(</span><span class="s1">&#39;-&#39;</span><span class="p">),</span>
+                   <span class="n">c</span><span class="o">.</span><span class="n">blue</span><span class="p">(</span><span class="s1">&#39;        _</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">),</span>
+                   <span class="n">c</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">startup_info</span><span class="p">(</span><span class="n">service</span><span class="p">))),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Beat.init_loader"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.init_loader">[docs]</a>    <span class="k">def</span> <span class="nf">init_loader</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Run the worker init handler.</span>
+        <span class="c1"># (Usually imports task modules and such.)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">init_worker</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">finalize</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Beat.startup_info"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.startup_info">[docs]</a>    <span class="k">def</span> <span class="nf">startup_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">service</span><span class="p">):</span>
+        <span class="n">scheduler</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">get_scheduler</span><span class="p">(</span><span class="n">lazy</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">STARTUP_INFO_FMT</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="n">conninfo</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">connection</span><span class="p">()</span><span class="o">.</span><span class="n">as_uri</span><span class="p">(),</span>
+            <span class="n">timestamp</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">microsecond</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">logfile</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">logfile</span> <span class="ow">or</span> <span class="s1">&#39;[stderr]&#39;</span><span class="p">,</span>
+            <span class="n">loglevel</span><span class="o">=</span><span class="n">LOG_LEVELS</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span><span class="p">],</span>
+            <span class="n">loader</span><span class="o">=</span><span class="n">qualname</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">loader</span><span class="p">),</span>
+            <span class="n">scheduler</span><span class="o">=</span><span class="n">qualname</span><span class="p">(</span><span class="n">scheduler</span><span class="p">),</span>
+            <span class="n">scheduler_info</span><span class="o">=</span><span class="n">scheduler</span><span class="o">.</span><span class="n">info</span><span class="p">,</span>
+            <span class="n">hmax_interval</span><span class="o">=</span><span class="n">humanize_seconds</span><span class="p">(</span><span class="n">scheduler</span><span class="o">.</span><span class="n">max_interval</span><span class="p">),</span>
+            <span class="n">max_interval</span><span class="o">=</span><span class="n">scheduler</span><span class="o">.</span><span class="n">max_interval</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Beat.set_process_title"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.set_process_title">[docs]</a>    <span class="k">def</span> <span class="nf">set_process_title</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">arg_start</span> <span class="o">=</span> <span class="s1">&#39;manage&#39;</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">and</span> <span class="mi">2</span> <span class="ow">or</span> <span class="mi">1</span>
+        <span class="n">platforms</span><span class="o">.</span><span class="n">set_process_title</span><span class="p">(</span>
+            <span class="s1">&#39;celery beat&#39;</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="n">arg_start</span><span class="p">:]),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Beat.install_sync_handler"><a class="viewcode-back" href="../../../reference/celery.apps.beat.html#celery.apps.beat.Beat.install_sync_handler">[docs]</a>    <span class="k">def</span> <span class="nf">install_sync_handler</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">service</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Install a `SIGTERM` + `SIGINT` handler saving the schedule.&quot;&quot;&quot;</span>
+        <span class="k">def</span> <span class="nf">_sync</span><span class="p">(</span><span class="n">signum</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+            <span class="n">service</span><span class="o">.</span><span class="n">sync</span><span class="p">()</span>
+            <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">()</span>
+        <span class="n">platforms</span><span class="o">.</span><span class="n">signals</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">SIGTERM</span><span class="o">=</span><span class="n">_sync</span><span class="p">,</span> <span class="n">SIGINT</span><span class="o">=</span><span class="n">_sync</span><span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

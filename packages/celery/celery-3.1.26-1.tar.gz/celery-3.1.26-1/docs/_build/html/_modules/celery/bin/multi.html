@@ -1,0 +1,566 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.bin.multi &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/bin/multi.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.bin.multi</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Start multiple worker instances from the command-line.</span>
+
+<span class="sd">.. program:: celery multi</span>
+
+<span class="sd">Examples</span>
+<span class="sd">========</span>
+
+<span class="sd">.. code-block:: console</span>
+
+<span class="sd">    $ # Single worker with explicit name and events enabled.</span>
+<span class="sd">    $ celery multi start Leslie -E</span>
+
+<span class="sd">    $ # Pidfiles and logfiles are stored in the current directory</span>
+<span class="sd">    $ # by default.  Use --pidfile and --logfile argument to change</span>
+<span class="sd">    $ # this.  The abbreviation %n will be expanded to the current</span>
+<span class="sd">    $ # node name.</span>
+<span class="sd">    $ celery multi start Leslie -E --pidfile=/var/run/celery/%n.pid</span>
+<span class="sd">                                   --logfile=/var/log/celery/%n%I.log</span>
+
+
+<span class="sd">    $ # You need to add the same arguments when you restart,</span>
+<span class="sd">    $ # as these aren&#39;t persisted anywhere.</span>
+<span class="sd">    $ celery multi restart Leslie -E --pidfile=/var/run/celery/%n.pid</span>
+<span class="sd">                                     --logfile=/var/run/celery/%n%I.log</span>
+
+<span class="sd">    $ # To stop the node, you need to specify the same pidfile.</span>
+<span class="sd">    $ celery multi stop Leslie --pidfile=/var/run/celery/%n.pid</span>
+
+<span class="sd">    $ # 3 workers, with 3 processes each</span>
+<span class="sd">    $ celery multi start 3 -c 3</span>
+<span class="sd">    celery worker -n celery1@myhost -c 3</span>
+<span class="sd">    celery worker -n celery2@myhost -c 3</span>
+<span class="sd">    celery worker -n celery3@myhost -c 3</span>
+
+<span class="sd">    $ # start 3 named workers</span>
+<span class="sd">    $ celery multi start image video data -c 3</span>
+<span class="sd">    celery worker -n image@myhost -c 3</span>
+<span class="sd">    celery worker -n video@myhost -c 3</span>
+<span class="sd">    celery worker -n data@myhost -c 3</span>
+
+<span class="sd">    $ # specify custom hostname</span>
+<span class="sd">    $ celery multi start 2 --hostname=worker.example.com -c 3</span>
+<span class="sd">    celery worker -n celery1@worker.example.com -c 3</span>
+<span class="sd">    celery worker -n celery2@worker.example.com -c 3</span>
+
+<span class="sd">    $ # specify fully qualified nodenames</span>
+<span class="sd">    $ celery multi start foo@worker.example.com bar@worker.example.com -c 3</span>
+
+<span class="sd">    $ # fully qualified nodenames but using the current hostname</span>
+<span class="sd">    $ celery multi start foo@%h bar@%h</span>
+
+<span class="sd">    $ # Advanced example starting 10 workers in the background:</span>
+<span class="sd">    $ #   * Three of the workers processes the images and video queue</span>
+<span class="sd">    $ #   * Two of the workers processes the data queue with loglevel DEBUG</span>
+<span class="sd">    $ #   * the rest processes the default&#39; queue.</span>
+<span class="sd">    $ celery multi start 10 -l INFO -Q:1-3 images,video -Q:4,5 data</span>
+<span class="sd">        -Q default -L:4,5 DEBUG</span>
+
+<span class="sd">    $ # You can show the commands necessary to start the workers with</span>
+<span class="sd">    $ # the &#39;show&#39; command:</span>
+<span class="sd">    $ celery multi show 10 -l INFO -Q:1-3 images,video -Q:4,5 data</span>
+<span class="sd">        -Q default -L:4,5 DEBUG</span>
+
+<span class="sd">    $ # Additional options are added to each celery worker&#39; comamnd,</span>
+<span class="sd">    $ # but you can also modify the options for ranges of, or specific workers</span>
+
+<span class="sd">    $ # 3 workers: Two with 3 processes, and one with 10 processes.</span>
+<span class="sd">    $ celery multi start 3 -c 3 -c:1 10</span>
+<span class="sd">    celery worker -n celery1@myhost -c 10</span>
+<span class="sd">    celery worker -n celery2@myhost -c 3</span>
+<span class="sd">    celery worker -n celery3@myhost -c 3</span>
+
+<span class="sd">    $ # can also specify options for named workers</span>
+<span class="sd">    $ celery multi start image video data -c 3 -c:image 10</span>
+<span class="sd">    celery worker -n image@myhost -c 10</span>
+<span class="sd">    celery worker -n video@myhost -c 3</span>
+<span class="sd">    celery worker -n data@myhost -c 3</span>
+
+<span class="sd">    $ # ranges and lists of workers in options is also allowed:</span>
+<span class="sd">    $ # (-c:1-3 can also be written as -c:1,2,3)</span>
+<span class="sd">    $ celery multi start 5 -c 3  -c:1-3 10</span>
+<span class="sd">    celery worker -n celery1@myhost -c 10</span>
+<span class="sd">    celery worker -n celery2@myhost -c 10</span>
+<span class="sd">    celery worker -n celery3@myhost -c 10</span>
+<span class="sd">    celery worker -n celery4@myhost -c 3</span>
+<span class="sd">    celery worker -n celery5@myhost -c 3</span>
+
+<span class="sd">    $ # lists also works with named workers</span>
+<span class="sd">    $ celery multi start foo bar baz xuzzy -c 3 -c:foo,bar,baz 10</span>
+<span class="sd">    celery worker -n foo@myhost -c 10</span>
+<span class="sd">    celery worker -n bar@myhost -c 10</span>
+<span class="sd">    celery worker -n baz@myhost -c 10</span>
+<span class="sd">    celery worker -n xuzzy@myhost -c 3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">wraps</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils.objects</span> <span class="k">import</span> <span class="n">cached_property</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">VERSION_BANNER</span>
+<span class="kn">from</span> <span class="nn">celery.apps.multi</span> <span class="k">import</span> <span class="n">Cluster</span><span class="p">,</span> <span class="n">MultiParser</span><span class="p">,</span> <span class="n">NamespacedOptionParser</span>
+<span class="kn">from</span> <span class="nn">celery.platforms</span> <span class="k">import</span> <span class="n">EX_FAILURE</span><span class="p">,</span> <span class="n">EX_OK</span><span class="p">,</span> <span class="n">signals</span>
+<span class="kn">from</span> <span class="nn">celery.utils</span> <span class="k">import</span> <span class="n">term</span>
+<span class="kn">from</span> <span class="nn">celery.utils.text</span> <span class="k">import</span> <span class="n">pluralize</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;MultiTool&#39;</span><span class="p">,)</span>
+
+<span class="n">USAGE</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">usage: </span><span class="si">{prog_name}</span><span class="s2"> start &lt;node1 node2 nodeN|range&gt; [worker options]</span>
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> stop &lt;n1 n2 nN|range&gt; [-SIG (default: -TERM)]</span>
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> restart &lt;n1 n2 nN|range&gt; [-SIG] [worker options]</span>
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> kill &lt;n1 n2 nN|range&gt;</span>
+
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> show &lt;n1 n2 nN|range&gt; [worker options]</span>
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> get hostname &lt;n1 n2 nN|range&gt; [-qv] [worker options]</span>
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> names &lt;n1 n2 nN|range&gt;</span>
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> expand template &lt;n1 n2 nN|range&gt;</span>
+<span class="s2">       </span><span class="si">{prog_name}</span><span class="s2"> help</span>
+
+<span class="s2">additional options (must appear after command name):</span>
+
+<span class="s2">    * --nosplash:   Don&#39;t display program info.</span>
+<span class="s2">    * --quiet:      Don&#39;t show as much output.</span>
+<span class="s2">    * --verbose:    Show more output.</span>
+<span class="s2">    * --no-color:   Don&#39;t display colors.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">MultiTool</span><span class="p">()</span><span class="o">.</span><span class="n">execute_from_commandline</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">))</span>
+
+
+<span class="k">def</span> <span class="nf">splash</span><span class="p">(</span><span class="n">fun</span><span class="p">):</span>
+
+    <span class="nd">@wraps</span><span class="p">(</span><span class="n">fun</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">_inner</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">splash</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">fun</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_inner</span>
+
+
+<span class="k">def</span> <span class="nf">using_cluster</span><span class="p">(</span><span class="n">fun</span><span class="p">):</span>
+
+    <span class="nd">@wraps</span><span class="p">(</span><span class="n">fun</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">_inner</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">argv</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fun</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cluster_from_argv</span><span class="p">(</span><span class="n">argv</span><span class="p">),</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_inner</span>
+
+
+<span class="k">def</span> <span class="nf">using_cluster_and_sig</span><span class="p">(</span><span class="n">fun</span><span class="p">):</span>
+
+    <span class="nd">@wraps</span><span class="p">(</span><span class="n">fun</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">_inner</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">argv</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">p</span><span class="p">,</span> <span class="n">cluster</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cluster_from_argv</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+        <span class="n">sig</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_find_sig_argument</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">fun</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_inner</span>
+
+
+<span class="k">class</span> <span class="nc">TermLogger</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="n">splash_text</span> <span class="o">=</span> <span class="s1">&#39;celery multi v</span><span class="si">{version}</span><span class="s1">&#39;</span>
+    <span class="n">splash_context</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;version&#39;</span><span class="p">:</span> <span class="n">VERSION_BANNER</span><span class="p">}</span>
+
+    <span class="c1">#: Final exit code.</span>
+    <span class="n">retcode</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span> <span class="nf">setup_terminal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span><span class="p">,</span>
+                       <span class="n">nosplash</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">quiet</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">verbose</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                       <span class="n">no_color</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stdout</span> <span class="o">=</span> <span class="n">stdout</span> <span class="ow">or</span> <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stderr</span> <span class="o">=</span> <span class="n">stderr</span> <span class="ow">or</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">nosplash</span> <span class="o">=</span> <span class="n">nosplash</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">quiet</span> <span class="o">=</span> <span class="n">quiet</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span> <span class="o">=</span> <span class="n">verbose</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">no_color</span> <span class="o">=</span> <span class="n">no_color</span>
+
+    <span class="k">def</span> <span class="nf">ok</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">say</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="n">newline</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">EX_OK</span>
+
+    <span class="k">def</span> <span class="nf">say</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="k">if</span> <span class="n">newline</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">carp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">say</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">newline</span><span class="p">,</span> <span class="n">file</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">error</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">msg</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">carp</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">usage</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">EX_FAILURE</span>
+
+    <span class="k">def</span> <span class="nf">info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="n">msg</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="n">newline</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">note</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">quiet</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">say</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">msg</span><span class="p">),</span> <span class="n">newline</span><span class="o">=</span><span class="n">newline</span><span class="p">)</span>
+
+    <span class="nd">@splash</span>
+    <span class="k">def</span> <span class="nf">usage</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">say</span><span class="p">(</span><span class="n">USAGE</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">prog_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">prog_name</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">splash</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">nosplash</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">cyan</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">splash_text</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">splash_context</span><span class="p">)))</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">colored</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">term</span><span class="o">.</span><span class="n">colored</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">no_color</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="MultiTool"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool">[docs]</a><span class="k">class</span> <span class="nc">MultiTool</span><span class="p">(</span><span class="n">TermLogger</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The ``celery multi`` program.&quot;&quot;&quot;</span>
+
+    <span class="n">MultiParser</span> <span class="o">=</span> <span class="n">MultiParser</span>
+    <span class="n">OptionParser</span> <span class="o">=</span> <span class="n">NamespacedOptionParser</span>
+
+    <span class="n">reserved_options</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span><span class="s1">&#39;--nosplash&#39;</span><span class="p">,</span> <span class="s1">&#39;nosplash&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;--quiet&#39;</span><span class="p">,</span> <span class="s1">&#39;quiet&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;-q&#39;</span><span class="p">,</span> <span class="s1">&#39;quiet&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;--verbose&#39;</span><span class="p">,</span> <span class="s1">&#39;verbose&#39;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;--no-color&#39;</span><span class="p">,</span> <span class="s1">&#39;no_color&#39;</span><span class="p">),</span>
+    <span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">fh</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stdout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stderr</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># fh is an old alias to stdout.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">env</span> <span class="o">=</span> <span class="n">env</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cmd</span> <span class="o">=</span> <span class="n">cmd</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">setup_terminal</span><span class="p">(</span><span class="n">stdout</span> <span class="ow">or</span> <span class="n">fh</span><span class="p">,</span> <span class="n">stderr</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fh</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">stdout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prog_name</span> <span class="o">=</span> <span class="s1">&#39;celery multi&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">commands</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;start&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">start</span><span class="p">,</span>
+            <span class="s1">&#39;show&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">show</span><span class="p">,</span>
+            <span class="s1">&#39;stop&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span>
+            <span class="s1">&#39;stopwait&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">stopwait</span><span class="p">,</span>
+            <span class="s1">&#39;stop_verify&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">stopwait</span><span class="p">,</span>  <span class="c1"># compat alias</span>
+            <span class="s1">&#39;restart&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">restart</span><span class="p">,</span>
+            <span class="s1">&#39;kill&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">kill</span><span class="p">,</span>
+            <span class="s1">&#39;names&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">names</span><span class="p">,</span>
+            <span class="s1">&#39;expand&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand</span><span class="p">,</span>
+            <span class="s1">&#39;get&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">,</span>
+            <span class="s1">&#39;help&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">help</span><span class="p">,</span>
+        <span class="p">}</span>
+
+<div class="viewcode-block" id="MultiTool.execute_from_commandline"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.execute_from_commandline">[docs]</a>    <span class="k">def</span> <span class="nf">execute_from_commandline</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">argv</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="c1"># Reserve the --nosplash|--quiet|-q/--verbose options.</span>
+        <span class="n">argv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_handle_reserved_options</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cmd</span> <span class="o">=</span> <span class="n">cmd</span> <span class="k">if</span> <span class="n">cmd</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">cmd</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prog_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">argv</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">validate_arguments</span><span class="p">(</span><span class="n">argv</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">error</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">call_command</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span></div>
+
+<div class="viewcode-block" id="MultiTool.validate_arguments"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.validate_arguments">[docs]</a>    <span class="k">def</span> <span class="nf">validate_arguments</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">argv</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">argv</span> <span class="ow">and</span> <span class="n">argv</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s1">&#39;-&#39;</span></div>
+
+<div class="viewcode-block" id="MultiTool.call_command"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.call_command">[docs]</a>    <span class="k">def</span> <span class="nf">call_command</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">argv</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">commands</span><span class="p">[</span><span class="n">command</span><span class="p">](</span><span class="o">*</span><span class="n">argv</span><span class="p">)</span> <span class="ow">or</span> <span class="n">EX_OK</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Invalid command: </span><span class="si">{0}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">command</span><span class="p">))</span></div>
+
+    <span class="k">def</span> <span class="nf">_handle_reserved_options</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">argv</span><span class="p">):</span>
+        <span class="n">argv</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>  <span class="c1"># don&#39;t modify callers argv.</span>
+        <span class="k">for</span> <span class="n">arg</span><span class="p">,</span> <span class="n">attr</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">reserved_options</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">argv</span><span class="p">:</span>
+                <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attr</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">argv</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">argv</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">arg</span><span class="p">))))</span>
+        <span class="k">return</span> <span class="n">argv</span>
+
+<div class="viewcode-block" id="MultiTool.start"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.start">[docs]</a>    <span class="nd">@splash</span>
+    <span class="nd">@using_cluster</span>
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;&gt; Starting nodes...&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nb">any</span><span class="p">(</span><span class="n">cluster</span><span class="o">.</span><span class="n">start</span><span class="p">()))</span></div>
+
+<div class="viewcode-block" id="MultiTool.stop"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.stop">[docs]</a>    <span class="nd">@splash</span>
+    <span class="nd">@using_cluster_and_sig</span>
+    <span class="k">def</span> <span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">cluster</span><span class="o">.</span><span class="n">stop</span><span class="p">(</span><span class="n">sig</span><span class="o">=</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.stopwait"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.stopwait">[docs]</a>    <span class="nd">@splash</span>
+    <span class="nd">@using_cluster_and_sig</span>
+    <span class="k">def</span> <span class="nf">stopwait</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">cluster</span><span class="o">.</span><span class="n">stopwait</span><span class="p">(</span><span class="n">sig</span><span class="o">=</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+    <span class="n">stop_verify</span> <span class="o">=</span> <span class="n">stopwait</span>  <span class="c1"># compat</span>
+
+<div class="viewcode-block" id="MultiTool.restart"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.restart">[docs]</a>    <span class="nd">@splash</span>
+    <span class="nd">@using_cluster_and_sig</span>
+    <span class="k">def</span> <span class="nf">restart</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nb">any</span><span class="p">(</span><span class="n">cluster</span><span class="o">.</span><span class="n">restart</span><span class="p">(</span><span class="n">sig</span><span class="o">=</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)))</span></div>
+
+<div class="viewcode-block" id="MultiTool.names"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.names">[docs]</a>    <span class="nd">@using_cluster</span>
+    <span class="k">def</span> <span class="nf">names</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">say</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">cluster</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.get"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.get">[docs]</a>    <span class="k">def</span> <span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wanted</span><span class="p">,</span> <span class="o">*</span><span class="n">argv</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cluster_from_argv</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">wanted</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">EX_FAILURE</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">ok</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">node</span><span class="o">.</span><span class="n">argv</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.show"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.show">[docs]</a>    <span class="nd">@using_cluster</span>
+    <span class="k">def</span> <span class="nf">show</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">ok</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">node</span><span class="o">.</span><span class="n">argv_with_executable</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">cluster</span>
+        <span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.kill"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.kill">[docs]</a>    <span class="nd">@splash</span>
+    <span class="nd">@using_cluster</span>
+    <span class="k">def</span> <span class="nf">kill</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cluster</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">cluster</span><span class="o">.</span><span class="n">kill</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="MultiTool.expand"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.expand">[docs]</a>    <span class="k">def</span> <span class="nf">expand</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">template</span><span class="p">,</span> <span class="o">*</span><span class="n">argv</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">ok</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="n">node</span><span class="o">.</span><span class="n">expander</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cluster_from_argv</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+        <span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.help"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.help">[docs]</a>    <span class="k">def</span> <span class="nf">help</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">argv</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">say</span><span class="p">(</span><span class="vm">__doc__</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_find_sig_argument</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGTERM</span><span class="p">):</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">args</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">values</span><span class="p">):]</span>
+        <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">arg</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;-&#39;</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">arg</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+                <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                    <span class="k">pass</span>
+            <span class="k">if</span> <span class="n">arg</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;-&#39;</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">signals</span><span class="o">.</span><span class="n">signum</span><span class="p">(</span><span class="n">arg</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+                <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+                    <span class="k">pass</span>
+        <span class="k">return</span> <span class="n">default</span>
+
+    <span class="k">def</span> <span class="nf">_nodes_from_argv</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">argv</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">cmd</span> <span class="o">=</span> <span class="n">cmd</span> <span class="k">if</span> <span class="n">cmd</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">cmd</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">OptionParser</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+        <span class="n">p</span><span class="o">.</span><span class="n">parse</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">p</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">MultiParser</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="n">cmd</span><span class="p">)</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+
+<div class="viewcode-block" id="MultiTool.cluster_from_argv"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.cluster_from_argv">[docs]</a>    <span class="k">def</span> <span class="nf">cluster_from_argv</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">argv</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">cluster</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cluster_from_argv</span><span class="p">(</span><span class="n">argv</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="n">cmd</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">cluster</span></div>
+
+    <span class="k">def</span> <span class="nf">_cluster_from_argv</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">argv</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">p</span><span class="p">,</span> <span class="n">nodes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes_from_argv</span><span class="p">(</span><span class="n">argv</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="n">cmd</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">p</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">Cluster</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">nodes</span><span class="p">),</span> <span class="n">cmd</span><span class="o">=</span><span class="n">cmd</span><span class="p">)</span>
+
+<div class="viewcode-block" id="MultiTool.Cluster"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.Cluster">[docs]</a>    <span class="k">def</span> <span class="nf">Cluster</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">nodes</span><span class="p">,</span> <span class="n">cmd</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">Cluster</span><span class="p">(</span>
+            <span class="n">nodes</span><span class="p">,</span>
+            <span class="n">cmd</span><span class="o">=</span><span class="n">cmd</span><span class="p">,</span>
+            <span class="n">env</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">env</span><span class="p">,</span>
+            <span class="n">on_stopping_preamble</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_stopping_preamble</span><span class="p">,</span>
+            <span class="n">on_send_signal</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_send_signal</span><span class="p">,</span>
+            <span class="n">on_still_waiting_for</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_still_waiting_for</span><span class="p">,</span>
+            <span class="n">on_still_waiting_progress</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_still_waiting_progress</span><span class="p">,</span>
+            <span class="n">on_still_waiting_end</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_still_waiting_end</span><span class="p">,</span>
+            <span class="n">on_node_start</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_start</span><span class="p">,</span>
+            <span class="n">on_node_restart</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_restart</span><span class="p">,</span>
+            <span class="n">on_node_shutdown_ok</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_shutdown_ok</span><span class="p">,</span>
+            <span class="n">on_node_status</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_status</span><span class="p">,</span>
+            <span class="n">on_node_signal_dead</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_signal_dead</span><span class="p">,</span>
+            <span class="n">on_node_signal</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_signal</span><span class="p">,</span>
+            <span class="n">on_node_down</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_down</span><span class="p">,</span>
+            <span class="n">on_child_spawn</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_child_spawn</span><span class="p">,</span>
+            <span class="n">on_child_signalled</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_child_signalled</span><span class="p">,</span>
+            <span class="n">on_child_failure</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_child_failure</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_stopping_preamble"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_stopping_preamble">[docs]</a>    <span class="k">def</span> <span class="nf">on_stopping_preamble</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">nodes</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">blue</span><span class="p">(</span><span class="s1">&#39;&gt; Stopping nodes...&#39;</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_send_signal"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_send_signal">[docs]</a>    <span class="k">def</span> <span class="nf">on_send_signal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">sig</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\t</span><span class="s1">&gt; </span><span class="si">{0.name}</span><span class="s1">: </span><span class="si">{1}</span><span class="s1"> -&gt; </span><span class="si">{0.pid}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">sig</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_still_waiting_for"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_still_waiting_for">[docs]</a>    <span class="k">def</span> <span class="nf">on_still_waiting_for</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">nodes</span><span class="p">):</span>
+        <span class="n">num_left</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">nodes</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">num_left</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">blue</span><span class="p">(</span>
+                <span class="s1">&#39;&gt; Waiting for </span><span class="si">{0}</span><span class="s1"> </span><span class="si">{1}</span><span class="s1"> -&gt; </span><span class="si">{2}</span><span class="s1">...&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">num_left</span><span class="p">,</span> <span class="n">pluralize</span><span class="p">(</span><span class="n">num_left</span><span class="p">,</span> <span class="s1">&#39;node&#39;</span><span class="p">),</span>
+                    <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">node</span><span class="o">.</span><span class="n">pid</span><span class="p">)</span> <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">nodes</span><span class="p">)),</span>
+            <span class="p">),</span> <span class="n">newline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_still_waiting_progress"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_still_waiting_progress">[docs]</a>    <span class="k">def</span> <span class="nf">on_still_waiting_progress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">nodes</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_still_waiting_end"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_still_waiting_end">[docs]</a>    <span class="k">def</span> <span class="nf">on_still_waiting_end</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_node_signal_dead"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_node_signal_dead">[docs]</a>    <span class="k">def</span> <span class="nf">on_node_signal_dead</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span>
+            <span class="s1">&#39;Could not signal </span><span class="si">{0.name}</span><span class="s1"> (</span><span class="si">{0.pid}</span><span class="s1">): No such process&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                <span class="n">node</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_node_start"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_node_start">[docs]</a>    <span class="k">def</span> <span class="nf">on_node_start</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\t</span><span class="s1">&gt; </span><span class="si">{0.name}</span><span class="s1">: &#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">node</span><span class="p">),</span> <span class="n">newline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_node_restart"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_node_restart">[docs]</a>    <span class="k">def</span> <span class="nf">on_node_restart</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">blue</span><span class="p">(</span>
+            <span class="s1">&#39;&gt; Restarting node </span><span class="si">{0.name}</span><span class="s1">: &#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">node</span><span class="p">)),</span> <span class="n">newline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_node_down"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_node_down">[docs]</a>    <span class="k">def</span> <span class="nf">on_node_down</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;&gt; </span><span class="si">{0.name}</span><span class="s1">: </span><span class="si">{1.DOWN}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="bp">self</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_node_shutdown_ok"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_node_shutdown_ok">[docs]</a>    <span class="k">def</span> <span class="nf">on_node_shutdown_ok</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n\t</span><span class="s1">&gt; </span><span class="si">{0.name}</span><span class="s1">: </span><span class="si">{1.OK}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="bp">self</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_node_status"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_node_status">[docs]</a>    <span class="k">def</span> <span class="nf">on_node_status</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">retval</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="n">retval</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">FAILED</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">OK</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_node_signal"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_node_signal">[docs]</a>    <span class="k">def</span> <span class="nf">on_node_signal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">sig</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;Sending </span><span class="si">{sig}</span><span class="s1"> to node </span><span class="si">{0.name}</span><span class="s1"> (</span><span class="si">{0.pid}</span><span class="s1">)&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="n">node</span><span class="p">,</span> <span class="n">sig</span><span class="o">=</span><span class="n">sig</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_child_spawn"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_child_spawn">[docs]</a>    <span class="k">def</span> <span class="nf">on_child_spawn</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">argstr</span><span class="p">,</span> <span class="n">env</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;  </span><span class="si">{0}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">argstr</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_child_signalled"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_child_signalled">[docs]</a>    <span class="k">def</span> <span class="nf">on_child_signalled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">signum</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;* Child was terminated by signal </span><span class="si">{0}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">signum</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.on_child_failure"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.on_child_failure">[docs]</a>    <span class="k">def</span> <span class="nf">on_child_failure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span> <span class="n">retcode</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="s1">&#39;* Child terminated with exit code </span><span class="si">{0}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">retcode</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.OK"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.OK">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">OK</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">green</span><span class="p">(</span><span class="s1">&#39;OK&#39;</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.FAILED"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.FAILED">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">FAILED</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">red</span><span class="p">(</span><span class="s1">&#39;FAILED&#39;</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MultiTool.DOWN"><a class="viewcode-back" href="../../../reference/celery.bin.multi.html#celery.bin.multi.MultiTool.DOWN">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">DOWN</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">colored</span><span class="o">.</span><span class="n">magenta</span><span class="p">(</span><span class="s1">&#39;DOWN&#39;</span><span class="p">))</span></div></div>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>              <span class="c1"># pragma: no cover</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

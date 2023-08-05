@@ -1,0 +1,612 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Application &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="copyright" title="Copyright" href="../copyright.html" />
+    <link rel="next" title="Tasks" href="tasks.html" />
+    <link rel="prev" title="User Guide" href="index.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="tasks.html" title="Tasks"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="index.html" title="User Guide"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">User Guide</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/userguide/application.html">go here</a>.
+        </p>
+    
+
+</div>
+    <div class="section" id="application">
+<span id="guide-app"></span><h1>Application<a class="headerlink" href="#application" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><a class="reference internal" href="#main-name" id="id1">Main Name</a></li>
+<li><a class="reference internal" href="#configuration" id="id2">Configuration</a></li>
+<li><a class="reference internal" href="#laziness" id="id3">Laziness</a></li>
+<li><a class="reference internal" href="#breaking-the-chain" id="id4">Breaking the chain</a></li>
+<li><a class="reference internal" href="#abstract-tasks" id="id5">Abstract Tasks</a></li>
+</ul>
+</div>
+<p>The Celery library must be instantiated before use, this instance
+is called an application (or <em>app</em> for short).</p>
+<p>The application is thread-safe so that multiple Celery applications
+with different configurations, components, and tasks can co-exist in the
+same process space.</p>
+<p>Let’s create one now:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span>
+<span class="go">&lt;Celery __main__:0x100469fd0&gt;</span>
+</pre></div>
+</div>
+<p>The last line shows the textual representation of the application:
+including the name of the app class (<code class="docutils literal notranslate"><span class="pre">Celery</span></code>), the name of the
+current main module (<code class="docutils literal notranslate"><span class="pre">__main__</span></code>), and the memory address of the object
+(<code class="docutils literal notranslate"><span class="pre">0x100469fd0</span></code>).</p>
+<div class="section" id="main-name">
+<h2><a class="toc-backref" href="#id1">Main Name</a><a class="headerlink" href="#main-name" title="Permalink to this headline">¶</a></h2>
+<p>Only one of these is important, and that’s the main module name.
+Let’s look at why that is.</p>
+<p>When you send a task message in Celery, that message won’t contain
+any source code, but only the name of the task you want to execute.
+This works similarly to how host names work on the internet: every worker
+maintains a mapping of task names to their actual functions, called the <em>task
+registry</em>.</p>
+<p>Whenever you define a task, that task will also be added to the local registry:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nd">@app.task</span>
+<span class="gp">... </span><span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span>
+<span class="go">&lt;@task: __main__.add&gt;</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">name</span>
+<span class="go">__main__.add</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="s1">&#39;__main__.add&#39;</span><span class="p">]</span>
+<span class="go">&lt;@task: __main__.add&gt;</span>
+</pre></div>
+</div>
+<p>and there you see that <code class="docutils literal notranslate"><span class="pre">__main__</span></code> again; whenever Celery isn’t able
+to detect what module the function belongs to, it uses the main module
+name to generate the beginning of the task name.</p>
+<p>This is only a problem in a limited set of use cases:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>If the module that the task is defined in is run as a program.</li>
+<li>If the application is created in the Python shell (REPL).</li>
+</ol>
+</div></blockquote>
+<p>For example here, where the tasks module is also used to start a worker
+with <a class="reference internal" href="../reference/celery.html#celery.Celery.worker_main" title="celery.Celery.worker_main"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.worker_main()</span></code></a>:</p>
+<p><code class="file docutils literal notranslate"><span class="pre">tasks.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+
+<span class="nd">@app.task</span>
+<span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span> <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">worker_main</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>When this module is executed the tasks will be named starting with “<code class="docutils literal notranslate"><span class="pre">__main__</span></code>”,
+but when the module is imported by another process, say to call a task,
+the tasks will be named starting with “<code class="docutils literal notranslate"><span class="pre">tasks</span></code>” (the real name of the module):</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">tasks</span> <span class="kn">import</span> <span class="n">add</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">name</span>
+<span class="go">tasks.add</span>
+</pre></div>
+</div>
+<p>You can specify another name for the main module:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">(</span><span class="s1">&#39;tasks&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">main</span>
+<span class="go">&#39;tasks&#39;</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@app.task</span>
+<span class="gp">... </span><span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">name</span>
+<span class="go">tasks.add</span>
+</pre></div>
+</div>
+<div class="admonition seealso">
+<p class="first admonition-title">See also</p>
+<p class="last"><a class="reference internal" href="tasks.html#task-names"><span class="std std-ref">Names</span></a></p>
+</div>
+</div>
+<div class="section" id="configuration">
+<h2><a class="toc-backref" href="#id2">Configuration</a><a class="headerlink" href="#configuration" title="Permalink to this headline">¶</a></h2>
+<p>There are several options you can set that’ll change how
+Celery works. These options can be set directly on the app instance,
+or you can use a dedicated configuration module.</p>
+<p>The configuration is available as <a class="reference internal" href="../reference/celery.app.utils.html#celery.app.utils.Settings" title="celery.app.utils.Settings"><code class="xref py py-attr docutils literal notranslate"><span class="pre">app.conf</span></code></a>:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">timezone</span>
+<span class="go">&#39;Europe/London&#39;</span>
+</pre></div>
+</div>
+<p>where you can also set configuration values directly:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">enable_utc</span> <span class="o">=</span> <span class="bp">True</span>
+</pre></div>
+</div>
+<p>or update several keys at once by using the <code class="docutils literal notranslate"><span class="pre">update</span></code> method:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">enable_utc</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">timezone</span><span class="o">=</span><span class="s1">&#39;Europe/London&#39;</span><span class="p">,</span>
+<span class="go">...)</span>
+</pre></div>
+</div>
+<p>The configuration object consists of multiple dictionaries
+that are consulted in order:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>Changes made at run-time.</li>
+<li>The configuration module (if any)</li>
+<li>The default configuration (<a class="reference internal" href="../reference/celery.app.defaults.html#module-celery.app.defaults" title="celery.app.defaults"><code class="xref py py-mod docutils literal notranslate"><span class="pre">celery.app.defaults</span></code></a>).</li>
+</ol>
+</div></blockquote>
+<p>You can even add new default sources by using the <a class="reference internal" href="../reference/celery.html#celery.Celery.add_defaults" title="celery.Celery.add_defaults"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.add_defaults()</span></code></a>
+method.</p>
+<div class="admonition seealso">
+<p class="first admonition-title">See also</p>
+<p class="last">Go to the <a class="reference internal" href="configuration.html#configuration"><span class="std std-ref">Configuration reference</span></a> for a complete
+listing of all the available settings, and their default values.</p>
+</div>
+<div class="section" id="config-from-object">
+<h3><code class="docutils literal notranslate"><span class="pre">config_from_object</span></code><a class="headerlink" href="#config-from-object" title="Permalink to this headline">¶</a></h3>
+<p>The <a class="reference internal" href="../reference/celery.html#celery.Celery.config_from_object" title="celery.Celery.config_from_object"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.config_from_object()</span></code></a> method loads configuration
+from a configuration object.</p>
+<p>This can be a configuration module, or any object with configuration attributes.</p>
+<p>Note that any configuration that was previously set will be reset when
+<a class="reference internal" href="../reference/celery.html#celery.Celery.config_from_object" title="celery.Celery.config_from_object"><code class="xref py py-meth docutils literal notranslate"><span class="pre">config_from_object()</span></code></a> is called. If you want to set additional
+configuration you should do so after.</p>
+<div class="section" id="example-1-using-the-name-of-a-module">
+<h4>Example 1: Using the name of a module<a class="headerlink" href="#example-1-using-the-name-of-a-module" title="Permalink to this headline">¶</a></h4>
+<p>The <a class="reference internal" href="../reference/celery.html#celery.Celery.config_from_object" title="celery.Celery.config_from_object"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.config_from_object()</span></code></a> method can take the fully qualified
+name of a Python module, or even the name of a Python attribute,
+for example: <code class="docutils literal notranslate"><span class="pre">&quot;celeryconfig&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;myproj.config.celery&quot;</span></code>, or
+<code class="docutils literal notranslate"><span class="pre">&quot;myproj.config:CeleryConfig&quot;</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+<span class="n">app</span><span class="o">.</span><span class="n">config_from_object</span><span class="p">(</span><span class="s1">&#39;celeryconfig&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">celeryconfig</span></code> module may then look like this:</p>
+<p><code class="file docutils literal notranslate"><span class="pre">celeryconfig.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">enable_utc</span> <span class="o">=</span> <span class="bp">True</span>
+<span class="n">timezone</span> <span class="o">=</span> <span class="s1">&#39;Europe/London&#39;</span>
+</pre></div>
+</div>
+<p>and the app will be able to use it as long as <code class="docutils literal notranslate"><span class="pre">import</span> <span class="pre">celeryconfig</span></code> is
+possible.</p>
+</div>
+<div class="section" id="example-2-passing-an-actual-module-object">
+<h4>Example 2: Passing an actual module object<a class="headerlink" href="#example-2-passing-an-actual-module-object" title="Permalink to this headline">¶</a></h4>
+<p>You can also pass an already imported module object, but this
+isn’t always recommended.</p>
+<div class="admonition tip">
+<p class="first admonition-title">Tip</p>
+<p class="last">Using the name of a module is recommended as this means the module does
+not need to be serialized when the prefork pool is used. If you’re
+experiencing configuration problems or pickle errors then please
+try using the name of a module instead.</p>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">celeryconfig</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+<span class="n">app</span><span class="o">.</span><span class="n">config_from_object</span><span class="p">(</span><span class="n">celeryconfig</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="example-3-using-a-configuration-class-object">
+<h4>Example 3:  Using a configuration class/object<a class="headerlink" href="#example-3-using-a-configuration-class-object" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+
+<span class="k">class</span> <span class="nc">Config</span><span class="p">:</span>
+    <span class="n">enable_utc</span> <span class="o">=</span> <span class="bp">True</span>
+    <span class="n">timezone</span> <span class="o">=</span> <span class="s1">&#39;Europe/London&#39;</span>
+
+<span class="n">app</span><span class="o">.</span><span class="n">config_from_object</span><span class="p">(</span><span class="n">Config</span><span class="p">)</span>
+<span class="c1"># or using the fully qualified name of the object:</span>
+<span class="c1">#   app.config_from_object(&#39;module:Config&#39;)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="config-from-envvar">
+<h3><code class="docutils literal notranslate"><span class="pre">config_from_envvar</span></code><a class="headerlink" href="#config-from-envvar" title="Permalink to this headline">¶</a></h3>
+<p>The <a class="reference internal" href="../reference/celery.html#celery.Celery.config_from_envvar" title="celery.Celery.config_from_envvar"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.config_from_envvar()</span></code></a> takes the configuration module name
+from an environment variable</p>
+<p>For example – to load configuration from a module specified in the
+environment variable named <span class="target" id="index-0"></span><code class="xref std std-envvar docutils literal notranslate"><span class="pre">CELERY_CONFIG_MODULE</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+
+<span class="c1">#: Set default configuration module name</span>
+<span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s1">&#39;CELERY_CONFIG_MODULE&#39;</span><span class="p">,</span> <span class="s1">&#39;celeryconfig&#39;</span><span class="p">)</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+<span class="n">app</span><span class="o">.</span><span class="n">config_from_envvar</span><span class="p">(</span><span class="s1">&#39;CELERY_CONFIG_MODULE&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>You can then specify the configuration module to use via the environment:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$</span> <span class="nv">CELERY_CONFIG_MODULE</span><span class="o">=</span><span class="s2">&quot;celeryconfig.prod&quot;</span> celery worker -l info
+</pre></div>
+</div>
+</div>
+<div class="section" id="censored-configuration">
+<span id="app-censored-config"></span><h3>Censored configuration<a class="headerlink" href="#censored-configuration" title="Permalink to this headline">¶</a></h3>
+<p>If you ever want to print out the configuration, as debugging information
+or similar, you may also want to filter out sensitive information like
+passwords and API keys.</p>
+<p>Celery comes with several utilities useful for presenting the configuration,
+one is <a class="reference internal" href="../reference/celery.app.utils.html#celery.app.utils.Settings.humanize" title="celery.app.utils.Settings.humanize"><code class="xref py py-meth docutils literal notranslate"><span class="pre">humanize()</span></code></a>:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">humanize</span><span class="p">(</span><span class="n">with_defaults</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">censored</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>This method returns the configuration as a tabulated string. This will
+only contain changes to the configuration by default, but you can include the
+built-in default keys and values by enabling the <code class="docutils literal notranslate"><span class="pre">with_defaults</span></code> argument.</p>
+<p>If you instead want to work with the configuration as a dictionary, you
+can use the <a class="reference internal" href="../reference/celery.app.utils.html#celery.app.utils.Settings.table" title="celery.app.utils.Settings.table"><code class="xref py py-meth docutils literal notranslate"><span class="pre">table()</span></code></a> method:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">table</span><span class="p">(</span><span class="n">with_defaults</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">censored</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Please note that Celery won’t be able to remove all sensitive information,
+as it merely uses a regular expression to search for commonly named keys.
+If you add custom settings containing sensitive information you should name
+the keys using a name that Celery identifies as secret.</p>
+<p>A configuration setting will be censored if the name contains any of
+these sub-strings:</p>
+<p><code class="docutils literal notranslate"><span class="pre">API</span></code>, <code class="docutils literal notranslate"><span class="pre">TOKEN</span></code>, <code class="docutils literal notranslate"><span class="pre">KEY</span></code>, <code class="docutils literal notranslate"><span class="pre">SECRET</span></code>, <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGNATURE</span></code>, <code class="docutils literal notranslate"><span class="pre">DATABASE</span></code></p>
+</div>
+</div>
+<div class="section" id="laziness">
+<h2><a class="toc-backref" href="#id3">Laziness</a><a class="headerlink" href="#laziness" title="Permalink to this headline">¶</a></h2>
+<p>The application instance is lazy, meaning it won’t be evaluated
+until it’s actually needed.</p>
+<p>Creating a <a class="reference internal" href="../reference/celery.html#celery.Celery" title="celery.Celery"><code class="xref py py-class docutils literal notranslate"><span class="pre">Celery</span></code></a> instance will only do the following:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>Create a logical clock instance, used for events.</li>
+<li>Create the task registry.</li>
+<li>Set itself as the current app (but not if the <code class="docutils literal notranslate"><span class="pre">set_as_current</span></code>
+argument was disabled)</li>
+<li>Call the <a class="reference internal" href="../reference/celery.html#celery.Celery.on_init" title="celery.Celery.on_init"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.on_init()</span></code></a> callback (does nothing by default).</li>
+</ol>
+</div></blockquote>
+<p>The <a class="reference internal" href="../reference/celery.html#celery.Celery.task" title="celery.Celery.task"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.task()</span></code></a> decorators don’t create the tasks at the point when
+the task is defined, instead it’ll defer the creation
+of the task to happen either when the task is used, or after the
+application has been <em>finalized</em>,</p>
+<p>This example shows how the task isn’t created until
+you use the task, or access an attribute (in this case <code class="xref py py-meth docutils literal notranslate"><span class="pre">repr()</span></code>):</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nd">@app.task</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="gp">... </span>   <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">type</span><span class="p">(</span><span class="n">add</span><span class="p">)</span>
+<span class="go">&lt;class &#39;celery.local.PromiseProxy&#39;&gt;</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">__evaluated__</span><span class="p">()</span>
+<span class="go">False</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span>        <span class="c1"># &lt;-- causes repr(add) to happen</span>
+<span class="go">&lt;@task: __main__.add&gt;</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">__evaluated__</span><span class="p">()</span>
+<span class="go">True</span>
+</pre></div>
+</div>
+<p><em>Finalization</em> of the app happens either explicitly by calling
+<a class="reference internal" href="../reference/celery.html#celery.Celery.finalize" title="celery.Celery.finalize"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.finalize()</span></code></a> – or implicitly by accessing the <code class="xref py py-attr docutils literal notranslate"><span class="pre">app.tasks</span></code>
+attribute.</p>
+<p>Finalizing the object will:</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p class="first">Copy tasks that must be shared between apps</p>
+<blockquote>
+<div><p>Tasks are shared by default, but if the
+<code class="docutils literal notranslate"><span class="pre">shared</span></code> argument to the task decorator is disabled,
+then the task will be private to the app it’s bound to.</p>
+</div></blockquote>
+</li>
+<li><p class="first">Evaluate all pending task decorators.</p>
+</li>
+<li><p class="first">Make sure all tasks are bound to the current app.</p>
+<blockquote>
+<div><p>Tasks are bound to an app so that they can read default
+values from the configuration.</p>
+</div></blockquote>
+</li>
+</ol>
+</div></blockquote>
+<div class="topic" id="default-app">
+<p class="topic-title first">The “default app”</p>
+<p>Celery didn’t always have applications, it used to be that
+there was only a module-based API, and for backwards compatibility
+the old API is still there until the release of Celery 5.0.</p>
+<p>Celery always creates a special app - the “default app”,
+and this is used if no custom application has been instantiated.</p>
+<p>The <code class="xref py py-mod docutils literal notranslate"><span class="pre">celery.task</span></code> module is there to accommodate the old API,
+and shouldn’t be used if you use a custom app. You should
+always use the methods on the app instance, not the module based API.</p>
+<p>For example, the old Task base class enables many compatibility
+features where some may be incompatible with newer features, such
+as task methods:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery.task</span> <span class="kn">import</span> <span class="n">Task</span>   <span class="c1"># &lt;&lt; OLD Task base class.</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Task</span>        <span class="c1"># &lt;&lt; NEW base class.</span>
+</pre></div>
+</div>
+<p>The new base class is recommended even if you use the old
+module-based API.</p>
+</div>
+</div>
+<div class="section" id="breaking-the-chain">
+<h2><a class="toc-backref" href="#id4">Breaking the chain</a><a class="headerlink" href="#breaking-the-chain" title="Permalink to this headline">¶</a></h2>
+<p>While it’s possible to depend on the current app
+being set, the best practice is to always pass the app instance
+around to anything that needs it.</p>
+<p>I call this the “app chain”, since it creates a chain
+of instances depending on the app being passed.</p>
+<p>The following example is considered bad practice:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">current_app</span>
+
+<span class="k">class</span> <span class="nc">Scheduler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">app</span> <span class="o">=</span> <span class="n">current_app</span>
+</pre></div>
+</div>
+<p>Instead it should take the <code class="docutils literal notranslate"><span class="pre">app</span></code> as an argument:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Scheduler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+</pre></div>
+</div>
+<p>Internally Celery uses the <a class="reference internal" href="../reference/celery.app.html#celery.app.app_or_default" title="celery.app.app_or_default"><code class="xref py py-func docutils literal notranslate"><span class="pre">celery.app.app_or_default()</span></code></a> function
+so that everything also works in the module-based compatibility API</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery.app</span> <span class="kn">import</span> <span class="n">app_or_default</span>
+
+<span class="k">class</span> <span class="nc">Scheduler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app_or_default</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>In development you can set the <span class="target" id="index-1"></span><code class="xref std std-envvar docutils literal notranslate"><span class="pre">CELERY_TRACE_APP</span></code>
+environment variable to raise an exception if the app
+chain breaks:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$</span> <span class="nv">CELERY_TRACE_APP</span><span class="o">=</span><span class="m">1</span> celery worker -l info
+</pre></div>
+</div>
+<div class="topic">
+<p class="topic-title first">Evolving the API</p>
+<p>Celery has changed a lot in the 7 years since it was initially
+created.</p>
+<p>For example, in the beginning it was possible to use any callable as
+a task:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="go">def hello(to):</span>
+<span class="go">    return &#39;hello {0}&#39;.format(to)</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">celery.execute</span> <span class="kn">import</span> <span class="n">apply_async</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">apply_async</span><span class="p">(</span><span class="n">hello</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;world!&#39;</span><span class="p">,))</span>
+</pre></div>
+</div>
+<p>or you could also create a <code class="docutils literal notranslate"><span class="pre">Task</span></code> class to set
+certain options, or override other behavior</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery.task</span> <span class="kn">import</span> <span class="n">Task</span>
+<span class="kn">from</span> <span class="nn">celery.registry</span> <span class="kn">import</span> <span class="n">tasks</span>
+
+<span class="k">class</span> <span class="nc">Hello</span><span class="p">(</span><span class="n">Task</span><span class="p">):</span>
+    <span class="n">queue</span> <span class="o">=</span> <span class="s1">&#39;hipri&#39;</span>
+
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">to</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;hello {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">to</span><span class="p">)</span>
+<span class="n">tasks</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">Hello</span><span class="p">)</span>
+
+<span class="o">&gt;&gt;&gt;</span> <span class="n">Hello</span><span class="o">.</span><span class="n">delay</span><span class="p">(</span><span class="s1">&#39;world!&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Later, it was decided that passing arbitrary call-able’s
+was an anti-pattern, since it makes it very hard to use
+serializers other than pickle, and the feature was removed
+in 2.0, replaced by task decorators:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery.task</span> <span class="kn">import</span> <span class="n">task</span>
+
+<span class="nd">@task</span><span class="p">(</span><span class="n">queue</span><span class="o">=</span><span class="s1">&#39;hipri&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">hello</span><span class="p">(</span><span class="n">to</span><span class="p">):</span>
+    <span class="k">return</span> <span class="s1">&#39;hello {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">to</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="abstract-tasks">
+<h2><a class="toc-backref" href="#id5">Abstract Tasks</a><a class="headerlink" href="#abstract-tasks" title="Permalink to this headline">¶</a></h2>
+<p>All tasks created using the <a class="reference internal" href="../reference/celery.html#celery.Celery.task" title="celery.Celery.task"><code class="xref py py-meth docutils literal notranslate"><span class="pre">task()</span></code></a> decorator
+will inherit from the application’s base <a class="reference internal" href="../reference/celery.app.task.html#celery.app.task.Task" title="celery.app.task.Task"><code class="xref py py-attr docutils literal notranslate"><span class="pre">Task</span></code></a> class.</p>
+<p>You can specify a different base class using the <code class="docutils literal notranslate"><span class="pre">base</span></code> argument:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@app.task</span><span class="p">(</span><span class="n">base</span><span class="o">=</span><span class="n">OtherTask</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+</pre></div>
+</div>
+<p>To create a custom task class you should inherit from the neutral base
+class: <code class="xref py py-class docutils literal notranslate"><span class="pre">celery.Task</span></code>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Task</span>
+
+<span class="k">class</span> <span class="nc">DebugTask</span><span class="p">(</span><span class="n">Task</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;TASK STARTING: {0.name}[{0.request.id}]&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">DebugTask</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__call__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="admonition tip">
+<p class="first admonition-title">Tip</p>
+<p class="last">If you override the tasks <code class="docutils literal notranslate"><span class="pre">__call__</span></code> method, then it’s very important
+that you also call super so that the base call method can set up the
+default request used when a task is called directly.</p>
+</div>
+<p>The neutral base class is special because it’s not bound to any specific app
+yet. Once a task is bound to an app it’ll read configuration to set default
+values, and so on.</p>
+<p>To realize a base class you need to create a task using the <a class="reference internal" href="../reference/celery.html#celery.Celery.task" title="celery.Celery.task"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.task()</span></code></a>
+decorator:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@app.task</span><span class="p">(</span><span class="n">base</span><span class="o">=</span><span class="n">DebugTask</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+</pre></div>
+</div>
+<p>It’s even possible to change the default base class for an application
+by changing its <a class="reference internal" href="../reference/celery.app.task.html#celery.app.task.Task" title="celery.app.task.Task"><code class="xref py py-meth docutils literal notranslate"><span class="pre">app.Task()</span></code></a> attribute:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span><span class="p">,</span> <span class="n">Task</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">MyBaseTask</span><span class="p">(</span><span class="n">Task</span><span class="p">):</span>
+<span class="gp">... </span>   <span class="n">queue</span> <span class="o">=</span> <span class="s1">&#39;hipri&#39;</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">Task</span> <span class="o">=</span> <span class="n">MyBaseTask</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">Task</span>
+<span class="go">&lt;unbound MyBaseTask&gt;</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@app.task</span>
+<span class="gp">... </span><span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span>
+<span class="go">&lt;@task: __main__.add&gt;</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">mro</span><span class="p">()</span>
+<span class="go">[&lt;class add of &lt;Celery __main__:0x1012b4410&gt;&gt;,</span>
+<span class="go"> &lt;unbound MyBaseTask&gt;,</span>
+<span class="go"> &lt;unbound Task&gt;,</span>
+<span class="go"> &lt;type &#39;object&#39;&gt;]</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../index.html">
+              <img class="logo" src="../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="index.html"
+                        title="previous chapter">User Guide</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="tasks.html"
+                        title="next chapter">Tasks</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userguide/application.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="tasks.html" title="Tasks"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="index.html" title="User Guide"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >User Guide</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,361 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.app.log &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/app/log.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.app.log</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Logging configuration.</span>
+
+<span class="sd">The Celery instances logging section: ``Celery.log``.</span>
+
+<span class="sd">Sets up logging for the worker and other programs,</span>
+<span class="sd">redirects standard outs, colors log output, patches logging</span>
+<span class="sd">related compatibility fixes, and so on.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">logging.handlers</span> <span class="k">import</span> <span class="n">WatchedFileHandler</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils.encoding</span> <span class="k">import</span> <span class="n">set_default_encoding_file</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">signals</span>
+<span class="kn">from</span> <span class="nn">celery._state</span> <span class="k">import</span> <span class="n">get_current_task</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">string_t</span>
+<span class="kn">from</span> <span class="nn">celery.local</span> <span class="k">import</span> <span class="n">class_property</span>
+<span class="kn">from</span> <span class="nn">celery.platforms</span> <span class="k">import</span> <span class="n">isatty</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="p">(</span><span class="n">ColorFormatter</span><span class="p">,</span> <span class="n">LoggingProxy</span><span class="p">,</span> <span class="n">get_logger</span><span class="p">,</span>
+                              <span class="n">get_multiprocessing_logger</span><span class="p">,</span> <span class="n">mlevel</span><span class="p">,</span>
+                              <span class="n">reset_multiprocessing_logger</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">celery.utils.nodenames</span> <span class="k">import</span> <span class="n">node_format</span>
+<span class="kn">from</span> <span class="nn">celery.utils.term</span> <span class="k">import</span> <span class="n">colored</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;TaskFormatter&#39;</span><span class="p">,</span> <span class="s1">&#39;Logging&#39;</span><span class="p">)</span>
+
+<span class="n">MP_LOG</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;MP_LOG&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="TaskFormatter"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.TaskFormatter">[docs]</a><span class="k">class</span> <span class="nc">TaskFormatter</span><span class="p">(</span><span class="n">ColorFormatter</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Formatter for tasks, adding the task name and id.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="TaskFormatter.format"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.TaskFormatter.format">[docs]</a>    <span class="k">def</span> <span class="nf">format</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">record</span><span class="p">):</span>
+        <span class="n">task</span> <span class="o">=</span> <span class="n">get_current_task</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">task</span> <span class="ow">and</span> <span class="n">task</span><span class="o">.</span><span class="n">request</span><span class="p">:</span>
+            <span class="n">record</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">task_id</span><span class="o">=</span><span class="n">task</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                                   <span class="n">task_name</span><span class="o">=</span><span class="n">task</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">record</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s1">&#39;task_name&#39;</span><span class="p">,</span> <span class="s1">&#39;???&#39;</span><span class="p">)</span>
+            <span class="n">record</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s1">&#39;task_id&#39;</span><span class="p">,</span> <span class="s1">&#39;???&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ColorFormatter</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">record</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="Logging"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging">[docs]</a><span class="k">class</span> <span class="nc">Logging</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Application logging setup (app.log).&quot;&quot;&quot;</span>
+
+    <span class="c1">#: The logging subsystem is only configured once per process.</span>
+    <span class="c1">#: setup_logging_subsystem sets this flag, and subsequent calls</span>
+    <span class="c1">#: will do nothing.</span>
+    <span class="n">_setup</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span> <span class="o">=</span> <span class="n">mlevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">WARN</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">format</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">worker_log_format</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task_format</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">worker_task_log_format</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">colorize</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">worker_log_color</span>
+
+<div class="viewcode-block" id="Logging.setup"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.setup">[docs]</a>    <span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">redirect_stdouts</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+              <span class="n">redirect_level</span><span class="o">=</span><span class="s1">&#39;WARNING&#39;</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">hostname</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">loglevel</span> <span class="o">=</span> <span class="n">mlevel</span><span class="p">(</span><span class="n">loglevel</span><span class="p">)</span>
+        <span class="n">handled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">setup_logging_subsystem</span><span class="p">(</span>
+            <span class="n">loglevel</span><span class="p">,</span> <span class="n">logfile</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="n">colorize</span><span class="p">,</span> <span class="n">hostname</span><span class="o">=</span><span class="n">hostname</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">handled</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">redirect_stdouts</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">redirect_stdouts</span><span class="p">(</span><span class="n">redirect_level</span><span class="p">)</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+            <span class="n">CELERY_LOG_LEVEL</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">loglevel</span><span class="p">)</span> <span class="k">if</span> <span class="n">loglevel</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+            <span class="n">CELERY_LOG_FILE</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">logfile</span><span class="p">)</span> <span class="k">if</span> <span class="n">logfile</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">handled</span></div>
+
+<div class="viewcode-block" id="Logging.redirect_stdouts"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.redirect_stdouts">[docs]</a>    <span class="k">def</span> <span class="nf">redirect_stdouts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;celery.redirected&#39;</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">redirect_stdouts_to_logger</span><span class="p">(</span>
+            <span class="n">get_logger</span><span class="p">(</span><span class="n">name</span><span class="p">),</span> <span class="n">loglevel</span><span class="o">=</span><span class="n">loglevel</span>
+        <span class="p">)</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+            <span class="n">CELERY_LOG_REDIRECT</span><span class="o">=</span><span class="s1">&#39;1&#39;</span><span class="p">,</span>
+            <span class="n">CELERY_LOG_REDIRECT_LEVEL</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">loglevel</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Logging.setup_logging_subsystem"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.setup_logging_subsystem">[docs]</a>    <span class="k">def</span> <span class="nf">setup_logging_subsystem</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                                <span class="n">colorize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">hostname</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">already_setup</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="n">logfile</span> <span class="ow">and</span> <span class="n">hostname</span><span class="p">:</span>
+            <span class="n">logfile</span> <span class="o">=</span> <span class="n">node_format</span><span class="p">(</span><span class="n">logfile</span><span class="p">,</span> <span class="n">hostname</span><span class="p">)</span>
+        <span class="n">Logging</span><span class="o">.</span><span class="n">_setup</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">loglevel</span> <span class="o">=</span> <span class="n">mlevel</span><span class="p">(</span><span class="n">loglevel</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span><span class="p">)</span>
+        <span class="nb">format</span> <span class="o">=</span> <span class="nb">format</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">format</span>
+        <span class="n">colorize</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">supports_color</span><span class="p">(</span><span class="n">colorize</span><span class="p">,</span> <span class="n">logfile</span><span class="p">)</span>
+        <span class="n">reset_multiprocessing_logger</span><span class="p">()</span>
+        <span class="n">receivers</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">setup_logging</span><span class="o">.</span><span class="n">send</span><span class="p">(</span>
+            <span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="n">loglevel</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="n">logfile</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="n">colorize</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">receivers</span><span class="p">:</span>
+            <span class="n">root</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">worker_hijack_root_logger</span><span class="p">:</span>
+                <span class="n">root</span><span class="o">.</span><span class="n">handlers</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">get_logger</span><span class="p">(</span><span class="s1">&#39;celery&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">handlers</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">get_logger</span><span class="p">(</span><span class="s1">&#39;celery.task&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">handlers</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">get_logger</span><span class="p">(</span><span class="s1">&#39;celery.redirected&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">handlers</span> <span class="o">=</span> <span class="p">[]</span>
+
+            <span class="c1"># Configure root logger</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_configure_logger</span><span class="p">(</span>
+                <span class="n">root</span><span class="p">,</span> <span class="n">logfile</span><span class="p">,</span> <span class="n">loglevel</span><span class="p">,</span> <span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Configure the multiprocessing logger</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_configure_logger</span><span class="p">(</span>
+                <span class="n">get_multiprocessing_logger</span><span class="p">(),</span>
+                <span class="n">logfile</span><span class="p">,</span> <span class="n">loglevel</span> <span class="k">if</span> <span class="n">MP_LOG</span> <span class="k">else</span> <span class="n">logging</span><span class="o">.</span><span class="n">ERROR</span><span class="p">,</span>
+                <span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+            <span class="p">)</span>
+
+            <span class="n">signals</span><span class="o">.</span><span class="n">after_setup_logger</span><span class="o">.</span><span class="n">send</span><span class="p">(</span>
+                <span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="n">root</span><span class="p">,</span>
+                <span class="n">loglevel</span><span class="o">=</span><span class="n">loglevel</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="n">logfile</span><span class="p">,</span>
+                <span class="nb">format</span><span class="o">=</span><span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="n">colorize</span><span class="p">,</span>
+            <span class="p">)</span>
+
+            <span class="c1"># then setup the root task logger.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">setup_task_loggers</span><span class="p">(</span><span class="n">loglevel</span><span class="p">,</span> <span class="n">logfile</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="n">colorize</span><span class="p">)</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span><span class="o">.</span><span class="n">handlers</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">stream</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">IndexError</span><span class="p">):</span>
+            <span class="k">pass</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">set_default_encoding_file</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+
+        <span class="c1"># This is a hack for multiprocessing&#39;s fork+exec, so that</span>
+        <span class="c1"># logging before Process.run works.</span>
+        <span class="n">logfile_name</span> <span class="o">=</span> <span class="n">logfile</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">logfile</span><span class="p">,</span> <span class="n">string_t</span><span class="p">)</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_MP_FORK_LOGLEVEL_</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">loglevel</span><span class="p">),</span>
+                          <span class="n">_MP_FORK_LOGFILE_</span><span class="o">=</span><span class="n">logfile_name</span><span class="p">,</span>
+                          <span class="n">_MP_FORK_LOGFORMAT_</span><span class="o">=</span><span class="nb">format</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">receivers</span></div>
+
+    <span class="k">def</span> <span class="nf">_configure_logger</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logger</span><span class="p">,</span> <span class="n">logfile</span><span class="p">,</span> <span class="n">loglevel</span><span class="p">,</span>
+                          <span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">logger</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">setup_handlers</span><span class="p">(</span><span class="n">logger</span><span class="p">,</span> <span class="n">logfile</span><span class="p">,</span> <span class="nb">format</span><span class="p">,</span>
+                                <span class="n">colorize</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">loglevel</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">loglevel</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Logging.setup_task_loggers"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.setup_task_loggers">[docs]</a>    <span class="k">def</span> <span class="nf">setup_task_loggers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                           <span class="n">colorize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">propagate</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Setup the task logger.</span>
+
+<span class="sd">        If `logfile` is not specified, then `sys.stderr` is used.</span>
+
+<span class="sd">        Will return the base task logger object.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">loglevel</span> <span class="o">=</span> <span class="n">mlevel</span><span class="p">(</span><span class="n">loglevel</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span><span class="p">)</span>
+        <span class="nb">format</span> <span class="o">=</span> <span class="nb">format</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_format</span>
+        <span class="n">colorize</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">supports_color</span><span class="p">(</span><span class="n">colorize</span><span class="p">,</span> <span class="n">logfile</span><span class="p">)</span>
+
+        <span class="n">logger</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">setup_handlers</span><span class="p">(</span>
+            <span class="n">get_logger</span><span class="p">(</span><span class="s1">&#39;celery.task&#39;</span><span class="p">),</span>
+            <span class="n">logfile</span><span class="p">,</span> <span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="p">,</span>
+            <span class="n">formatter</span><span class="o">=</span><span class="n">TaskFormatter</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+        <span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">loglevel</span><span class="p">)</span>
+        <span class="c1"># this is an int for some reason, better to not question why.</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">propagate</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">propagate</span><span class="p">)</span>
+        <span class="n">signals</span><span class="o">.</span><span class="n">after_setup_task_logger</span><span class="o">.</span><span class="n">send</span><span class="p">(</span>
+            <span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="n">logger</span><span class="p">,</span>
+            <span class="n">loglevel</span><span class="o">=</span><span class="n">loglevel</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="n">logfile</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="n">colorize</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">logger</span></div>
+
+<div class="viewcode-block" id="Logging.redirect_stdouts_to_logger"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.redirect_stdouts_to_logger">[docs]</a>    <span class="k">def</span> <span class="nf">redirect_stdouts_to_logger</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logger</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                                   <span class="n">stdout</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">stderr</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Redirect :class:`sys.stdout` and :class:`sys.stderr` to logger.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            logger (logging.Logger): Logger instance to redirect to.</span>
+<span class="sd">            loglevel (int, str): The loglevel redirected message</span>
+<span class="sd">                will be logged as.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">proxy</span> <span class="o">=</span> <span class="n">LoggingProxy</span><span class="p">(</span><span class="n">logger</span><span class="p">,</span> <span class="n">loglevel</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span> <span class="o">=</span> <span class="n">proxy</span>
+        <span class="k">if</span> <span class="n">stderr</span><span class="p">:</span>
+            <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span> <span class="o">=</span> <span class="n">proxy</span>
+        <span class="k">return</span> <span class="n">proxy</span></div>
+
+<div class="viewcode-block" id="Logging.supports_color"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.supports_color">[docs]</a>    <span class="k">def</span> <span class="nf">supports_color</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">colorize</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">colorize</span> <span class="k">if</span> <span class="n">colorize</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">colorize</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">IS_WINDOWS</span><span class="p">:</span>
+            <span class="c1"># Windows does not support ANSI color codes.</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="n">colorize</span> <span class="ow">or</span> <span class="n">colorize</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Only use color if there&#39;s no active log file</span>
+            <span class="c1"># and stderr is an actual terminal.</span>
+            <span class="k">return</span> <span class="n">logfile</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">isatty</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">colorize</span></div>
+
+<div class="viewcode-block" id="Logging.colored"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.colored">[docs]</a>    <span class="k">def</span> <span class="nf">colored</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">enabled</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">colored</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">supports_color</span><span class="p">(</span><span class="n">enabled</span><span class="p">,</span> <span class="n">logfile</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="Logging.setup_handlers"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.setup_handlers">[docs]</a>    <span class="k">def</span> <span class="nf">setup_handlers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logger</span><span class="p">,</span> <span class="n">logfile</span><span class="p">,</span> <span class="nb">format</span><span class="p">,</span> <span class="n">colorize</span><span class="p">,</span>
+                       <span class="n">formatter</span><span class="o">=</span><span class="n">ColorFormatter</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_configured</span><span class="p">(</span><span class="n">logger</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">logger</span>
+        <span class="n">handler</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_detect_handler</span><span class="p">(</span><span class="n">logfile</span><span class="p">)</span>
+        <span class="n">handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">formatter</span><span class="p">(</span><span class="nb">format</span><span class="p">,</span> <span class="n">use_color</span><span class="o">=</span><span class="n">colorize</span><span class="p">))</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">logger</span></div>
+
+    <span class="k">def</span> <span class="nf">_detect_handler</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create handler from filename, an open stream or `None` (stderr).&quot;&quot;&quot;</span>
+        <span class="n">logfile</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">__stderr__</span> <span class="k">if</span> <span class="n">logfile</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">logfile</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">logfile</span><span class="p">,</span> <span class="s1">&#39;write&#39;</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">logging</span><span class="o">.</span><span class="n">StreamHandler</span><span class="p">(</span><span class="n">logfile</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">WatchedFileHandler</span><span class="p">(</span><span class="n">logfile</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_has_handler</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logger</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">any</span><span class="p">(</span>
+            <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">h</span><span class="p">,</span> <span class="n">logging</span><span class="o">.</span><span class="n">NullHandler</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">logger</span><span class="o">.</span><span class="n">handlers</span> <span class="ow">or</span> <span class="p">[]</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_is_configured</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logger</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_has_handler</span><span class="p">(</span><span class="n">logger</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">getattr</span><span class="p">(</span>
+            <span class="n">logger</span><span class="p">,</span> <span class="s1">&#39;_rudimentary_setup&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Logging.setup_logger"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.setup_logger">[docs]</a>    <span class="k">def</span> <span class="nf">setup_logger</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;celery&#39;</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Deprecated: No longer used.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">setup_logging_subsystem</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">logging</span><span class="o">.</span><span class="n">root</span></div>
+
+<div class="viewcode-block" id="Logging.get_default_logger"><a class="viewcode-back" href="../../../reference/celery.app.log.html#celery.app.log.Logging.get_default_logger">[docs]</a>    <span class="k">def</span> <span class="nf">get_default_logger</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;celery&#39;</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">get_logger</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></div>
+
+    <span class="nd">@class_property</span>
+    <span class="k">def</span> <span class="nf">already_setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_setup</span>
+
+    <span class="nd">@already_setup</span><span class="o">.</span><span class="n">setter</span>  <span class="c1"># noqa</span>
+    <span class="k">def</span> <span class="nf">already_setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">was_setup</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_setup</span> <span class="o">=</span> <span class="n">was_setup</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

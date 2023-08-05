@@ -1,0 +1,741 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kombu.messaging &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/kombu/messaging.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for kombu.messaging</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Sending and receiving messages.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">from</span> <span class="nn">itertools</span> <span class="k">import</span> <span class="n">count</span>
+
+<span class="kn">from</span> <span class="nn">.common</span> <span class="k">import</span> <span class="n">maybe_declare</span>
+<span class="kn">from</span> <span class="nn">.compression</span> <span class="k">import</span> <span class="n">compress</span>
+<span class="kn">from</span> <span class="nn">.connection</span> <span class="k">import</span> <span class="n">maybe_channel</span><span class="p">,</span> <span class="n">is_connection</span>
+<span class="kn">from</span> <span class="nn">.entity</span> <span class="k">import</span> <span class="n">Exchange</span><span class="p">,</span> <span class="n">Queue</span><span class="p">,</span> <span class="n">maybe_delivery_mode</span>
+<span class="kn">from</span> <span class="nn">.exceptions</span> <span class="k">import</span> <span class="n">ContentDisallowed</span>
+<span class="kn">from</span> <span class="nn">.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="n">python_2_unicode_compatible</span><span class="p">,</span> <span class="n">text_t</span><span class="p">,</span> <span class="n">values</span>
+<span class="kn">from</span> <span class="nn">.serialization</span> <span class="k">import</span> <span class="n">dumps</span><span class="p">,</span> <span class="n">prepare_accept_content</span>
+<span class="kn">from</span> <span class="nn">.utils.functional</span> <span class="k">import</span> <span class="n">ChannelPromise</span><span class="p">,</span> <span class="n">maybe_list</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;Exchange&#39;</span><span class="p">,</span> <span class="s1">&#39;Queue&#39;</span><span class="p">,</span> <span class="s1">&#39;Producer&#39;</span><span class="p">,</span> <span class="s1">&#39;Consumer&#39;</span><span class="p">]</span>
+
+
+<span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">Producer</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Message Producer.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        channel (kombu.Connection, ChannelT): Connection or channel.</span>
+<span class="sd">        exchange (Exchange, str): Optional default exchange.</span>
+<span class="sd">        routing_key (str): Optional default routing key.</span>
+<span class="sd">        serializer (str): Default serializer. Default is `&quot;json&quot;`.</span>
+<span class="sd">        compression (str): Default compression method.</span>
+<span class="sd">            Default is no compression.</span>
+<span class="sd">        auto_declare (bool): Automatically declare the default exchange</span>
+<span class="sd">            at instantiation. Default is :const:`True`.</span>
+<span class="sd">        on_return (Callable): Callback to call for undeliverable messages,</span>
+<span class="sd">            when the `mandatory` or `immediate` arguments to</span>
+<span class="sd">            :meth:`publish` is used. This callback needs the following</span>
+<span class="sd">            signature: `(exception, exchange, routing_key, message)`.</span>
+<span class="sd">            Note that the producer needs to drain events to use this feature.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1">#: Default exchange</span>
+    <span class="n">exchange</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Default routing key.</span>
+    <span class="n">routing_key</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+    <span class="c1">#: Default serializer to use. Default is JSON.</span>
+    <span class="n">serializer</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Default compression method.  Disabled by default.</span>
+    <span class="n">compression</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: By default, if a defualt exchange is set,</span>
+    <span class="c1">#: that exchange will be declare when publishing a message.</span>
+    <span class="n">auto_declare</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1">#: Basic return callback.</span>
+    <span class="n">on_return</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Set if channel argument was a Connection instance (using</span>
+    <span class="c1">#: default_channel).</span>
+    <span class="n">__connection__</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">,</span> <span class="n">exchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">auto_declare</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">compression</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">on_return</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span> <span class="o">=</span> <span class="n">channel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="n">exchange</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">routing_key</span> <span class="o">=</span> <span class="n">routing_key</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">routing_key</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="o">=</span> <span class="n">serializer</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">compression</span> <span class="o">=</span> <span class="n">compression</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">compression</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_return</span> <span class="o">=</span> <span class="n">on_return</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_channel_promise</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="n">Exchange</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">auto_declare</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">auto_declare</span> <span class="o">=</span> <span class="n">auto_declare</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">revive</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_channel</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;&lt;Producer: </span><span class="si">{0._channel}</span><span class="s1">&gt;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__reduce__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">__reduce_args__</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">__reduce_args__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">routing_key</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">auto_declare</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">compression</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">declare</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Declare the exchange.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This happens automatically at instantiation when</span>
+<span class="sd">            the :attr:`auto_declare` flag is enabled.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">name</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">declare</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">maybe_declare</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity</span><span class="p">,</span> <span class="n">retry</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">retry_policy</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Declare exchange if not already declared during this session.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">entity</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">maybe_declare</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">,</span> <span class="n">retry</span><span class="p">,</span> <span class="o">**</span><span class="n">retry_policy</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_delivery_details</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exchange</span><span class="p">,</span> <span class="n">delivery_mode</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                          <span class="n">maybe_delivery_mode</span><span class="o">=</span><span class="n">maybe_delivery_mode</span><span class="p">,</span>
+                          <span class="n">Exchange</span><span class="o">=</span><span class="n">Exchange</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exchange</span><span class="p">,</span> <span class="n">Exchange</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">exchange</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">maybe_delivery_mode</span><span class="p">(</span>
+                <span class="n">delivery_mode</span> <span class="ow">or</span> <span class="n">exchange</span><span class="o">.</span><span class="n">delivery_mode</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="c1"># exchange is string, so inherit the delivery</span>
+        <span class="c1"># mode of our default exchange.</span>
+        <span class="k">return</span> <span class="n">exchange</span><span class="p">,</span> <span class="n">maybe_delivery_mode</span><span class="p">(</span>
+            <span class="n">delivery_mode</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">delivery_mode</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">publish</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">delivery_mode</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                <span class="n">mandatory</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">immediate</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">priority</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                <span class="n">content_type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">content_encoding</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">compression</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">exchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retry</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">retry_policy</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">declare</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">expiration</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                <span class="o">**</span><span class="n">properties</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Publish message to the specified exchange.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            body (Any): Message body.</span>
+<span class="sd">            routing_key (str): Message routing key.</span>
+<span class="sd">            delivery_mode (enum): See :attr:`delivery_mode`.</span>
+<span class="sd">            mandatory (bool): Currently not supported.</span>
+<span class="sd">            immediate (bool): Currently not supported.</span>
+<span class="sd">            priority (int): Message priority. A number between 0 and 9.</span>
+<span class="sd">            content_type (str): Content type. Default is auto-detect.</span>
+<span class="sd">            content_encoding (str): Content encoding. Default is auto-detect.</span>
+<span class="sd">            serializer (str): Serializer to use. Default is auto-detect.</span>
+<span class="sd">            compression (str): Compression method to use.  Default is none.</span>
+<span class="sd">            headers (Dict): Mapping of arbitrary headers to pass along</span>
+<span class="sd">                with the message body.</span>
+<span class="sd">            exchange (Exchange, str): Override the exchange.</span>
+<span class="sd">                Note that this exchange must have been declared.</span>
+<span class="sd">            declare (Sequence[EntityT]): Optional list of required entities</span>
+<span class="sd">                that must have been declared before publishing the message.</span>
+<span class="sd">                The entities will be declared using</span>
+<span class="sd">                :func:`~kombu.common.maybe_declare`.</span>
+<span class="sd">            retry (bool): Retry publishing, or declaring entities if the</span>
+<span class="sd">                connection is lost.</span>
+<span class="sd">            retry_policy (Dict): Retry configuration, this is the keywords</span>
+<span class="sd">                supported by :meth:`~kombu.Connection.ensure`.</span>
+<span class="sd">            expiration (float): A TTL in seconds can be specified per message.</span>
+<span class="sd">                Default is no expiration.</span>
+<span class="sd">            **properties (Any): Additional message properties, see AMQP spec.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_publish</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_publish</span>
+
+        <span class="n">declare</span> <span class="o">=</span> <span class="p">[]</span> <span class="k">if</span> <span class="n">declare</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">declare</span>
+        <span class="n">headers</span> <span class="o">=</span> <span class="p">{}</span> <span class="k">if</span> <span class="n">headers</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">headers</span>
+        <span class="n">retry_policy</span> <span class="o">=</span> <span class="p">{}</span> <span class="k">if</span> <span class="n">retry_policy</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">retry_policy</span>
+        <span class="n">routing_key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">routing_key</span> <span class="k">if</span> <span class="n">routing_key</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">routing_key</span>
+        <span class="n">compression</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">compression</span> <span class="k">if</span> <span class="n">compression</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">compression</span>
+
+        <span class="n">exchange_name</span><span class="p">,</span> <span class="n">properties</span><span class="p">[</span><span class="s1">&#39;delivery_mode&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_delivery_details</span><span class="p">(</span>
+            <span class="n">exchange</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">,</span> <span class="n">delivery_mode</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">expiration</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">properties</span><span class="p">[</span><span class="s1">&#39;expiration&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">expiration</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">))</span>
+
+        <span class="n">body</span><span class="p">,</span> <span class="n">content_type</span><span class="p">,</span> <span class="n">content_encoding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prepare</span><span class="p">(</span>
+            <span class="n">body</span><span class="p">,</span> <span class="n">serializer</span><span class="p">,</span> <span class="n">content_type</span><span class="p">,</span> <span class="n">content_encoding</span><span class="p">,</span>
+            <span class="n">compression</span><span class="p">,</span> <span class="n">headers</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">auto_declare</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">name</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">declare</span><span class="p">:</span>
+                <span class="c1"># XXX declare should be a Set.</span>
+                <span class="n">declare</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">retry</span><span class="p">:</span>
+            <span class="n">_publish</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">ensure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_publish</span><span class="p">,</span> <span class="o">**</span><span class="n">retry_policy</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_publish</span><span class="p">(</span>
+            <span class="n">body</span><span class="p">,</span> <span class="n">priority</span><span class="p">,</span> <span class="n">content_type</span><span class="p">,</span> <span class="n">content_encoding</span><span class="p">,</span>
+            <span class="n">headers</span><span class="p">,</span> <span class="n">properties</span><span class="p">,</span> <span class="n">routing_key</span><span class="p">,</span> <span class="n">mandatory</span><span class="p">,</span> <span class="n">immediate</span><span class="p">,</span>
+            <span class="n">exchange_name</span><span class="p">,</span> <span class="n">declare</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_publish</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">priority</span><span class="p">,</span> <span class="n">content_type</span><span class="p">,</span> <span class="n">content_encoding</span><span class="p">,</span>
+                 <span class="n">headers</span><span class="p">,</span> <span class="n">properties</span><span class="p">,</span> <span class="n">routing_key</span><span class="p">,</span> <span class="n">mandatory</span><span class="p">,</span>
+                 <span class="n">immediate</span><span class="p">,</span> <span class="n">exchange</span><span class="p">,</span> <span class="n">declare</span><span class="p">):</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span>
+        <span class="n">message</span> <span class="o">=</span> <span class="n">channel</span><span class="o">.</span><span class="n">prepare_message</span><span class="p">(</span>
+            <span class="n">body</span><span class="p">,</span> <span class="n">priority</span><span class="p">,</span> <span class="n">content_type</span><span class="p">,</span>
+            <span class="n">content_encoding</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="n">properties</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">declare</span><span class="p">:</span>
+            <span class="n">maybe_declare</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">maybe_declare</span>
+            <span class="p">[</span><span class="n">maybe_declare</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span> <span class="k">for</span> <span class="n">entity</span> <span class="ow">in</span> <span class="n">declare</span><span class="p">]</span>
+
+        <span class="c1"># handle autogenerated queue names for reply_to</span>
+        <span class="n">reply_to</span> <span class="o">=</span> <span class="n">properties</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;reply_to&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">reply_to</span><span class="p">,</span> <span class="n">Queue</span><span class="p">):</span>
+            <span class="n">properties</span><span class="p">[</span><span class="s1">&#39;reply_to&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">reply_to</span><span class="o">.</span><span class="n">name</span>
+        <span class="k">return</span> <span class="n">channel</span><span class="o">.</span><span class="n">basic_publish</span><span class="p">(</span>
+            <span class="n">message</span><span class="p">,</span>
+            <span class="n">exchange</span><span class="o">=</span><span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="n">routing_key</span><span class="p">,</span>
+            <span class="n">mandatory</span><span class="o">=</span><span class="n">mandatory</span><span class="p">,</span> <span class="n">immediate</span><span class="o">=</span><span class="n">immediate</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_channel</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="n">ChannelPromise</span><span class="p">):</span>
+            <span class="n">channel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span> <span class="o">=</span> <span class="n">channel</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">revive</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_return</span><span class="p">:</span>
+                <span class="n">channel</span><span class="o">.</span><span class="n">events</span><span class="p">[</span><span class="s1">&#39;basic_return&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">on_return</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">channel</span>
+
+    <span class="k">def</span> <span class="nf">_set_channel</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span> <span class="o">=</span> <span class="n">channel</span>
+    <span class="n">channel</span> <span class="o">=</span> <span class="nb">property</span><span class="p">(</span><span class="n">_get_channel</span><span class="p">,</span> <span class="n">_set_channel</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">revive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Revive the producer after connection loss.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">is_connection</span><span class="p">(</span><span class="n">channel</span><span class="p">):</span>
+            <span class="n">connection</span> <span class="o">=</span> <span class="n">channel</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__connection__</span> <span class="o">=</span> <span class="n">connection</span>
+            <span class="n">channel</span> <span class="o">=</span> <span class="n">ChannelPromise</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">connection</span><span class="o">.</span><span class="n">default_channel</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="n">ChannelPromise</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span> <span class="o">=</span> <span class="n">channel</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Channel already concrete</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span> <span class="o">=</span> <span class="n">channel</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_return</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span><span class="o">.</span><span class="n">events</span><span class="p">[</span><span class="s1">&#39;basic_return&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">on_return</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">exc_info</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">release</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span>
+    <span class="n">close</span> <span class="o">=</span> <span class="n">release</span>
+
+    <span class="k">def</span> <span class="nf">_prepare</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">content_type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">content_encoding</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">compression</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+
+        <span class="c1"># No content_type? Then we&#39;re serializing the data internally.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">content_type</span><span class="p">:</span>
+            <span class="n">serializer</span> <span class="o">=</span> <span class="n">serializer</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span>
+            <span class="p">(</span><span class="n">content_type</span><span class="p">,</span> <span class="n">content_encoding</span><span class="p">,</span>
+             <span class="n">body</span><span class="p">)</span> <span class="o">=</span> <span class="n">dumps</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="n">serializer</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># If the programmer doesn&#39;t want us to serialize,</span>
+            <span class="c1"># make sure content_encoding is set.</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">text_t</span><span class="p">):</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">content_encoding</span><span class="p">:</span>
+                    <span class="n">content_encoding</span> <span class="o">=</span> <span class="s1">&#39;utf-8&#39;</span>
+                <span class="n">body</span> <span class="o">=</span> <span class="n">body</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">content_encoding</span><span class="p">)</span>
+
+            <span class="c1"># If they passed in a string, we can&#39;t know anything</span>
+            <span class="c1"># about it. So assume it&#39;s binary data.</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">content_encoding</span><span class="p">:</span>
+                <span class="n">content_encoding</span> <span class="o">=</span> <span class="s1">&#39;binary&#39;</span>
+
+        <span class="k">if</span> <span class="n">compression</span><span class="p">:</span>
+            <span class="n">body</span><span class="p">,</span> <span class="n">headers</span><span class="p">[</span><span class="s1">&#39;compression&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">compress</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">compression</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">body</span><span class="p">,</span> <span class="n">content_type</span><span class="p">,</span> <span class="n">content_encoding</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">connection</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__connection__</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">client</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+
+<span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">Consumer</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Message consumer.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        channel (kombu.Connection, ChannelT): see :attr:`channel`.</span>
+<span class="sd">        queues (Sequence[kombu.Queue]): see :attr:`queues`.</span>
+<span class="sd">        no_ack (bool): see :attr:`no_ack`.</span>
+<span class="sd">        auto_declare (bool): see :attr:`auto_declare`</span>
+<span class="sd">        callbacks (Sequence[Callable]): see :attr:`callbacks`.</span>
+<span class="sd">        on_message (Callable): See :attr:`on_message`</span>
+<span class="sd">        on_decode_error (Callable): see :attr:`on_decode_error`.</span>
+<span class="sd">        prefetch_count (int): see :attr:`prefetch_count`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">ContentDisallowed</span> <span class="o">=</span> <span class="n">ContentDisallowed</span>
+
+    <span class="c1">#: The connection/channel to use for this consumer.</span>
+    <span class="n">channel</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: A single :class:`~kombu.Queue`, or a list of queues to</span>
+    <span class="c1">#: consume from.</span>
+    <span class="n">queues</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Flag for automatic message acknowledgment.</span>
+    <span class="c1">#: If enabled the messages are automatically acknowledged by the</span>
+    <span class="c1">#: broker.  This can increase performance but means that you</span>
+    <span class="c1">#: have no control of when the message is removed.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: Disabled by default.</span>
+    <span class="n">no_ack</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: By default all entities will be declared at instantiation, if you</span>
+    <span class="c1">#: want to handle this manually you can set this to :const:`False`.</span>
+    <span class="n">auto_declare</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1">#: List of callbacks called in order when a message is received.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: The signature of the callbacks must take two arguments:</span>
+    <span class="c1">#: `(body, message)`, which is the decoded message body and</span>
+    <span class="c1">#: the :class:`~kombu.Message` instance.</span>
+    <span class="n">callbacks</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Optional function called whenever a message is received.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: When defined this function will be called instead of the</span>
+    <span class="c1">#: :meth:`receive` method, and :attr:`callbacks` will be disabled.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: So this can be used as an alternative to :attr:`callbacks` when</span>
+    <span class="c1">#: you don&#39;t want the body to be automatically decoded.</span>
+    <span class="c1">#: Note that the message will still be decompressed if the message</span>
+    <span class="c1">#: has the ``compression`` header set.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: The signature of the callback must take a single argument,</span>
+    <span class="c1">#: which is the :class:`~kombu.Message` object.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: Also note that the ``message.body`` attribute, which is the raw</span>
+    <span class="c1">#: contents of the message body, may in some cases be a read-only</span>
+    <span class="c1">#: :class:`buffer` object.</span>
+    <span class="n">on_message</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Callback called when a message can&#39;t be decoded.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: The signature of the callback must take two arguments: `(message,</span>
+    <span class="c1">#: exc)`, which is the message that can&#39;t be decoded and the exception</span>
+    <span class="c1">#: that occurred while trying to decode it.</span>
+    <span class="n">on_decode_error</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: List of accepted content-types.</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: An exception will be raised if the consumer receives</span>
+    <span class="c1">#: a message with an untrusted content type.</span>
+    <span class="c1">#: By default all content-types are accepted, but not if</span>
+    <span class="c1">#: :func:`kombu.disable_untrusted_serializers` was called,</span>
+    <span class="c1">#: in which case only json is allowed.</span>
+    <span class="n">accept</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Initial prefetch count</span>
+    <span class="c1">#:</span>
+    <span class="c1">#: If set, the consumer will set the prefetch_count QoS value at startup.</span>
+    <span class="c1">#: Can also be changed using :meth:`qos`.</span>
+    <span class="n">prefetch_count</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Mapping of queues we consume from.</span>
+    <span class="n">_queues</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">_tags</span> <span class="o">=</span> <span class="n">count</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>   <span class="c1"># global</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">,</span> <span class="n">queues</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">auto_declare</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">callbacks</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">on_decode_error</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">on_message</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">accept</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">prefetch_count</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tag_prefix</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="o">=</span> <span class="n">channel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">queues</span> <span class="o">=</span> <span class="n">maybe_list</span><span class="p">(</span><span class="n">queues</span> <span class="ow">or</span> <span class="p">[])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">no_ack</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">no_ack</span> <span class="k">if</span> <span class="n">no_ack</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">no_ack</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">callbacks</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">callbacks</span> <span class="ow">or</span> <span class="p">[]</span> <span class="k">if</span> <span class="n">callbacks</span> <span class="ow">is</span> <span class="kc">None</span>
+                          <span class="k">else</span> <span class="n">callbacks</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_message</span> <span class="o">=</span> <span class="n">on_message</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tag_prefix</span> <span class="o">=</span> <span class="n">tag_prefix</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">auto_declare</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">auto_declare</span> <span class="o">=</span> <span class="n">auto_declare</span>
+        <span class="k">if</span> <span class="n">on_decode_error</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_decode_error</span> <span class="o">=</span> <span class="n">on_decode_error</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">accept</span> <span class="o">=</span> <span class="n">prepare_accept_content</span><span class="p">(</span><span class="n">accept</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prefetch_count</span> <span class="o">=</span> <span class="n">prefetch_count</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">revive</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">queues</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+
+    <span class="nd">@queues</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">queues</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queues</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_queues</span> <span class="o">=</span> <span class="p">{</span><span class="n">q</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">q</span> <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">queues</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">revive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Revive consumer after connection loss.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="o">=</span> <span class="n">maybe_channel</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
+        <span class="c1"># modify dict size while iterating over it is not allowed</span>
+        <span class="k">for</span> <span class="n">qname</span><span class="p">,</span> <span class="n">queue</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">items</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="p">)):</span>
+            <span class="c1"># name may have changed after declare</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">qname</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="n">queue</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="p">[</span><span class="n">queue</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">queue</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">)</span>
+            <span class="n">queue</span><span class="o">.</span><span class="n">revive</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">auto_declare</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">declare</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">prefetch_count</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">qos</span><span class="p">(</span><span class="n">prefetch_count</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">prefetch_count</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">declare</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Declare queues, exchanges and bindings.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This is done automatically at instantiation</span>
+<span class="sd">            when :attr:`auto_declare` is set.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">queue</span> <span class="ow">in</span> <span class="n">values</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="p">):</span>
+            <span class="n">queue</span><span class="o">.</span><span class="n">declare</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">register_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">callback</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Register a new callback to be called when a message is received.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            The signature of the callback needs to accept two arguments:</span>
+<span class="sd">            `(body, message)`, which is the decoded message body</span>
+<span class="sd">            and the :class:`~kombu.Message` instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">callbacks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">callback</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">consume</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_val</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">connection</span><span class="p">:</span>
+            <span class="n">conn_errors</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">connection_errors</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc_val</span><span class="p">,</span> <span class="n">conn_errors</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+                <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                    <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">add_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a queue to the list of queues to consume from.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This will not start consuming from the queue,</span>
+<span class="sd">            for that you will have to call :meth:`consume` after.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="n">queue</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">auto_declare</span><span class="p">:</span>
+            <span class="n">queue</span><span class="o">.</span><span class="n">declare</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="p">[</span><span class="n">queue</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">queue</span>
+        <span class="k">return</span> <span class="n">queue</span>
+
+    <span class="k">def</span> <span class="nf">consume</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Start consuming messages.</span>
+
+<span class="sd">        Can be called multiple times, but note that while it</span>
+<span class="sd">        will consume from new queues added since the last call,</span>
+<span class="sd">        it will not cancel consuming from removed queues (</span>
+<span class="sd">        use :meth:`cancel_by_queue`).</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            no_ack (bool): See :attr:`no_ack`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">queues</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">values</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">queues</span><span class="p">:</span>
+            <span class="n">no_ack</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">no_ack</span> <span class="k">if</span> <span class="n">no_ack</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">no_ack</span>
+
+            <span class="n">H</span><span class="p">,</span> <span class="n">T</span> <span class="o">=</span> <span class="n">queues</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">queues</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">queue</span> <span class="ow">in</span> <span class="n">H</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_basic_consume</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span> <span class="n">nowait</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_basic_consume</span><span class="p">(</span><span class="n">T</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span> <span class="n">nowait</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">cancel</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;End all active queue consumers.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This does not affect already delivered messages, but it does</span>
+<span class="sd">            mean the server will not send any more messages for this consumer.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">cancel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">basic_cancel</span>
+        <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">values</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span><span class="p">):</span>
+            <span class="n">cancel</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+    <span class="n">close</span> <span class="o">=</span> <span class="n">cancel</span>
+
+    <span class="k">def</span> <span class="nf">cancel_by_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Cancel consumer by queue name.&quot;&quot;&quot;</span>
+        <span class="n">qname</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="n">Queue</span><span class="p">)</span> <span class="k">else</span> <span class="n">queue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">tag</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">qname</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">basic_cancel</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">qname</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">consuming_from</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return :const:`True` if currently consuming from queue&#39;.&quot;&quot;&quot;</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">queue</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="n">Queue</span><span class="p">):</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">name</span>
+        <span class="k">return</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span>
+
+    <span class="k">def</span> <span class="nf">purge</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Purge messages from all queues.</span>
+
+<span class="sd">        Warning:</span>
+<span class="sd">            This will *delete all ready messages*, there is no undo operation.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">queue</span><span class="o">.</span><span class="n">purge</span><span class="p">()</span> <span class="k">for</span> <span class="n">queue</span> <span class="ow">in</span> <span class="n">values</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_queues</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">flow</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">active</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Enable/disable flow from peer.</span>
+
+<span class="sd">        This is a simple flow-control mechanism that a peer can use</span>
+<span class="sd">        to avoid overflowing its queues or otherwise finding itself</span>
+<span class="sd">        receiving more messages than it can process.</span>
+
+<span class="sd">        The peer that receives a request to stop sending content</span>
+<span class="sd">        will finish sending the current content (if any), and then wait</span>
+<span class="sd">        until flow is reactivated.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">flow</span><span class="p">(</span><span class="n">active</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">qos</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prefetch_size</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">prefetch_count</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">apply_global</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Specify quality of service.</span>
+
+<span class="sd">        The client can request that messages should be sent in</span>
+<span class="sd">        advance so that when the client finishes processing a message,</span>
+<span class="sd">        the following message is already held locally, rather than needing</span>
+<span class="sd">        to be sent down the channel. Prefetching gives a performance</span>
+<span class="sd">        improvement.</span>
+
+<span class="sd">        The prefetch window is Ignored if the :attr:`no_ack` option is set.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            prefetch_size (int): Specify the prefetch window in octets.</span>
+<span class="sd">                The server will send a message in advance if it is equal to</span>
+<span class="sd">                or smaller in size than the available prefetch size (and</span>
+<span class="sd">                also falls within other prefetch limits). May be set to zero,</span>
+<span class="sd">                meaning &quot;no specific limit&quot;, although other prefetch limits</span>
+<span class="sd">                may still apply.</span>
+
+<span class="sd">            prefetch_count (int): Specify the prefetch window in terms of</span>
+<span class="sd">                whole messages.</span>
+
+<span class="sd">            apply_global (bool): Apply new settings globally on all channels.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">basic_qos</span><span class="p">(</span><span class="n">prefetch_size</span><span class="p">,</span>
+                                      <span class="n">prefetch_count</span><span class="p">,</span>
+                                      <span class="n">apply_global</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">recover</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">requeue</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Redeliver unacknowledged messages.</span>
+
+<span class="sd">        Asks the broker to redeliver all unacknowledged messages</span>
+<span class="sd">        on the specified channel.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            requeue (bool): By default the messages will be redelivered</span>
+<span class="sd">                to the original recipient. With `requeue` set to true, the</span>
+<span class="sd">                server will attempt to requeue the message, potentially then</span>
+<span class="sd">                delivering it to an alternative subscriber.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">basic_recover</span><span class="p">(</span><span class="n">requeue</span><span class="o">=</span><span class="n">requeue</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">receive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Method called when a message is received.</span>
+
+<span class="sd">        This dispatches to the registered :attr:`callbacks`.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            body (Any): The decoded message body.</span>
+<span class="sd">            message (~kombu.Message): The message instance.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            NotImplementedError: If no consumer callbacks have been</span>
+<span class="sd">                registered.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">callbacks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">callbacks</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">callbacks</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Consumer does not have any callbacks&#39;</span><span class="p">)</span>
+        <span class="p">[</span><span class="n">callback</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">callback</span> <span class="ow">in</span> <span class="n">callbacks</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">_basic_consume</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span> <span class="n">consumer_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                       <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span> <span class="n">nowait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="n">tag</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">queue</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">tag</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">tag</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_tag</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="n">consumer_tag</span><span class="p">)</span>
+            <span class="n">queue</span><span class="o">.</span><span class="n">consume</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_receive_callback</span><span class="p">,</span>
+                          <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span> <span class="n">nowait</span><span class="o">=</span><span class="n">nowait</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">tag</span>
+
+    <span class="k">def</span> <span class="nf">_add_tag</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span> <span class="n">consumer_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">tag</span> <span class="o">=</span> <span class="n">consumer_tag</span> <span class="ow">or</span> <span class="s1">&#39;</span><span class="si">{0}{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tag_prefix</span><span class="p">,</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_tags</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_active_tags</span><span class="p">[</span><span class="n">queue</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">tag</span>
+        <span class="k">return</span> <span class="n">tag</span>
+
+    <span class="k">def</span> <span class="nf">_receive_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="n">accept</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">accept</span>
+        <span class="n">on_m</span><span class="p">,</span> <span class="n">channel</span><span class="p">,</span> <span class="n">decoded</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_message</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">m2p</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="s1">&#39;message_to_python&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">m2p</span><span class="p">:</span>
+                <span class="n">message</span> <span class="o">=</span> <span class="n">m2p</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">accept</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">message</span><span class="o">.</span><span class="n">accept</span> <span class="o">=</span> <span class="n">accept</span>
+            <span class="k">if</span> <span class="n">message</span><span class="o">.</span><span class="n">errors</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">message</span><span class="o">.</span><span class="n">_reraise_error</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">on_decode_error</span><span class="p">)</span>
+            <span class="n">decoded</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">on_m</span> <span class="k">else</span> <span class="n">message</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_decode_error</span><span class="p">:</span>
+                <span class="k">raise</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_decode_error</span><span class="p">(</span><span class="n">message</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">on_m</span><span class="p">(</span><span class="n">message</span><span class="p">)</span> <span class="k">if</span> <span class="n">on_m</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">receive</span><span class="p">(</span><span class="n">decoded</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;&lt;</span><span class="si">{name}</span><span class="s1">: </span><span class="si">{0.queues}</span><span class="s1">&gt;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">connection</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">client</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">pass</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../index.html">
+              <img class="logo" src="../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,276 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.concurrency.prefork &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../concurrency.html" accesskey="U">celery.concurrency</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/concurrency/prefork.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.concurrency.prefork</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Prefork execution pool.</span>
+
+<span class="sd">Pool implementation using :mod:`multiprocessing`.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+
+<span class="kn">from</span> <span class="nn">billiard</span> <span class="k">import</span> <span class="n">forking_enable</span>
+<span class="kn">from</span> <span class="nn">billiard.common</span> <span class="k">import</span> <span class="n">REMAP_SIGTERM</span><span class="p">,</span> <span class="n">TERM_SIGNAME</span>
+<span class="kn">from</span> <span class="nn">billiard.pool</span> <span class="k">import</span> <span class="n">CLOSE</span><span class="p">,</span> <span class="n">RUN</span>
+<span class="kn">from</span> <span class="nn">billiard.pool</span> <span class="k">import</span> <span class="n">Pool</span> <span class="k">as</span> <span class="n">BlockingPool</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">platforms</span><span class="p">,</span> <span class="n">signals</span>
+<span class="kn">from</span> <span class="nn">celery._state</span> <span class="k">import</span> <span class="n">_set_task_join_will_block</span><span class="p">,</span> <span class="n">set_default_app</span>
+<span class="kn">from</span> <span class="nn">celery.app</span> <span class="k">import</span> <span class="n">trace</span>
+<span class="kn">from</span> <span class="nn">celery.concurrency.base</span> <span class="k">import</span> <span class="n">BasePool</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span>
+<span class="kn">from</span> <span class="nn">celery.utils.functional</span> <span class="k">import</span> <span class="n">noop</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+
+<span class="kn">from</span> <span class="nn">.asynpool</span> <span class="k">import</span> <span class="n">AsynPool</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;TaskPool&#39;</span><span class="p">,</span> <span class="s1">&#39;process_initializer&#39;</span><span class="p">,</span> <span class="s1">&#39;process_destructor&#39;</span><span class="p">)</span>
+
+<span class="c1">#: List of signals to reset when a child process starts.</span>
+<span class="n">WORKER_SIGRESET</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;SIGTERM&#39;</span><span class="p">,</span> <span class="s1">&#39;SIGHUP&#39;</span><span class="p">,</span> <span class="s1">&#39;SIGTTIN&#39;</span><span class="p">,</span> <span class="s1">&#39;SIGTTOU&#39;</span><span class="p">,</span> <span class="s1">&#39;SIGUSR1&#39;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1">#: List of signals to ignore when a child process starts.</span>
+<span class="k">if</span> <span class="n">REMAP_SIGTERM</span><span class="p">:</span>
+    <span class="n">WORKER_SIGIGNORE</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;SIGINT&#39;</span><span class="p">,</span> <span class="n">TERM_SIGNAME</span><span class="p">}</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">WORKER_SIGIGNORE</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;SIGINT&#39;</span><span class="p">}</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="n">warning</span><span class="p">,</span> <span class="n">debug</span> <span class="o">=</span> <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">,</span> <span class="n">logger</span><span class="o">.</span><span class="n">debug</span>
+
+
+<div class="viewcode-block" id="process_initializer"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.process_initializer">[docs]</a><span class="k">def</span> <span class="nf">process_initializer</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">hostname</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Pool child process initializer.</span>
+
+<span class="sd">    Initialize the child pool process to ensure the correct</span>
+<span class="sd">    app instance is used and things like logging works.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_set_task_join_will_block</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">platforms</span><span class="o">.</span><span class="n">signals</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="o">*</span><span class="n">WORKER_SIGRESET</span><span class="p">)</span>
+    <span class="n">platforms</span><span class="o">.</span><span class="n">signals</span><span class="o">.</span><span class="n">ignore</span><span class="p">(</span><span class="o">*</span><span class="n">WORKER_SIGIGNORE</span><span class="p">)</span>
+    <span class="n">platforms</span><span class="o">.</span><span class="n">set_mp_process_title</span><span class="p">(</span><span class="s1">&#39;celeryd&#39;</span><span class="p">,</span> <span class="n">hostname</span><span class="o">=</span><span class="n">hostname</span><span class="p">)</span>
+    <span class="c1"># This is for Windows and other platforms not supporting</span>
+    <span class="c1"># fork().  Note that init_worker makes sure it&#39;s only</span>
+    <span class="c1"># run once per process.</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">init_worker</span><span class="p">()</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">init_worker_process</span><span class="p">()</span>
+    <span class="n">logfile</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_LOG_FILE&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">logfile</span> <span class="ow">and</span> <span class="s1">&#39;</span><span class="si">%i</span><span class="s1">&#39;</span> <span class="ow">in</span> <span class="n">logfile</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+        <span class="c1"># logfile path will differ so need to set up logging again.</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">already_setup</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">setup</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_LOG_LEVEL&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">),</span>
+                  <span class="n">logfile</span><span class="p">,</span>
+                  <span class="nb">bool</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_LOG_REDIRECT&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)),</span>
+                  <span class="nb">str</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_LOG_REDIRECT_LEVEL&#39;</span><span class="p">)),</span>
+                  <span class="n">hostname</span><span class="o">=</span><span class="n">hostname</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;FORKED_BY_MULTIPROCESSING&#39;</span><span class="p">):</span>
+        <span class="c1"># pool did execv after fork</span>
+        <span class="n">trace</span><span class="o">.</span><span class="n">setup_worker_optimizations</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">hostname</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">set_current</span><span class="p">()</span>
+        <span class="n">set_default_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">finalize</span><span class="p">()</span>
+        <span class="n">trace</span><span class="o">.</span><span class="n">_tasks</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">_tasks</span>  <span class="c1"># enables fast_trace_task optimization.</span>
+    <span class="c1"># rebuild execution handler for all tasks.</span>
+    <span class="kn">from</span> <span class="nn">celery.app.trace</span> <span class="k">import</span> <span class="n">build_tracer</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="p">):</span>
+        <span class="n">task</span><span class="o">.</span><span class="n">__trace__</span> <span class="o">=</span> <span class="n">build_tracer</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">app</span><span class="o">.</span><span class="n">loader</span><span class="p">,</span> <span class="n">hostname</span><span class="p">,</span>
+                                      <span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">)</span>
+    <span class="kn">from</span> <span class="nn">celery.worker</span> <span class="k">import</span> <span class="n">state</span> <span class="k">as</span> <span class="n">worker_state</span>
+    <span class="n">worker_state</span><span class="o">.</span><span class="n">reset_state</span><span class="p">()</span>
+    <span class="n">signals</span><span class="o">.</span><span class="n">worker_process_init</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="process_destructor"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.process_destructor">[docs]</a><span class="k">def</span> <span class="nf">process_destructor</span><span class="p">(</span><span class="n">pid</span><span class="p">,</span> <span class="n">exitcode</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Pool child process destructor.</span>
+
+<span class="sd">    Dispatch the :signal:`worker_process_shutdown` signal.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">signals</span><span class="o">.</span><span class="n">worker_process_shutdown</span><span class="o">.</span><span class="n">send</span><span class="p">(</span>
+        <span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pid</span><span class="o">=</span><span class="n">pid</span><span class="p">,</span> <span class="n">exitcode</span><span class="o">=</span><span class="n">exitcode</span><span class="p">,</span>
+    <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="TaskPool"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool">[docs]</a><span class="k">class</span> <span class="nc">TaskPool</span><span class="p">(</span><span class="n">BasePool</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Multiprocessing Pool implementation.&quot;&quot;&quot;</span>
+
+    <span class="n">Pool</span> <span class="o">=</span> <span class="n">AsynPool</span>
+    <span class="n">BlockingPool</span> <span class="o">=</span> <span class="n">BlockingPool</span>
+
+    <span class="n">uses_semaphore</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">write_stats</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="TaskPool.on_start"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool.on_start">[docs]</a>    <span class="k">def</span> <span class="nf">on_start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">forking_enable</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">forking_enable</span><span class="p">)</span>
+        <span class="n">Pool</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">BlockingPool</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;threads&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+                <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">Pool</span><span class="p">)</span>
+        <span class="n">P</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span> <span class="o">=</span> <span class="n">Pool</span><span class="p">(</span><span class="n">processes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">limit</span><span class="p">,</span>
+                              <span class="n">initializer</span><span class="o">=</span><span class="n">process_initializer</span><span class="p">,</span>
+                              <span class="n">on_process_exit</span><span class="o">=</span><span class="n">process_destructor</span><span class="p">,</span>
+                              <span class="n">enable_timeouts</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                              <span class="n">synack</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                              <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">options</span><span class="p">)</span>
+
+        <span class="c1"># Create proxy methods</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_apply</span> <span class="o">=</span> <span class="n">P</span><span class="o">.</span><span class="n">apply_async</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">maintain_pool</span> <span class="o">=</span> <span class="n">P</span><span class="o">.</span><span class="n">maintain_pool</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">terminate_job</span> <span class="o">=</span> <span class="n">P</span><span class="o">.</span><span class="n">terminate_job</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grow</span> <span class="o">=</span> <span class="n">P</span><span class="o">.</span><span class="n">grow</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">shrink</span> <span class="o">=</span> <span class="n">P</span><span class="o">.</span><span class="n">shrink</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">flush</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">P</span><span class="p">,</span> <span class="s1">&#39;flush&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>  <span class="c1"># FIXME add to billiard</span></div>
+
+<div class="viewcode-block" id="TaskPool.restart"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool.restart">[docs]</a>    <span class="k">def</span> <span class="nf">restart</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">restart</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">noop</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="TaskPool.did_start_ok"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool.did_start_ok">[docs]</a>    <span class="k">def</span> <span class="nf">did_start_ok</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">did_start_ok</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="TaskPool.register_with_event_loop"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool.register_with_event_loop">[docs]</a>    <span class="k">def</span> <span class="nf">register_with_event_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loop</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">reg</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">register_with_event_loop</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">return</span> <span class="n">reg</span><span class="p">(</span><span class="n">loop</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="TaskPool.on_stop"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool.on_stop">[docs]</a>    <span class="k">def</span> <span class="nf">on_stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Gracefully stop the pool.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">_state</span> <span class="ow">in</span> <span class="p">(</span><span class="n">RUN</span><span class="p">,</span> <span class="n">CLOSE</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="TaskPool.on_terminate"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool.on_terminate">[docs]</a>    <span class="k">def</span> <span class="nf">on_terminate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Force terminate the pool.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">terminate</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="TaskPool.on_close"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.prefork.html#celery.concurrency.prefork.TaskPool.on_close">[docs]</a>    <span class="k">def</span> <span class="nf">on_close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">_state</span> <span class="o">==</span> <span class="n">RUN</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">close</span><span class="p">()</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">write_stats</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="p">,</span> <span class="s1">&#39;human_write_stats&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;max-concurrency&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">limit</span><span class="p">,</span>
+            <span class="s1">&#39;processes&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">pid</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">_pool</span><span class="p">],</span>
+            <span class="s1">&#39;max-tasks-per-child&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">_maxtasksperchild</span> <span class="ow">or</span> <span class="s1">&#39;N/A&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;put-guarded-by-semaphore&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">putlocks</span><span class="p">,</span>
+            <span class="s1">&#39;timeouts&#39;</span><span class="p">:</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">soft_timeout</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">,</span>
+                         <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">timeout</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="s1">&#39;writes&#39;</span><span class="p">:</span> <span class="n">write_stats</span><span class="p">()</span> <span class="k">if</span> <span class="n">write_stats</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s1">&#39;N/A&#39;</span><span class="p">,</span>
+        <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_processes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pool</span><span class="o">.</span><span class="n">_processes</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../concurrency.html" >celery.concurrency</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

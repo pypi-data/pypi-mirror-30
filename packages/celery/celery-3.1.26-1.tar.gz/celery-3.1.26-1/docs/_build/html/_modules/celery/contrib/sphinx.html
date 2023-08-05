@@ -1,0 +1,219 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.contrib.sphinx &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/contrib/sphinx.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.contrib.sphinx</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Sphinx documentation plugin used to document tasks.</span>
+
+<span class="sd">Introduction</span>
+<span class="sd">============</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+
+<span class="sd">Add the extension to your :file:`docs/conf.py` configuration module:</span>
+
+<span class="sd">.. code-block:: python</span>
+
+<span class="sd">    extensions = (...,</span>
+<span class="sd">                  &#39;celery.contrib.sphinx&#39;)</span>
+
+<span class="sd">If you&#39;d like to change the prefix for tasks in reference documentation</span>
+<span class="sd">then you can change the ``celery_task_prefix`` configuration value:</span>
+
+<span class="sd">.. code-block:: python</span>
+
+<span class="sd">    celery_task_prefix = &#39;(task)&#39;  # &lt; default</span>
+
+<span class="sd">With the extension installed `autodoc` will automatically find</span>
+<span class="sd">task decorated objects (e.g. when using the automodule directive)</span>
+<span class="sd">and generate the correct (as well as add a ``(task)`` prefix),</span>
+<span class="sd">and you can also refer to the tasks using `:task:proj.tasks.add`</span>
+<span class="sd">syntax.</span>
+
+<span class="sd">Use ``.. autotask::`` to alternatively manually document a task.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">from</span> <span class="nn">celery.app.task</span> <span class="k">import</span> <span class="n">BaseTask</span>
+<span class="kn">from</span> <span class="nn">celery.local</span> <span class="k">import</span> <span class="n">PromiseProxy</span>
+<span class="kn">from</span> <span class="nn">sphinx.domains.python</span> <span class="k">import</span> <span class="n">PyModulelevel</span>
+<span class="kn">from</span> <span class="nn">sphinx.ext.autodoc</span> <span class="k">import</span> <span class="n">FunctionDocumenter</span>
+
+<span class="k">try</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="kn">from</span> <span class="nn">inspect</span> <span class="k">import</span> <span class="n">formatargspec</span><span class="p">,</span> <span class="n">getfullargspec</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># Py2</span>
+    <span class="kn">from</span> <span class="nn">inspect</span> <span class="k">import</span> <span class="n">formatargspec</span><span class="p">,</span> <span class="n">getargspec</span> <span class="k">as</span> <span class="n">getfullargspec</span>  <span class="c1"># noqa</span>
+
+
+<div class="viewcode-block" id="TaskDocumenter"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.TaskDocumenter">[docs]</a><span class="k">class</span> <span class="nc">TaskDocumenter</span><span class="p">(</span><span class="n">FunctionDocumenter</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Document task definitions.&quot;&quot;&quot;</span>
+
+    <span class="n">objtype</span> <span class="o">=</span> <span class="s1">&#39;task&#39;</span>
+    <span class="n">member_order</span> <span class="o">=</span> <span class="mi">11</span>
+
+<div class="viewcode-block" id="TaskDocumenter.can_document_member"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.TaskDocumenter.can_document_member">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">can_document_member</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">member</span><span class="p">,</span> <span class="n">membername</span><span class="p">,</span> <span class="n">isattr</span><span class="p">,</span> <span class="n">parent</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">member</span><span class="p">,</span> <span class="n">BaseTask</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">member</span><span class="p">,</span> <span class="s1">&#39;__wrapped__&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="TaskDocumenter.format_args"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.TaskDocumenter.format_args">[docs]</a>    <span class="k">def</span> <span class="nf">format_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">wrapped</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">object</span><span class="p">,</span> <span class="s1">&#39;__wrapped__&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">wrapped</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">argspec</span> <span class="o">=</span> <span class="n">getfullargspec</span><span class="p">(</span><span class="n">wrapped</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">argspec</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">and</span> <span class="n">argspec</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;cls&#39;</span><span class="p">,</span> <span class="s1">&#39;self&#39;</span><span class="p">):</span>
+                <span class="k">del</span> <span class="n">argspec</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">fmt</span> <span class="o">=</span> <span class="n">formatargspec</span><span class="p">(</span><span class="o">*</span><span class="n">argspec</span><span class="p">)</span>
+            <span class="n">fmt</span> <span class="o">=</span> <span class="n">fmt</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\\</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="se">\\\\</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">fmt</span>
+        <span class="k">return</span> <span class="s1">&#39;&#39;</span></div>
+
+<div class="viewcode-block" id="TaskDocumenter.document_members"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.TaskDocumenter.document_members">[docs]</a>    <span class="k">def</span> <span class="nf">document_members</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">all_members</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="TaskDocumenter.check_module"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.TaskDocumenter.check_module">[docs]</a>    <span class="k">def</span> <span class="nf">check_module</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Normally checks if *self.object* is really defined in the module</span>
+        <span class="c1"># given by *self.modname*. But since functions decorated with the @task</span>
+        <span class="c1"># decorator are instances living in the celery.local, we have to check</span>
+        <span class="c1"># the wrapped function instead.</span>
+        <span class="n">modname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_attr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">object</span><span class="p">,</span> <span class="s1">&#39;__module__&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">modname</span> <span class="ow">and</span> <span class="n">modname</span> <span class="o">==</span> <span class="s1">&#39;celery.local&#39;</span><span class="p">:</span>
+            <span class="n">wrapped</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">object</span><span class="p">,</span> <span class="s1">&#39;__wrapped__&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">wrapped</span> <span class="ow">and</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">wrapped</span><span class="p">,</span> <span class="s1">&#39;__module__&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">modname</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">TaskDocumenter</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">check_module</span><span class="p">()</span></div></div>
+
+
+<div class="viewcode-block" id="TaskDirective"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.TaskDirective">[docs]</a><span class="k">class</span> <span class="nc">TaskDirective</span><span class="p">(</span><span class="n">PyModulelevel</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Sphinx task directive.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="TaskDirective.get_signature_prefix"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.TaskDirective.get_signature_prefix">[docs]</a>    <span class="k">def</span> <span class="nf">get_signature_prefix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">env</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">celery_task_prefix</span></div></div>
+
+
+<div class="viewcode-block" id="autodoc_skip_member_handler"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.autodoc_skip_member_handler">[docs]</a><span class="k">def</span> <span class="nf">autodoc_skip_member_handler</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">what</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">skip</span><span class="p">,</span> <span class="n">options</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Handler for autodoc-skip-member event.&quot;&quot;&quot;</span>
+    <span class="c1"># Celery tasks created with the @task decorator have the property</span>
+    <span class="c1"># that *obj.__doc__* and *obj.__class__.__doc__* are equal, which</span>
+    <span class="c1"># trips up the logic in sphinx.ext.autodoc that is supposed to</span>
+    <span class="c1"># suppress repetition of class documentation in an instance of the</span>
+    <span class="c1"># class. This overrides that behavior.</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">BaseTask</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__wrapped__&#39;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">skip</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">PromiseProxy</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="setup"><a class="viewcode-back" href="../../../userguide/sphinx.html#celery.contrib.sphinx.setup">[docs]</a><span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Setup Sphinx extension.&quot;&quot;&quot;</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">setup_extension</span><span class="p">(</span><span class="s1">&#39;sphinx.ext.autodoc&#39;</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">add_autodocumenter</span><span class="p">(</span><span class="n">TaskDocumenter</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">add_directive_to_domain</span><span class="p">(</span><span class="s1">&#39;py&#39;</span><span class="p">,</span> <span class="s1">&#39;task&#39;</span><span class="p">,</span> <span class="n">TaskDirective</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">add_config_value</span><span class="p">(</span><span class="s1">&#39;celery_task_prefix&#39;</span><span class="p">,</span> <span class="s1">&#39;(task)&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="s1">&#39;autodoc-skip-member&#39;</span><span class="p">,</span> <span class="n">autodoc_skip_member_handler</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;parallel_read_safe&#39;</span><span class="p">:</span> <span class="kc">True</span>
+    <span class="p">}</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

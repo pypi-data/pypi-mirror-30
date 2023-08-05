@@ -1,0 +1,212 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.utils.nodenames &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/utils/nodenames.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.utils.nodenames</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Worker name utilities.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">socket</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">partial</span>
+
+<span class="kn">from</span> <span class="nn">kombu.entity</span> <span class="k">import</span> <span class="n">Exchange</span><span class="p">,</span> <span class="n">Queue</span>
+
+<span class="kn">from</span> <span class="nn">.functional</span> <span class="k">import</span> <span class="n">memoize</span>
+<span class="kn">from</span> <span class="nn">.text</span> <span class="k">import</span> <span class="n">simple_format</span>
+
+<span class="c1">#: Exchange for worker direct queues.</span>
+<span class="n">WORKER_DIRECT_EXCHANGE</span> <span class="o">=</span> <span class="n">Exchange</span><span class="p">(</span><span class="s1">&#39;C.dq2&#39;</span><span class="p">)</span>
+
+<span class="c1">#: Format for worker direct queue names.</span>
+<span class="n">WORKER_DIRECT_QUEUE_FORMAT</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{hostname}</span><span class="s1">.dq2&#39;</span>
+
+<span class="c1">#: Separator for worker node name and hostname.</span>
+<span class="n">NODENAME_SEP</span> <span class="o">=</span> <span class="s1">&#39;@&#39;</span>
+
+<span class="n">NODENAME_DEFAULT</span> <span class="o">=</span> <span class="s1">&#39;celery&#39;</span>
+
+<span class="n">gethostname</span> <span class="o">=</span> <span class="n">memoize</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">Cache</span><span class="o">=</span><span class="nb">dict</span><span class="p">)(</span><span class="n">socket</span><span class="o">.</span><span class="n">gethostname</span><span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s1">&#39;worker_direct&#39;</span><span class="p">,</span> <span class="s1">&#39;gethostname&#39;</span><span class="p">,</span> <span class="s1">&#39;nodename&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;anon_nodename&#39;</span><span class="p">,</span> <span class="s1">&#39;nodesplit&#39;</span><span class="p">,</span> <span class="s1">&#39;default_nodename&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;node_format&#39;</span><span class="p">,</span> <span class="s1">&#39;host_format&#39;</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="worker_direct"><a class="viewcode-back" href="../../../internals/reference/celery.utils.nodenames.html#celery.utils.worker_direct">[docs]</a><span class="k">def</span> <span class="nf">worker_direct</span><span class="p">(</span><span class="n">hostname</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return the :class:`kombu.Queue` being a direct route to a worker.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        hostname (str, ~kombu.Queue): The fully qualified node name of</span>
+<span class="sd">            a worker (e.g., ``w1@example.com``).  If passed a</span>
+<span class="sd">            :class:`kombu.Queue` instance it will simply return</span>
+<span class="sd">            that instead.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">hostname</span><span class="p">,</span> <span class="n">Queue</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">hostname</span>
+    <span class="k">return</span> <span class="n">Queue</span><span class="p">(</span>
+        <span class="n">WORKER_DIRECT_QUEUE_FORMAT</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">hostname</span><span class="o">=</span><span class="n">hostname</span><span class="p">),</span>
+        <span class="n">WORKER_DIRECT_EXCHANGE</span><span class="p">,</span>
+        <span class="n">hostname</span><span class="p">,</span>
+    <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="nodename"><a class="viewcode-back" href="../../../internals/reference/celery.utils.nodenames.html#celery.utils.nodename">[docs]</a><span class="k">def</span> <span class="nf">nodename</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">hostname</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Create node name from name/hostname pair.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">NODENAME_SEP</span><span class="o">.</span><span class="n">join</span><span class="p">((</span><span class="n">name</span><span class="p">,</span> <span class="n">hostname</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="anon_nodename"><a class="viewcode-back" href="../../../internals/reference/celery.utils.nodenames.html#celery.utils.anon_nodename">[docs]</a><span class="k">def</span> <span class="nf">anon_nodename</span><span class="p">(</span><span class="n">hostname</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;gen&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return the nodename for this process (not a worker).</span>
+
+<span class="sd">    This is used for e.g. the origin task message field.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">nodename</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">prefix</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">())]),</span>
+                    <span class="n">hostname</span> <span class="ow">or</span> <span class="n">gethostname</span><span class="p">())</span></div>
+
+
+<div class="viewcode-block" id="nodesplit"><a class="viewcode-back" href="../../../internals/reference/celery.utils.nodenames.html#celery.utils.nodesplit">[docs]</a><span class="k">def</span> <span class="nf">nodesplit</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Split node name into tuple of name/hostname.&quot;&quot;&quot;</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">NODENAME_SEP</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">parts</span></div>
+
+
+<div class="viewcode-block" id="default_nodename"><a class="viewcode-back" href="../../../internals/reference/celery.utils.nodenames.html#celery.utils.default_nodename">[docs]</a><span class="k">def</span> <span class="nf">default_nodename</span><span class="p">(</span><span class="n">hostname</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return the default nodename for this process.&quot;&quot;&quot;</span>
+    <span class="n">name</span><span class="p">,</span> <span class="n">host</span> <span class="o">=</span> <span class="n">nodesplit</span><span class="p">(</span><span class="n">hostname</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">nodename</span><span class="p">(</span><span class="n">name</span> <span class="ow">or</span> <span class="n">NODENAME_DEFAULT</span><span class="p">,</span> <span class="n">host</span> <span class="ow">or</span> <span class="n">gethostname</span><span class="p">())</span></div>
+
+
+<div class="viewcode-block" id="node_format"><a class="viewcode-back" href="../../../internals/reference/celery.utils.nodenames.html#celery.utils.node_format">[docs]</a><span class="k">def</span> <span class="nf">node_format</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="n">extra</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Format worker node name (name@host.com).&quot;&quot;&quot;</span>
+    <span class="n">shortname</span><span class="p">,</span> <span class="n">host</span> <span class="o">=</span> <span class="n">nodesplit</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">host_format</span><span class="p">(</span>
+        <span class="n">s</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">shortname</span> <span class="ow">or</span> <span class="n">NODENAME_DEFAULT</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="n">extra</span><span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">_fmt_process_index</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;0&#39;</span><span class="p">):</span>
+    <span class="kn">from</span> <span class="nn">.log</span> <span class="k">import</span> <span class="n">current_process_index</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">current_process_index</span><span class="p">()</span>
+    <span class="k">return</span> <span class="s1">&#39;</span><span class="si">{0}{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">index</span><span class="p">)</span> <span class="k">if</span> <span class="n">index</span> <span class="k">else</span> <span class="n">default</span>
+
+
+<span class="n">_fmt_process_index_with_prefix</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">_fmt_process_index</span><span class="p">,</span> <span class="s1">&#39;-&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="host_format"><a class="viewcode-back" href="../../../internals/reference/celery.utils.nodenames.html#celery.utils.host_format">[docs]</a><span class="k">def</span> <span class="nf">host_format</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">host</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">extra</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Format host %x abbreviations.&quot;&quot;&quot;</span>
+    <span class="n">host</span> <span class="o">=</span> <span class="n">host</span> <span class="ow">or</span> <span class="n">gethostname</span><span class="p">()</span>
+    <span class="n">hname</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">domain</span> <span class="o">=</span> <span class="n">host</span><span class="o">.</span><span class="n">partition</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">name</span> <span class="ow">or</span> <span class="n">hname</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">({</span>
+        <span class="s1">&#39;h&#39;</span><span class="p">:</span> <span class="n">host</span><span class="p">,</span> <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span> <span class="s1">&#39;d&#39;</span><span class="p">:</span> <span class="n">domain</span><span class="p">,</span>
+        <span class="s1">&#39;i&#39;</span><span class="p">:</span> <span class="n">_fmt_process_index</span><span class="p">,</span> <span class="s1">&#39;I&#39;</span><span class="p">:</span> <span class="n">_fmt_process_index_with_prefix</span><span class="p">,</span>
+    <span class="p">},</span> <span class="o">**</span><span class="n">extra</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">simple_format</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">keys</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,461 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.utils.dispatch.signal &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/utils/dispatch/signal.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.utils.dispatch.signal</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Implementation of the Observer pattern.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="kn">import</span> <span class="nn">weakref</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils.functional</span> <span class="k">import</span> <span class="n">retry_over_time</span>
+
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="n">CDeprecationWarning</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">python_2_unicode_compatible</span><span class="p">,</span> <span class="nb">range</span><span class="p">,</span> <span class="n">text_t</span>
+<span class="kn">from</span> <span class="nn">celery.local</span> <span class="k">import</span> <span class="n">PromiseProxy</span><span class="p">,</span> <span class="n">Proxy</span>
+<span class="kn">from</span> <span class="nn">celery.utils.functional</span> <span class="k">import</span> <span class="n">fun_accepts_kwargs</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">celery.utils.time</span> <span class="k">import</span> <span class="n">humanize_seconds</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">weakref</span> <span class="k">import</span> <span class="n">WeakMethod</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">.weakref_backports</span> <span class="k">import</span> <span class="n">WeakMethod</span>  <span class="c1"># noqa</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Signal&#39;</span><span class="p">,)</span>
+
+<span class="n">PY3</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">3</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_make_id</span><span class="p">(</span><span class="n">target</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">Proxy</span><span class="p">):</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">_get_current_object</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="p">(</span><span class="nb">bytes</span><span class="p">,</span> <span class="n">text_t</span><span class="p">)):</span>
+        <span class="c1"># see Issue #2475</span>
+        <span class="k">return</span> <span class="n">target</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="s1">&#39;__func__&#39;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">target</span><span class="o">.</span><span class="vm">__self__</span><span class="p">),</span> <span class="nb">id</span><span class="p">(</span><span class="n">target</span><span class="o">.</span><span class="vm">__func__</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">id</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
+
+
+<span class="n">NONE_ID</span> <span class="o">=</span> <span class="n">_make_id</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+
+<span class="n">NO_RECEIVERS</span> <span class="o">=</span> <span class="nb">object</span><span class="p">()</span>
+
+<span class="n">RECEIVER_RETRY_ERROR</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">Could not process signal receiver </span><span class="si">%(receiver)s</span><span class="s2">. Retrying </span><span class="si">%(when)s</span><span class="s2">...</span><span class="se">\</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="Signal"><a class="viewcode-back" href="../../../../internals/reference/celery.utils.dispatch.signal.html#celery.events.snapshot.Signal">[docs]</a><span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">Signal</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+    <span class="sd">&quot;&quot;&quot;Create new signal.</span>
+
+<span class="sd">    Keyword Arguments:</span>
+<span class="sd">        providing_args (List): A list of the arguments this signal can pass</span>
+<span class="sd">            along in a :meth:`send` call.</span>
+<span class="sd">        use_caching (bool): Enable receiver cache.</span>
+<span class="sd">        name (str): Name of signal, used for debugging purposes.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1">#: Holds a dictionary of</span>
+    <span class="c1">#: ``{receiverkey (id): weakref(receiver)}`` mappings.</span>
+    <span class="n">receivers</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">providing_args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_caching</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">providing_args</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span>
+            <span class="n">providing_args</span> <span class="k">if</span> <span class="n">providing_args</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">[])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">use_caching</span> <span class="o">=</span> <span class="n">use_caching</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
+        <span class="c1"># For convenience we create empty caches even if they are not used.</span>
+        <span class="c1"># A note about caching: if use_caching is defined, then for each</span>
+        <span class="c1"># distinct sender we cache the receivers that sender has in</span>
+        <span class="c1"># &#39;sender_receivers_cache&#39;.  The cache is cleaned when .connect() or</span>
+        <span class="c1"># .disconnect() is called and populated on .send().</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sender_receivers_cache</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">weakref</span><span class="o">.</span><span class="n">WeakKeyDictionary</span><span class="p">()</span> <span class="k">if</span> <span class="n">use_caching</span> <span class="k">else</span> <span class="p">{}</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dead_receivers</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span> <span class="nf">_connect_proxy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fun</span><span class="p">,</span> <span class="n">sender</span><span class="p">,</span> <span class="n">weak</span><span class="p">,</span> <span class="n">dispatch_uid</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span>
+            <span class="n">fun</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="n">sender</span><span class="o">.</span><span class="n">_get_current_object</span><span class="p">(),</span>
+            <span class="n">weak</span><span class="o">=</span><span class="n">weak</span><span class="p">,</span> <span class="n">dispatch_uid</span><span class="o">=</span><span class="n">dispatch_uid</span><span class="p">,</span>
+        <span class="p">)</span>
+
+<div class="viewcode-block" id="Signal.connect"><a class="viewcode-back" href="../../../../internals/reference/celery.utils.dispatch.signal.html#celery.events.snapshot.Signal.connect">[docs]</a>    <span class="k">def</span> <span class="nf">connect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Connect receiver to sender for signal.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            receiver (Callable): A function or an instance method which is to</span>
+<span class="sd">                receive signals.  Receivers must be hashable objects.</span>
+
+<span class="sd">                if weak is :const:`True`, then receiver must be</span>
+<span class="sd">                weak-referenceable.</span>
+
+<span class="sd">                Receivers must be able to accept keyword arguments.</span>
+
+<span class="sd">                If receivers have a `dispatch_uid` attribute, the receiver will</span>
+<span class="sd">                not be added if another receiver already exists with that</span>
+<span class="sd">                `dispatch_uid`.</span>
+
+<span class="sd">            sender (Any): The sender to which the receiver should respond.</span>
+<span class="sd">                Must either be a Python object, or :const:`None` to</span>
+<span class="sd">                receive events from any sender.</span>
+
+<span class="sd">            weak (bool): Whether to use weak references to the receiver.</span>
+<span class="sd">                By default, the module will attempt to use weak references to</span>
+<span class="sd">                the receiver objects.  If this parameter is false, then strong</span>
+<span class="sd">                references will be used.</span>
+
+<span class="sd">            dispatch_uid (Hashable): An identifier used to uniquely identify a</span>
+<span class="sd">                particular instance of a receiver.  This will usually be a</span>
+<span class="sd">                string, though it may be anything hashable.</span>
+
+<span class="sd">            retry (bool): If the signal receiver raises an exception</span>
+<span class="sd">                (e.g. ConnectionError), the receiver will be retried until it</span>
+<span class="sd">                runs successfully. A strong ref to the receiver will be stored</span>
+<span class="sd">                and the `weak` option will be ignored.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">def</span> <span class="nf">_handle_options</span><span class="p">(</span><span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">weak</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">dispatch_uid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                            <span class="n">retry</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+
+            <span class="k">def</span> <span class="nf">_connect_signal</span><span class="p">(</span><span class="n">fun</span><span class="p">):</span>
+
+                <span class="n">options</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;dispatch_uid&#39;</span><span class="p">:</span> <span class="n">dispatch_uid</span><span class="p">,</span>
+                           <span class="s1">&#39;weak&#39;</span><span class="p">:</span> <span class="n">weak</span><span class="p">}</span>
+
+                <span class="k">def</span> <span class="nf">_retry_receiver</span><span class="p">(</span><span class="n">retry_fun</span><span class="p">):</span>
+
+                    <span class="k">def</span> <span class="nf">_try_receiver_over_time</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+                        <span class="k">def</span> <span class="nf">on_error</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">intervals</span><span class="p">,</span> <span class="n">retries</span><span class="p">):</span>
+                            <span class="n">interval</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">intervals</span><span class="p">)</span>
+                            <span class="n">err_msg</span> <span class="o">=</span> <span class="n">RECEIVER_RETRY_ERROR</span> <span class="o">%</span> \
+                                <span class="p">{</span><span class="s1">&#39;receiver&#39;</span><span class="p">:</span> <span class="n">retry_fun</span><span class="p">,</span>
+                                 <span class="s1">&#39;when&#39;</span><span class="p">:</span> <span class="n">humanize_seconds</span><span class="p">(</span><span class="n">interval</span><span class="p">,</span> <span class="s1">&#39;in&#39;</span><span class="p">,</span> <span class="s1">&#39; &#39;</span><span class="p">)}</span>
+                            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">err_msg</span><span class="p">)</span>
+                            <span class="k">return</span> <span class="n">interval</span>
+
+                        <span class="k">return</span> <span class="n">retry_over_time</span><span class="p">(</span><span class="n">retry_fun</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span>
+                                               <span class="n">kwargs</span><span class="p">,</span> <span class="n">on_error</span><span class="p">)</span>
+
+                    <span class="k">return</span> <span class="n">_try_receiver_over_time</span>
+
+                <span class="k">if</span> <span class="n">retry</span><span class="p">:</span>
+                    <span class="n">options</span><span class="p">[</span><span class="s1">&#39;weak&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">dispatch_uid</span><span class="p">:</span>
+                        <span class="c1"># if there&#39;s no dispatch_uid then we need to set the</span>
+                        <span class="c1"># dispatch uid to the original func id so we can look</span>
+                        <span class="c1"># it up later with the original func id</span>
+                        <span class="n">options</span><span class="p">[</span><span class="s1">&#39;dispatch_uid&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_make_id</span><span class="p">(</span><span class="n">fun</span><span class="p">)</span>
+                    <span class="n">fun</span> <span class="o">=</span> <span class="n">_retry_receiver</span><span class="p">(</span><span class="n">fun</span><span class="p">)</span>
+
+                <span class="bp">self</span><span class="o">.</span><span class="n">_connect_signal</span><span class="p">(</span><span class="n">fun</span><span class="p">,</span> <span class="n">sender</span><span class="p">,</span> <span class="n">options</span><span class="p">[</span><span class="s1">&#39;weak&#39;</span><span class="p">],</span>
+                                     <span class="n">options</span><span class="p">[</span><span class="s1">&#39;dispatch_uid&#39;</span><span class="p">])</span>
+                <span class="k">return</span> <span class="n">fun</span>
+
+            <span class="k">return</span> <span class="n">_connect_signal</span>
+
+        <span class="k">if</span> <span class="n">args</span> <span class="ow">and</span> <span class="n">callable</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
+            <span class="k">return</span> <span class="n">_handle_options</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">_handle_options</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_connect_signal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">receiver</span><span class="p">,</span> <span class="n">sender</span><span class="p">,</span> <span class="n">weak</span><span class="p">,</span> <span class="n">dispatch_uid</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="n">callable</span><span class="p">(</span><span class="n">receiver</span><span class="p">),</span> <span class="s1">&#39;Signal receivers must be callable&#39;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">fun_accepts_kwargs</span><span class="p">(</span><span class="n">receiver</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s1">&#39;Signal receiver must accept keyword arguments.&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sender</span><span class="p">,</span> <span class="n">PromiseProxy</span><span class="p">):</span>
+            <span class="n">sender</span><span class="o">.</span><span class="n">__then__</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_connect_proxy</span><span class="p">,</span> <span class="n">receiver</span><span class="p">,</span> <span class="n">sender</span><span class="p">,</span> <span class="n">weak</span><span class="p">,</span> <span class="n">dispatch_uid</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="n">receiver</span>
+
+        <span class="k">if</span> <span class="n">dispatch_uid</span><span class="p">:</span>
+            <span class="n">lookup_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">dispatch_uid</span><span class="p">,</span> <span class="n">_make_id</span><span class="p">(</span><span class="n">sender</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">lookup_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">_make_id</span><span class="p">(</span><span class="n">receiver</span><span class="p">),</span> <span class="n">_make_id</span><span class="p">(</span><span class="n">sender</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">weak</span><span class="p">:</span>
+            <span class="n">ref</span> <span class="o">=</span> <span class="n">weakref</span><span class="o">.</span><span class="n">ref</span>
+            <span class="n">receiver_object</span> <span class="o">=</span> <span class="n">receiver</span>
+            <span class="c1"># Check for bound methods</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">receiver</span><span class="o">.</span><span class="vm">__self__</span>
+                <span class="n">receiver</span><span class="o">.</span><span class="vm">__func__</span>
+            <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                <span class="k">pass</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">ref</span> <span class="o">=</span> <span class="n">WeakMethod</span>
+                <span class="n">receiver_object</span> <span class="o">=</span> <span class="n">receiver</span><span class="o">.</span><span class="vm">__self__</span>
+            <span class="k">if</span> <span class="n">PY3</span><span class="p">:</span>
+                <span class="n">receiver</span> <span class="o">=</span> <span class="n">ref</span><span class="p">(</span><span class="n">receiver</span><span class="p">)</span>
+                <span class="n">weakref</span><span class="o">.</span><span class="n">finalize</span><span class="p">(</span><span class="n">receiver_object</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_remove_receiver</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">receiver</span> <span class="o">=</span> <span class="n">ref</span><span class="p">(</span><span class="n">receiver</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_remove_receiver</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">lock</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_clear_dead_receivers</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">r_key</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">r_key</span> <span class="o">==</span> <span class="n">lookup_key</span><span class="p">:</span>
+                    <span class="k">break</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">lookup_key</span><span class="p">,</span> <span class="n">receiver</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sender_receivers_cache</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">receiver</span>
+
+<div class="viewcode-block" id="Signal.disconnect"><a class="viewcode-back" href="../../../../internals/reference/celery.utils.dispatch.signal.html#celery.events.snapshot.Signal.disconnect">[docs]</a>    <span class="k">def</span> <span class="nf">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">receiver</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">weak</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">dispatch_uid</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Disconnect receiver from sender for signal.</span>
+
+<span class="sd">        If weak references are used, disconnect needn&#39;t be called.</span>
+<span class="sd">        The receiver will be removed from dispatch automatically.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            receiver (Callable): The registered receiver to disconnect.</span>
+<span class="sd">                May be none if `dispatch_uid` is specified.</span>
+
+<span class="sd">            sender (Any): The registered sender to disconnect.</span>
+
+<span class="sd">            weak (bool): The weakref state to disconnect.</span>
+
+<span class="sd">            dispatch_uid (Hashable): The unique identifier of the receiver</span>
+<span class="sd">                to disconnect.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">weak</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="s1">&#39;Passing `weak` to disconnect has no effect.&#39;</span><span class="p">,</span>
+                <span class="n">CDeprecationWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">dispatch_uid</span><span class="p">:</span>
+            <span class="n">lookup_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">dispatch_uid</span><span class="p">,</span> <span class="n">_make_id</span><span class="p">(</span><span class="n">sender</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">lookup_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">_make_id</span><span class="p">(</span><span class="n">receiver</span><span class="p">),</span> <span class="n">_make_id</span><span class="p">(</span><span class="n">sender</span><span class="p">))</span>
+
+        <span class="n">disconnected</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">lock</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_clear_dead_receivers</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">receivers</span><span class="p">)):</span>
+                <span class="p">(</span><span class="n">r_key</span><span class="p">,</span> <span class="n">_</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span><span class="p">[</span><span class="n">index</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">r_key</span> <span class="o">==</span> <span class="n">lookup_key</span><span class="p">:</span>
+                    <span class="n">disconnected</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span><span class="p">[</span><span class="n">index</span><span class="p">]</span>
+                    <span class="k">break</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sender_receivers_cache</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">disconnected</span></div>
+
+<div class="viewcode-block" id="Signal.has_listeners"><a class="viewcode-back" href="../../../../internals/reference/celery.utils.dispatch.signal.html#celery.events.snapshot.Signal.has_listeners">[docs]</a>    <span class="k">def</span> <span class="nf">has_listeners</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">bool</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_live_receivers</span><span class="p">(</span><span class="n">sender</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="Signal.send"><a class="viewcode-back" href="../../../../internals/reference/celery.utils.dispatch.signal.html#celery.events.snapshot.Signal.send">[docs]</a>    <span class="k">def</span> <span class="nf">send</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sender</span><span class="p">,</span> <span class="o">**</span><span class="n">named</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Send signal from sender to all connected receivers.</span>
+
+<span class="sd">        If any receiver raises an error, the error propagates back through</span>
+<span class="sd">        send, terminating the dispatch loop, so it is quite possible to not</span>
+<span class="sd">        have all receivers called if a raises an error.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            sender (Any): The sender of the signal.</span>
+<span class="sd">                Either a specific object or :const:`None`.</span>
+<span class="sd">            **named (Any): Named arguments which will be passed to receivers.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            List: of tuple pairs: `[(receiver, response), … ]`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">responses</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span> <span class="ow">or</span> \
+                <span class="bp">self</span><span class="o">.</span><span class="n">sender_receivers_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">sender</span><span class="p">)</span> <span class="ow">is</span> <span class="n">NO_RECEIVERS</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">responses</span>
+
+        <span class="k">for</span> <span class="n">receiver</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_live_receivers</span><span class="p">(</span><span class="n">sender</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">response</span> <span class="o">=</span> <span class="n">receiver</span><span class="p">(</span><span class="n">signal</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="n">sender</span><span class="p">,</span> <span class="o">**</span><span class="n">named</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="s1">&#39;__traceback__&#39;</span><span class="p">):</span>
+                    <span class="n">exc</span><span class="o">.</span><span class="n">__traceback__</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()[</span><span class="mi">2</span><span class="p">]</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span>
+                    <span class="s1">&#39;Signal handler </span><span class="si">%r</span><span class="s1"> raised: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">receiver</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+                <span class="n">responses</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">receiver</span><span class="p">,</span> <span class="n">exc</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">responses</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">receiver</span><span class="p">,</span> <span class="n">response</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">responses</span></div>
+    <span class="n">send_robust</span> <span class="o">=</span> <span class="n">send</span>  <span class="c1"># Compat with Django interface.</span>
+
+    <span class="k">def</span> <span class="nf">_clear_dead_receivers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Warning: caller is assumed to hold self.lock</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dead_receivers</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_dead_receivers</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">new_receivers</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">weakref</span><span class="o">.</span><span class="n">ReferenceType</span><span class="p">)</span> <span class="ow">and</span> <span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">]()</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">new_receivers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span> <span class="o">=</span> <span class="n">new_receivers</span>
+
+    <span class="k">def</span> <span class="nf">_live_receivers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sender</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Filter sequence of receivers to get resolved, live receivers.</span>
+
+<span class="sd">        This checks for weak references and resolves them, then returning only</span>
+<span class="sd">        live receivers.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">receivers</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_caching</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dead_receivers</span><span class="p">:</span>
+            <span class="n">receivers</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sender_receivers_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">sender</span><span class="p">)</span>
+            <span class="c1"># We could end up here with NO_RECEIVERS even if we do check this</span>
+            <span class="c1"># case in .send() prior to calling _Live_receivers()  due to</span>
+            <span class="c1"># concurrent .send() call.</span>
+            <span class="k">if</span> <span class="n">receivers</span> <span class="ow">is</span> <span class="n">NO_RECEIVERS</span><span class="p">:</span>
+                <span class="k">return</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">receivers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">lock</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_clear_dead_receivers</span><span class="p">()</span>
+                <span class="n">senderkey</span> <span class="o">=</span> <span class="n">_make_id</span><span class="p">(</span><span class="n">sender</span><span class="p">)</span>
+                <span class="n">receivers</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="k">for</span> <span class="p">(</span><span class="n">receiverkey</span><span class="p">,</span> <span class="n">r_senderkey</span><span class="p">),</span> <span class="n">receiver</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">receivers</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">r_senderkey</span> <span class="o">==</span> <span class="n">NONE_ID</span> <span class="ow">or</span> <span class="n">r_senderkey</span> <span class="o">==</span> <span class="n">senderkey</span><span class="p">:</span>
+                        <span class="n">receivers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">receiver</span><span class="p">)</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_caching</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">receivers</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">sender_receivers_cache</span><span class="p">[</span><span class="n">sender</span><span class="p">]</span> <span class="o">=</span> <span class="n">NO_RECEIVERS</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="c1"># Note: we must cache the weakref versions.</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">sender_receivers_cache</span><span class="p">[</span><span class="n">sender</span><span class="p">]</span> <span class="o">=</span> <span class="n">receivers</span>
+        <span class="n">non_weak_receivers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">receiver</span> <span class="ow">in</span> <span class="n">receivers</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">receiver</span><span class="p">,</span> <span class="n">weakref</span><span class="o">.</span><span class="n">ReferenceType</span><span class="p">):</span>
+                <span class="c1"># Dereference the weak reference.</span>
+                <span class="n">receiver</span> <span class="o">=</span> <span class="n">receiver</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">receiver</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">non_weak_receivers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">receiver</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">non_weak_receivers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">receiver</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">non_weak_receivers</span>
+
+    <span class="k">def</span> <span class="nf">_remove_receiver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">receiver</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Remove dead receivers from connections.&quot;&quot;&quot;</span>
+        <span class="c1"># Mark that the self..receivers first has dead weakrefs. If so,</span>
+        <span class="c1"># we will clean those up in connect, disconnect and _live_receivers</span>
+        <span class="c1"># while holding self.lock.  Note that doing the cleanup here isn&#39;t a</span>
+        <span class="c1"># good idea, _remove_receiver() will be called as a side effect of</span>
+        <span class="c1"># garbage collection, and so the call can happen wh ile we are already</span>
+        <span class="c1"># holding self.lock.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dead_receivers</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;``repr(signal)``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;&lt;</span><span class="si">{0}</span><span class="s1">: </span><span class="si">{1}</span><span class="s1"> providing_args=</span><span class="si">{2!r}</span><span class="s1">&gt;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">providing_args</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;``str(signal)``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">repr</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../../index.html">
+              <img class="logo" src="../../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

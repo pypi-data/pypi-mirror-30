@@ -1,0 +1,279 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.contrib.abortable &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/contrib/abortable.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.contrib.abortable</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Abortable Tasks.</span>
+
+<span class="sd">Abortable tasks overview</span>
+<span class="sd">=========================</span>
+
+<span class="sd">For long-running :class:`Task`&#39;s, it can be desirable to support</span>
+<span class="sd">aborting during execution.  Of course, these tasks should be built to</span>
+<span class="sd">support abortion specifically.</span>
+
+<span class="sd">The :class:`AbortableTask` serves as a base class for all :class:`Task`</span>
+<span class="sd">objects that should support abortion by producers.</span>
+
+<span class="sd">* Producers may invoke the :meth:`abort` method on</span>
+<span class="sd">  :class:`AbortableAsyncResult` instances, to request abortion.</span>
+
+<span class="sd">* Consumers (workers) should periodically check (and honor!) the</span>
+<span class="sd">  :meth:`is_aborted` method at controlled points in their task&#39;s</span>
+<span class="sd">  :meth:`run` method.  The more often, the better.</span>
+
+<span class="sd">The necessary intermediate communication is dealt with by the</span>
+<span class="sd">:class:`AbortableTask` implementation.</span>
+
+<span class="sd">Usage example</span>
+<span class="sd">-------------</span>
+
+<span class="sd">In the consumer:</span>
+
+<span class="sd">.. code-block:: python</span>
+
+<span class="sd">    from __future__ import absolute_import</span>
+
+<span class="sd">    from celery.contrib.abortable import AbortableTask</span>
+<span class="sd">    from celery.utils.log import get_task_logger</span>
+
+<span class="sd">    from proj.celery import app</span>
+
+<span class="sd">    logger = get_logger(__name__)</span>
+
+<span class="sd">    @app.task(bind=True, base=AbortableTask)</span>
+<span class="sd">    def long_running_task(self):</span>
+<span class="sd">        results = []</span>
+<span class="sd">        for i in range(100):</span>
+<span class="sd">            # check after every 5 iterations...</span>
+<span class="sd">            # (or alternatively, check when some timer is due)</span>
+<span class="sd">            if not i % 5:</span>
+<span class="sd">                if self.is_aborted():</span>
+<span class="sd">                    # respect aborted state, and terminate gracefully.</span>
+<span class="sd">                    logger.warning(&#39;Task aborted&#39;)</span>
+<span class="sd">                    return</span>
+<span class="sd">                value = do_something_expensive(i)</span>
+<span class="sd">                results.append(y)</span>
+<span class="sd">        logger.info(&#39;Task complete&#39;)</span>
+<span class="sd">        return results</span>
+
+<span class="sd">In the producer:</span>
+
+<span class="sd">.. code-block:: python</span>
+
+<span class="sd">    from __future__ import absolute_import</span>
+
+<span class="sd">    import time</span>
+
+<span class="sd">    from proj.tasks import MyLongRunningTask</span>
+
+<span class="sd">    def myview(request):</span>
+<span class="sd">        # result is of type AbortableAsyncResult</span>
+<span class="sd">        result = long_running_task.delay()</span>
+
+<span class="sd">        # abort the task after 10 seconds</span>
+<span class="sd">        time.sleep(10)</span>
+<span class="sd">        result.abort()</span>
+
+<span class="sd">After the `result.abort()` call, the task execution isn&#39;t</span>
+<span class="sd">aborted immediately.  In fact, it&#39;s not guaranteed to abort at all.</span>
+<span class="sd">Keep checking `result.state` status, or call `result.get(timeout=)` to</span>
+<span class="sd">have it block until the task is finished.</span>
+
+<span class="sd">.. note::</span>
+
+<span class="sd">   In order to abort tasks, there needs to be communication between the</span>
+<span class="sd">   producer and the consumer.  This is currently implemented through the</span>
+<span class="sd">   database backend.  Therefore, this class will only work with the</span>
+<span class="sd">   database backends.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">Task</span>
+<span class="kn">from</span> <span class="nn">celery.result</span> <span class="k">import</span> <span class="n">AsyncResult</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;AbortableAsyncResult&#39;</span><span class="p">,</span> <span class="s1">&#39;AbortableTask&#39;</span><span class="p">)</span>
+
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Task States</span>
+<span class="sd">-----------</span>
+
+<span class="sd">.. state:: ABORTED</span>
+
+<span class="sd">ABORTED</span>
+<span class="sd">~~~~~~~</span>
+
+<span class="sd">Task is aborted (typically by the producer) and should be</span>
+<span class="sd">aborted as soon as possible.</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="n">ABORTED</span> <span class="o">=</span> <span class="s1">&#39;ABORTED&#39;</span>
+
+
+<div class="viewcode-block" id="AbortableAsyncResult"><a class="viewcode-back" href="../../../reference/celery.contrib.abortable.html#celery.contrib.abortable.AbortableAsyncResult">[docs]</a><span class="k">class</span> <span class="nc">AbortableAsyncResult</span><span class="p">(</span><span class="n">AsyncResult</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Represents an abortable result.</span>
+
+<span class="sd">    Specifically, this gives the `AsyncResult` a :meth:`abort()` method,</span>
+<span class="sd">    that sets the state of the underlying Task to `&#39;ABORTED&#39;`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="AbortableAsyncResult.is_aborted"><a class="viewcode-back" href="../../../reference/celery.contrib.abortable.html#celery.contrib.abortable.AbortableAsyncResult.is_aborted">[docs]</a>    <span class="k">def</span> <span class="nf">is_aborted</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return :const:`True` if the task is (being) aborted.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span> <span class="o">==</span> <span class="n">ABORTED</span></div>
+
+<div class="viewcode-block" id="AbortableAsyncResult.abort"><a class="viewcode-back" href="../../../reference/celery.contrib.abortable.html#celery.contrib.abortable.AbortableAsyncResult.abort">[docs]</a>    <span class="k">def</span> <span class="nf">abort</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the state of the task to :const:`ABORTED`.</span>
+
+<span class="sd">        Abortable tasks monitor their state at regular intervals and</span>
+<span class="sd">        terminate execution if so.</span>
+
+<span class="sd">        Warning:</span>
+<span class="sd">            Be aware that invoking this method does not guarantee when the</span>
+<span class="sd">            task will be aborted (or even if the task will be aborted at all).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># TODO: store_result requires all four arguments to be set,</span>
+        <span class="c1"># but only state should be updated here</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">backend</span><span class="o">.</span><span class="n">store_result</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">result</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                                         <span class="n">state</span><span class="o">=</span><span class="n">ABORTED</span><span class="p">,</span> <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="AbortableTask"><a class="viewcode-back" href="../../../reference/celery.contrib.abortable.html#celery.contrib.abortable.AbortableTask">[docs]</a><span class="k">class</span> <span class="nc">AbortableTask</span><span class="p">(</span><span class="n">Task</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Task that can be aborted.</span>
+
+<span class="sd">    This serves as a base class for all :class:`Task`&#39;s</span>
+<span class="sd">    that support aborting during execution.</span>
+
+<span class="sd">    All subclasses of :class:`AbortableTask` must call the</span>
+<span class="sd">    :meth:`is_aborted` method periodically and act accordingly when</span>
+<span class="sd">    the call evaluates to :const:`True`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">abstract</span> <span class="o">=</span> <span class="kc">True</span>
+
+<div class="viewcode-block" id="AbortableTask.AsyncResult"><a class="viewcode-back" href="../../../reference/celery.contrib.abortable.html#celery.contrib.abortable.AbortableTask.AsyncResult">[docs]</a>    <span class="k">def</span> <span class="nf">AsyncResult</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the accompanying AbortableAsyncResult instance.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">AbortableAsyncResult</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">backend</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AbortableTask.is_aborted"><a class="viewcode-back" href="../../../reference/celery.contrib.abortable.html#celery.contrib.abortable.AbortableTask.is_aborted">[docs]</a>    <span class="k">def</span> <span class="nf">is_aborted</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return true if task is aborted.</span>
+
+<span class="sd">        Checks against the backend whether this</span>
+<span class="sd">        :class:`AbortableAsyncResult` is :const:`ABORTED`.</span>
+
+<span class="sd">        Always return :const:`False` in case the `task_id` parameter</span>
+<span class="sd">        refers to a regular (non-abortable) :class:`Task`.</span>
+
+<span class="sd">        Be aware that invoking this method will cause a hit in the</span>
+<span class="sd">        backend (for example a database query), so find a good balance</span>
+<span class="sd">        between calling it regularly (for responsiveness), but not too</span>
+<span class="sd">        often (for performance).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">task_id</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;task_id&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">AsyncResult</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">AbortableAsyncResult</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">result</span><span class="o">.</span><span class="n">is_aborted</span><span class="p">()</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

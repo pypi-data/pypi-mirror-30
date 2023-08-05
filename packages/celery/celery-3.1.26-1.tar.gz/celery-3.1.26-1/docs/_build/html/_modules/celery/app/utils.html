@@ -1,0 +1,497 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.app.utils &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/app/utils.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.app.utils</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;App utilities: Compat settings, bug-report tool, pickling apps.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">platform</span> <span class="k">as</span> <span class="nn">_platform</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">Mapping</span><span class="p">,</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">copy</span> <span class="k">import</span> <span class="n">deepcopy</span>
+<span class="kn">from</span> <span class="nn">types</span> <span class="k">import</span> <span class="n">ModuleType</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils.url</span> <span class="k">import</span> <span class="n">maybe_sanitize_url</span>
+
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="n">ImproperlyConfigured</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="n">keys</span><span class="p">,</span> <span class="n">string_t</span><span class="p">,</span> <span class="n">values</span>
+<span class="kn">from</span> <span class="nn">celery.platforms</span> <span class="k">import</span> <span class="n">pyimplementation</span>
+<span class="kn">from</span> <span class="nn">celery.utils.collections</span> <span class="k">import</span> <span class="n">ConfigurationView</span>
+<span class="kn">from</span> <span class="nn">celery.utils.imports</span> <span class="k">import</span> <span class="n">import_from_cwd</span><span class="p">,</span> <span class="n">qualname</span><span class="p">,</span> <span class="n">symbol_by_name</span>
+<span class="kn">from</span> <span class="nn">celery.utils.text</span> <span class="k">import</span> <span class="n">pretty</span>
+
+<span class="kn">from</span> <span class="nn">.defaults</span> <span class="k">import</span> <span class="p">(</span><span class="n">_OLD_DEFAULTS</span><span class="p">,</span> <span class="n">_OLD_SETTING_KEYS</span><span class="p">,</span> <span class="n">_TO_NEW_KEY</span><span class="p">,</span>
+                       <span class="n">_TO_OLD_KEY</span><span class="p">,</span> <span class="n">DEFAULTS</span><span class="p">,</span> <span class="n">SETTING_KEYS</span><span class="p">,</span> <span class="n">find</span><span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s1">&#39;Settings&#39;</span><span class="p">,</span> <span class="s1">&#39;appstr&#39;</span><span class="p">,</span> <span class="s1">&#39;bugreport&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;filter_hidden_settings&#39;</span><span class="p">,</span> <span class="s1">&#39;find_app&#39;</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1">#: Format used to generate bug-report information.</span>
+<span class="n">BUGREPORT_INFO</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">software -&gt; celery:</span><span class="si">{celery_v}</span><span class="s2"> kombu:</span><span class="si">{kombu_v}</span><span class="s2"> py:</span><span class="si">{py_v}</span><span class="s2"></span>
+<span class="s2">            billiard:</span><span class="si">{billiard_v}</span><span class="s2"> </span><span class="si">{driver_v}</span><span class="s2"></span>
+<span class="s2">platform -&gt; system:</span><span class="si">{system}</span><span class="s2"> arch:</span><span class="si">{arch}</span><span class="s2"> imp:</span><span class="si">{py_i}</span><span class="s2"></span>
+<span class="s2">loader   -&gt; </span><span class="si">{loader}</span><span class="s2"></span>
+<span class="s2">settings -&gt; transport:</span><span class="si">{transport}</span><span class="s2"> results:</span><span class="si">{results}</span><span class="s2"></span>
+
+<span class="si">{human_settings}</span><span class="s2"></span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">HIDDEN_SETTINGS</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+    <span class="s1">&#39;API|TOKEN|KEY|SECRET|PASS|PROFANITIES_LIST|SIGNATURE|DATABASE&#39;</span><span class="p">,</span>
+    <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">E_MIX_OLD_INTO_NEW</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+
+<span class="s2">Cannot mix new and old setting keys, please rename the</span>
+<span class="s2">following settings to the new format:</span>
+
+<span class="si">{renames}</span><span class="s2"></span>
+
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">E_MIX_NEW_INTO_OLD</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+
+<span class="s2">Cannot mix new setting names with old setting names, please</span>
+<span class="s2">rename the following settings to use the old format:</span>
+
+<span class="si">{renames}</span><span class="s2"></span>
+
+<span class="s2">Or change all of the settings to use the new format :)</span>
+
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">FMT_REPLACE_SETTING</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{replace:&lt;36}</span><span class="s1"> -&gt; </span><span class="si">{with_}</span><span class="s1">&#39;</span>
+
+
+<div class="viewcode-block" id="appstr"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.appstr">[docs]</a><span class="k">def</span> <span class="nf">appstr</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;String used in __repr__ etc, to id app instances.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1"> at </span><span class="si">{1:#x}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">main</span> <span class="ow">or</span> <span class="s1">&#39;__main__&#39;</span><span class="p">,</span> <span class="nb">id</span><span class="p">(</span><span class="n">app</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="Settings"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings">[docs]</a><span class="k">class</span> <span class="nc">Settings</span><span class="p">(</span><span class="n">ConfigurationView</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Celery settings object.</span>
+
+<span class="sd">    .. seealso:</span>
+
+<span class="sd">        :ref:`configuration` for a full list of configuration keys.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">broker_read_url</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_BROKER_READ_URL&#39;</span><span class="p">)</span> <span class="ow">or</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;broker_read_url&#39;</span><span class="p">)</span> <span class="ow">or</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">broker_url</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">broker_write_url</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_BROKER_WRITE_URL&#39;</span><span class="p">)</span> <span class="ow">or</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;broker_write_url&#39;</span><span class="p">)</span> <span class="ow">or</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">broker_url</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">broker_url</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_BROKER_URL&#39;</span><span class="p">)</span> <span class="ow">or</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">first</span><span class="p">(</span><span class="s1">&#39;broker_url&#39;</span><span class="p">,</span> <span class="s1">&#39;broker_host&#39;</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">result_backend</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_RESULT_BACKEND&#39;</span><span class="p">)</span> <span class="ow">or</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CELERY_RESULT_BACKEND&#39;</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">task_default_exchange</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">first</span><span class="p">(</span>
+            <span class="s1">&#39;task_default_exchange&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;task_default_queue&#39;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">task_default_routing_key</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">first</span><span class="p">(</span>
+            <span class="s1">&#39;task_default_routing_key&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;task_default_queue&#39;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">timezone</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># this way we also support django&#39;s time zone.</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">first</span><span class="p">(</span><span class="s1">&#39;timezone&#39;</span><span class="p">,</span> <span class="s1">&#39;time_zone&#39;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Settings.without_defaults"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.without_defaults">[docs]</a>    <span class="k">def</span> <span class="nf">without_defaults</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the current configuration, but without defaults.&quot;&quot;&quot;</span>
+        <span class="c1"># the last stash is the default settings, so just skip that</span>
+        <span class="k">return</span> <span class="n">Settings</span><span class="p">({},</span> <span class="bp">self</span><span class="o">.</span><span class="n">maps</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span></div>
+
+<div class="viewcode-block" id="Settings.value_set_for"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.value_set_for">[docs]</a>    <span class="k">def</span> <span class="nf">value_set_for</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">without_defaults</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Settings.find_option"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.find_option">[docs]</a>    <span class="k">def</span> <span class="nf">find_option</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Search for option by name.</span>
+
+<span class="sd">        Example:</span>
+<span class="sd">            &gt;&gt;&gt; from proj.celery import app</span>
+<span class="sd">            &gt;&gt;&gt; app.conf.find_option(&#39;disable_rate_limits&#39;)</span>
+<span class="sd">            (&#39;worker&#39;, &#39;prefetch_multiplier&#39;,</span>
+<span class="sd">             &lt;Option: type-&gt;bool default-&gt;False&gt;))</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            name (str): Name of option, cannot be partial.</span>
+<span class="sd">            namespace (str): Preferred name-space (``None`` by default).</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple: of ``(namespace, key, type)``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">find</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">namespace</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Settings.find_value_for_key"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.find_value_for_key">[docs]</a>    <span class="k">def</span> <span class="nf">find_value_for_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="s1">&#39;celery&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Shortcut to ``get_by_parts(*find_option(name)[:-1])``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_by_parts</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">find_option</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">namespace</span><span class="p">)[:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span></div>
+
+<div class="viewcode-block" id="Settings.get_by_parts"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.get_by_parts">[docs]</a>    <span class="k">def</span> <span class="nf">get_by_parts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">parts</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the current value for setting specified as a path.</span>
+
+<span class="sd">        Example:</span>
+<span class="sd">            &gt;&gt;&gt; from proj.celery import app</span>
+<span class="sd">            &gt;&gt;&gt; app.conf.get_by_parts(&#39;worker&#39;, &#39;disable_rate_limits&#39;)</span>
+<span class="sd">            False</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="p">[</span><span class="s1">&#39;_&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">part</span> <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">parts</span> <span class="k">if</span> <span class="n">part</span><span class="p">)]</span></div>
+
+<div class="viewcode-block" id="Settings.finalize"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.finalize">[docs]</a>    <span class="k">def</span> <span class="nf">finalize</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># See PendingConfiguration in celery/app/base.py</span>
+        <span class="c1"># first access will read actual configuration.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">[</span><span class="s1">&#39;__bogus__&#39;</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">return</span> <span class="bp">self</span></div>
+
+<div class="viewcode-block" id="Settings.table"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.table">[docs]</a>    <span class="k">def</span> <span class="nf">table</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">with_defaults</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">censored</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="n">filt</span> <span class="o">=</span> <span class="n">filter_hidden_settings</span> <span class="k">if</span> <span class="n">censored</span> <span class="k">else</span> <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">v</span>
+        <span class="n">dict_members</span> <span class="o">=</span> <span class="nb">dir</span><span class="p">(</span><span class="nb">dict</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">finalize</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">filt</span><span class="p">({</span>
+            <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span>
+                <span class="bp">self</span> <span class="k">if</span> <span class="n">with_defaults</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">without_defaults</span><span class="p">())</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">dict_members</span>
+        <span class="p">})</span></div>
+
+<div class="viewcode-block" id="Settings.humanize"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.Settings.humanize">[docs]</a>    <span class="k">def</span> <span class="nf">humanize</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">with_defaults</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">censored</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a human readable text showing configuration changes.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">: </span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">pretty</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mi">50</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">table</span><span class="p">(</span><span class="n">with_defaults</span><span class="p">,</span> <span class="n">censored</span><span class="p">)))</span></div></div>
+
+
+<span class="k">def</span> <span class="nf">_new_key_to_old</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">convert</span><span class="o">=</span><span class="n">_TO_OLD_KEY</span><span class="o">.</span><span class="n">get</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">convert</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_old_key_to_new</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">convert</span><span class="o">=</span><span class="n">_TO_NEW_KEY</span><span class="o">.</span><span class="n">get</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">convert</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+
+
+<span class="n">_settings_info_t</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;settings_info_t&#39;</span><span class="p">,</span> <span class="p">(</span>
+    <span class="s1">&#39;defaults&#39;</span><span class="p">,</span> <span class="s1">&#39;convert&#39;</span><span class="p">,</span> <span class="s1">&#39;key_t&#39;</span><span class="p">,</span> <span class="s1">&#39;mix_error&#39;</span><span class="p">,</span>
+<span class="p">))</span>
+
+<span class="n">_settings_info</span> <span class="o">=</span> <span class="n">_settings_info_t</span><span class="p">(</span>
+    <span class="n">DEFAULTS</span><span class="p">,</span> <span class="n">_TO_NEW_KEY</span><span class="p">,</span> <span class="n">_old_key_to_new</span><span class="p">,</span> <span class="n">E_MIX_OLD_INTO_NEW</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">_old_settings_info</span> <span class="o">=</span> <span class="n">_settings_info_t</span><span class="p">(</span>
+    <span class="n">_OLD_DEFAULTS</span><span class="p">,</span> <span class="n">_TO_OLD_KEY</span><span class="p">,</span> <span class="n">_new_key_to_old</span><span class="p">,</span> <span class="n">E_MIX_NEW_INTO_OLD</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">detect_settings</span><span class="p">(</span><span class="n">conf</span><span class="p">,</span> <span class="n">preconf</span><span class="o">=</span><span class="p">{},</span> <span class="n">ignore_keys</span><span class="o">=</span><span class="nb">set</span><span class="p">(),</span> <span class="n">prefix</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">all_keys</span><span class="o">=</span><span class="n">SETTING_KEYS</span><span class="p">,</span> <span class="n">old_keys</span><span class="o">=</span><span class="n">_OLD_SETTING_KEYS</span><span class="p">):</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="n">conf</span>
+    <span class="k">if</span> <span class="n">conf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">source</span><span class="p">,</span> <span class="n">conf</span> <span class="o">=</span> <span class="n">preconf</span><span class="p">,</span> <span class="p">{}</span>
+    <span class="n">have</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">keys</span><span class="p">(</span><span class="n">source</span><span class="p">))</span> <span class="o">-</span> <span class="n">ignore_keys</span>
+    <span class="n">is_in_new</span> <span class="o">=</span> <span class="n">have</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">all_keys</span><span class="p">)</span>
+    <span class="n">is_in_old</span> <span class="o">=</span> <span class="n">have</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">old_keys</span><span class="p">)</span>
+
+    <span class="n">info</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">is_in_new</span><span class="p">:</span>
+        <span class="c1"># have new setting names</span>
+        <span class="n">info</span><span class="p">,</span> <span class="n">left</span> <span class="o">=</span> <span class="n">_settings_info</span><span class="p">,</span> <span class="n">is_in_old</span>
+        <span class="k">if</span> <span class="n">is_in_old</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">is_in_old</span><span class="p">)</span> <span class="o">&gt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">is_in_new</span><span class="p">):</span>
+            <span class="c1"># Majority of the settings are old.</span>
+            <span class="n">info</span><span class="p">,</span> <span class="n">left</span> <span class="o">=</span> <span class="n">_old_settings_info</span><span class="p">,</span> <span class="n">is_in_new</span>
+    <span class="k">if</span> <span class="n">is_in_old</span><span class="p">:</span>
+        <span class="c1"># have old setting names, or a majority of the names are old.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">info</span><span class="p">:</span>
+            <span class="n">info</span><span class="p">,</span> <span class="n">left</span> <span class="o">=</span> <span class="n">_old_settings_info</span><span class="p">,</span> <span class="n">is_in_new</span>
+        <span class="k">if</span> <span class="n">is_in_new</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">is_in_new</span><span class="p">)</span> <span class="o">&gt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">is_in_old</span><span class="p">):</span>
+            <span class="c1"># Majority of the settings are new</span>
+            <span class="n">info</span><span class="p">,</span> <span class="n">left</span> <span class="o">=</span> <span class="n">_settings_info</span><span class="p">,</span> <span class="n">is_in_old</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># no settings, just use new format.</span>
+        <span class="n">info</span><span class="p">,</span> <span class="n">left</span> <span class="o">=</span> <span class="n">_settings_info</span><span class="p">,</span> <span class="n">is_in_old</span>
+
+    <span class="k">if</span> <span class="n">prefix</span><span class="p">:</span>
+        <span class="c1"># always use new format if prefix is used.</span>
+        <span class="n">info</span><span class="p">,</span> <span class="n">left</span> <span class="o">=</span> <span class="n">_settings_info</span><span class="p">,</span> <span class="nb">set</span><span class="p">()</span>
+
+    <span class="c1"># only raise error for keys that the user didn&#39;t provide two keys</span>
+    <span class="c1"># for (e.g., both ``result_expires`` and ``CELERY_TASK_RESULT_EXPIRES``).</span>
+    <span class="n">really_left</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">left</span> <span class="k">if</span> <span class="n">info</span><span class="o">.</span><span class="n">convert</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">have</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">really_left</span><span class="p">:</span>
+        <span class="c1"># user is mixing old/new, or new/old settings, give renaming</span>
+        <span class="c1"># suggestions.</span>
+        <span class="k">raise</span> <span class="n">ImproperlyConfigured</span><span class="p">(</span><span class="n">info</span><span class="o">.</span><span class="n">mix_error</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">renames</span><span class="o">=</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="n">FMT_REPLACE_SETTING</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">replace</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">with_</span><span class="o">=</span><span class="n">info</span><span class="o">.</span><span class="n">convert</span><span class="p">[</span><span class="n">key</span><span class="p">])</span>
+            <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">really_left</span><span class="p">)</span>
+        <span class="p">)))</span>
+
+    <span class="n">preconf</span> <span class="o">=</span> <span class="p">{</span><span class="n">info</span><span class="o">.</span><span class="n">convert</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">k</span><span class="p">):</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">preconf</span><span class="p">)}</span>
+    <span class="n">defaults</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">info</span><span class="o">.</span><span class="n">defaults</span><span class="p">),</span> <span class="o">**</span><span class="n">preconf</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Settings</span><span class="p">(</span>
+        <span class="n">preconf</span><span class="p">,</span> <span class="p">[</span><span class="n">conf</span><span class="p">,</span> <span class="n">defaults</span><span class="p">],</span>
+        <span class="p">(</span><span class="n">_old_key_to_new</span><span class="p">,</span> <span class="n">_new_key_to_old</span><span class="p">),</span>
+        <span class="n">prefix</span><span class="o">=</span><span class="n">prefix</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">AppPickler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Old application pickler/unpickler (&lt; 3.1).&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_kwargs</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+        <span class="n">app</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">construct</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prepare</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">app</span>
+
+    <span class="k">def</span> <span class="nf">prepare</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;changes&#39;</span><span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">build_kwargs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_standard_kwargs</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">build_standard_kwargs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">main</span><span class="p">,</span> <span class="n">changes</span><span class="p">,</span> <span class="n">loader</span><span class="p">,</span> <span class="n">backend</span><span class="p">,</span> <span class="n">amqp</span><span class="p">,</span>
+                              <span class="n">events</span><span class="p">,</span> <span class="n">log</span><span class="p">,</span> <span class="n">control</span><span class="p">,</span> <span class="n">accept_magic_kwargs</span><span class="p">,</span>
+                              <span class="n">config_source</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;main&#39;</span><span class="p">:</span> <span class="n">main</span><span class="p">,</span> <span class="s1">&#39;loader&#39;</span><span class="p">:</span> <span class="n">loader</span><span class="p">,</span> <span class="s1">&#39;backend&#39;</span><span class="p">:</span> <span class="n">backend</span><span class="p">,</span>
+                <span class="s1">&#39;amqp&#39;</span><span class="p">:</span> <span class="n">amqp</span><span class="p">,</span> <span class="s1">&#39;changes&#39;</span><span class="p">:</span> <span class="n">changes</span><span class="p">,</span> <span class="s1">&#39;events&#39;</span><span class="p">:</span> <span class="n">events</span><span class="p">,</span>
+                <span class="s1">&#39;log&#39;</span><span class="p">:</span> <span class="n">log</span><span class="p">,</span> <span class="s1">&#39;control&#39;</span><span class="p">:</span> <span class="n">control</span><span class="p">,</span> <span class="s1">&#39;set_as_current&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                <span class="s1">&#39;config_source&#39;</span><span class="p">:</span> <span class="n">config_source</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">construct</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="bp">cls</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_unpickle_app</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">pickler</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Rebuild app for versions 2.5+.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">pickler</span><span class="p">()(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_unpickle_app_v2</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Rebuild app for versions 3.1+.&quot;&quot;&quot;</span>
+    <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;set_as_current&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="filter_hidden_settings"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.filter_hidden_settings">[docs]</a><span class="k">def</span> <span class="nf">filter_hidden_settings</span><span class="p">(</span><span class="n">conf</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Filter sensitive settings.&quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">maybe_censor</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="s1">&#39;*&#39;</span> <span class="o">*</span> <span class="mi">8</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">filter_hidden_settings</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">string_t</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">HIDDEN_SETTINGS</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">key</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">mask</span>
+            <span class="k">elif</span> <span class="s1">&#39;broker_url&#39;</span> <span class="ow">in</span> <span class="n">key</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+                <span class="kn">from</span> <span class="nn">kombu</span> <span class="k">import</span> <span class="n">Connection</span>
+                <span class="k">return</span> <span class="n">Connection</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">as_uri</span><span class="p">(</span><span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="s1">&#39;backend&#39;</span> <span class="ow">in</span> <span class="n">key</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">maybe_sanitize_url</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">value</span>
+
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">maybe_censor</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">conf</span><span class="p">)}</span></div>
+
+
+<div class="viewcode-block" id="bugreport"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.bugreport">[docs]</a><span class="k">def</span> <span class="nf">bugreport</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return a string containing information useful in bug-reports.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">billiard</span>
+    <span class="kn">import</span> <span class="nn">celery</span>
+    <span class="kn">import</span> <span class="nn">kombu</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">conn</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">connection</span><span class="p">()</span>
+        <span class="n">driver_v</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">:</span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">driver_name</span><span class="p">,</span>
+                                    <span class="n">conn</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">driver_version</span><span class="p">())</span>
+        <span class="n">transport</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">transport_cls</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+        <span class="n">transport</span> <span class="o">=</span> <span class="n">driver_v</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+    <span class="k">return</span> <span class="n">BUGREPORT_INFO</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">system</span><span class="o">=</span><span class="n">_platform</span><span class="o">.</span><span class="n">system</span><span class="p">(),</span>
+        <span class="n">arch</span><span class="o">=</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">_platform</span><span class="o">.</span><span class="n">architecture</span><span class="p">()</span> <span class="k">if</span> <span class="n">x</span><span class="p">),</span>
+        <span class="n">py_i</span><span class="o">=</span><span class="n">pyimplementation</span><span class="p">(),</span>
+        <span class="n">celery_v</span><span class="o">=</span><span class="n">celery</span><span class="o">.</span><span class="n">VERSION_BANNER</span><span class="p">,</span>
+        <span class="n">kombu_v</span><span class="o">=</span><span class="n">kombu</span><span class="o">.</span><span class="n">__version__</span><span class="p">,</span>
+        <span class="n">billiard_v</span><span class="o">=</span><span class="n">billiard</span><span class="o">.</span><span class="n">__version__</span><span class="p">,</span>
+        <span class="n">py_v</span><span class="o">=</span><span class="n">_platform</span><span class="o">.</span><span class="n">python_version</span><span class="p">(),</span>
+        <span class="n">driver_v</span><span class="o">=</span><span class="n">driver_v</span><span class="p">,</span>
+        <span class="n">transport</span><span class="o">=</span><span class="n">transport</span><span class="p">,</span>
+        <span class="n">results</span><span class="o">=</span><span class="n">maybe_sanitize_url</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">result_backend</span> <span class="ow">or</span> <span class="s1">&#39;disabled&#39;</span><span class="p">),</span>
+        <span class="n">human_settings</span><span class="o">=</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">humanize</span><span class="p">(),</span>
+        <span class="n">loader</span><span class="o">=</span><span class="n">qualname</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="vm">__class__</span><span class="p">),</span>
+    <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="find_app"><a class="viewcode-back" href="../../../reference/celery.app.utils.html#celery.app.utils.find_app">[docs]</a><span class="k">def</span> <span class="nf">find_app</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">symbol_by_name</span><span class="o">=</span><span class="n">symbol_by_name</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="n">import_from_cwd</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Find app by name.&quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">.base</span> <span class="k">import</span> <span class="n">Celery</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">sym</span> <span class="o">=</span> <span class="n">symbol_by_name</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="n">imp</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+        <span class="c1"># last part was not an attribute, but a module</span>
+        <span class="n">sym</span> <span class="o">=</span> <span class="n">imp</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sym</span><span class="p">,</span> <span class="n">ModuleType</span><span class="p">)</span> <span class="ow">and</span> <span class="s1">&#39;:&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">app</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">found</span> <span class="o">=</span> <span class="n">sym</span><span class="o">.</span><span class="n">app</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">found</span><span class="p">,</span> <span class="n">ModuleType</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">found</span> <span class="o">=</span> <span class="n">sym</span><span class="o">.</span><span class="n">celery</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">found</span><span class="p">,</span> <span class="n">ModuleType</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">sym</span><span class="p">,</span> <span class="s1">&#39;__path__&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="k">return</span> <span class="n">find_app</span><span class="p">(</span>
+                            <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">.celery&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">app</span><span class="p">),</span>
+                            <span class="n">symbol_by_name</span><span class="o">=</span><span class="n">symbol_by_name</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="n">imp</span><span class="p">,</span>
+                        <span class="p">)</span>
+                    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+                        <span class="k">pass</span>
+                <span class="k">for</span> <span class="n">suspect</span> <span class="ow">in</span> <span class="n">values</span><span class="p">(</span><span class="nb">vars</span><span class="p">(</span><span class="n">sym</span><span class="p">)):</span>
+                    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">suspect</span><span class="p">,</span> <span class="n">Celery</span><span class="p">):</span>
+                        <span class="k">return</span> <span class="n">suspect</span>
+                <span class="k">raise</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">found</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">found</span>
+    <span class="k">return</span> <span class="n">sym</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

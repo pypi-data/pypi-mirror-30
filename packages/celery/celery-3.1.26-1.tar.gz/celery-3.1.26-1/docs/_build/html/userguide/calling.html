@@ -1,0 +1,665 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Calling Tasks &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="copyright" title="Copyright" href="../copyright.html" />
+    <link rel="next" title="Canvas: Designing Work-flows" href="canvas.html" />
+    <link rel="prev" title="Tasks" href="tasks.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="canvas.html" title="Canvas: Designing Work-flows"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="tasks.html" title="Tasks"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">User Guide</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/userguide/calling.html">go here</a>.
+        </p>
+    
+
+</div>
+    <div class="section" id="calling-tasks">
+<span id="guide-calling"></span><h1>Calling Tasks<a class="headerlink" href="#calling-tasks" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><a class="reference internal" href="#basics" id="id1">Basics</a></li>
+<li><a class="reference internal" href="#linking-callbacks-errbacks" id="id2">Linking (callbacks/errbacks)</a></li>
+<li><a class="reference internal" href="#on-message" id="id3">On message</a></li>
+<li><a class="reference internal" href="#eta-and-countdown" id="id4">ETA and Countdown</a></li>
+<li><a class="reference internal" href="#expiration" id="id5">Expiration</a></li>
+<li><a class="reference internal" href="#message-sending-retry" id="id6">Message Sending Retry</a></li>
+<li><a class="reference internal" href="#connection-error-handling" id="id7">Connection Error Handling</a></li>
+<li><a class="reference internal" href="#serializers" id="id8">Serializers</a></li>
+<li><a class="reference internal" href="#compression" id="id9">Compression</a></li>
+<li><a class="reference internal" href="#connections" id="id10">Connections</a></li>
+<li><a class="reference internal" href="#routing-options" id="id11">Routing options</a></li>
+</ul>
+</div>
+<div class="section" id="basics">
+<span id="calling-basics"></span><h2><a class="toc-backref" href="#id1">Basics</a><a class="headerlink" href="#basics" title="Permalink to this headline">¶</a></h2>
+<p>This document describes Celery’s uniform “Calling API”
+used by task instances and the <a class="reference internal" href="canvas.html#guide-canvas"><span class="std std-ref">canvas</span></a>.</p>
+<p>The API defines a standard set of execution options, as well as three methods:</p>
+<blockquote>
+<div><ul>
+<li><p class="first"><code class="docutils literal notranslate"><span class="pre">apply_async(args[,</span> <span class="pre">kwargs[,</span> <span class="pre">…]])</span></code></p>
+<blockquote>
+<div><p>Sends a task message.</p>
+</div></blockquote>
+</li>
+<li><p class="first"><code class="docutils literal notranslate"><span class="pre">delay(*args,</span> <span class="pre">**kwargs)</span></code></p>
+<blockquote>
+<div><p>Shortcut to send a task message, but doesn’t support execution
+options.</p>
+</div></blockquote>
+</li>
+<li><p class="first"><em>calling</em> (<code class="docutils literal notranslate"><span class="pre">__call__</span></code>)</p>
+<blockquote>
+<div><p>Applying an object supporting the calling API (e.g., <code class="docutils literal notranslate"><span class="pre">add(2,</span> <span class="pre">2)</span></code>)
+means that the task will not be executed by a worker, but in the current
+process instead (a message won’t be sent).</p>
+</div></blockquote>
+</li>
+</ul>
+</div></blockquote>
+<div class="topic" id="calling-cheat">
+<p class="topic-title first">Quick Cheat Sheet</p>
+<ul class="simple">
+<li><dl class="first docutils">
+<dt><code class="docutils literal notranslate"><span class="pre">T.delay(arg,</span> <span class="pre">kwarg=value)</span></code></dt>
+<dd>Star arguments shortcut to <code class="docutils literal notranslate"><span class="pre">.apply_async</span></code>.
+(<code class="docutils literal notranslate"><span class="pre">.delay(*args,</span> <span class="pre">**kwargs)</span></code> calls <code class="docutils literal notranslate"><span class="pre">.apply_async(args,</span> <span class="pre">kwargs)</span></code>).</dd>
+</dl>
+</li>
+<li><code class="docutils literal notranslate"><span class="pre">T.apply_async((arg,),</span> <span class="pre">{'kwarg':</span> <span class="pre">value})</span></code></li>
+<li><dl class="first docutils">
+<dt><code class="docutils literal notranslate"><span class="pre">T.apply_async(countdown=10)</span></code></dt>
+<dd>executes in 10 seconds from now.</dd>
+</dl>
+</li>
+<li><dl class="first docutils">
+<dt><code class="docutils literal notranslate"><span class="pre">T.apply_async(eta=now</span> <span class="pre">+</span> <span class="pre">timedelta(seconds=10))</span></code></dt>
+<dd>executes in 10 seconds from now, specified using <code class="docutils literal notranslate"><span class="pre">eta</span></code></dd>
+</dl>
+</li>
+<li><dl class="first docutils">
+<dt><code class="docutils literal notranslate"><span class="pre">T.apply_async(countdown=60,</span> <span class="pre">expires=120)</span></code></dt>
+<dd>executes in one minute from now, but expires after 2 minutes.</dd>
+</dl>
+</li>
+<li><dl class="first docutils">
+<dt><code class="docutils literal notranslate"><span class="pre">T.apply_async(expires=now</span> <span class="pre">+</span> <span class="pre">timedelta(days=2))</span></code></dt>
+<dd>expires in 2 days, set using <a class="reference external" href="https://docs.python.org/dev/library/datetime.html#datetime.datetime" title="(in Python v3.8)"><code class="xref py py-class docutils literal notranslate"><span class="pre">datetime</span></code></a>.</dd>
+</dl>
+</li>
+</ul>
+</div>
+<div class="section" id="example">
+<h3>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h3>
+<p>The <a class="reference internal" href="../reference/celery.app.task.html#celery.app.task.Task.delay" title="celery.app.task.Task.delay"><code class="xref py py-meth docutils literal notranslate"><span class="pre">delay()</span></code></a> method is convenient as it looks like calling a regular
+function:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">task</span><span class="o">.</span><span class="n">delay</span><span class="p">(</span><span class="n">arg1</span><span class="p">,</span> <span class="n">arg2</span><span class="p">,</span> <span class="n">kwarg1</span><span class="o">=</span><span class="s1">&#39;x&#39;</span><span class="p">,</span> <span class="n">kwarg2</span><span class="o">=</span><span class="s1">&#39;y&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Using <a class="reference internal" href="../reference/celery.app.task.html#celery.app.task.Task.apply_async" title="celery.app.task.Task.apply_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">apply_async()</span></code></a> instead you have to write:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">task</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="p">[</span><span class="n">arg1</span><span class="p">,</span> <span class="n">arg2</span><span class="p">],</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;kwarg1&#39;</span><span class="p">:</span> <span class="s1">&#39;x&#39;</span><span class="p">,</span> <span class="s1">&#39;kwarg2&#39;</span><span class="p">:</span> <span class="s1">&#39;y&#39;</span><span class="p">})</span>
+</pre></div>
+</div>
+<div class="sidebar">
+<p class="first sidebar-title">Tip</p>
+<p class="last">If the task isn’t registered in the current process
+you can use <a class="reference internal" href="../reference/celery.html#celery.Celery.send_task" title="celery.Celery.send_task"><code class="xref py py-meth docutils literal notranslate"><span class="pre">send_task()</span></code></a> to call the task by name instead.</p>
+</div>
+<p>So <cite>delay</cite> is clearly convenient, but if you want to set additional execution
+options you have to use <code class="docutils literal notranslate"><span class="pre">apply_async</span></code>.</p>
+<p>The rest of this document will go into the task execution
+options in detail. All examples use a task
+called <cite>add</cite>, returning the sum of two arguments:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@app.task</span>
+<span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+</pre></div>
+</div>
+<div class="topic">
+<p class="topic-title first">There’s another way…</p>
+<p>You’ll learn more about this later while reading about the <a class="reference internal" href="canvas.html#guide-canvas"><span class="std std-ref">Canvas</span></a>, but <a class="reference internal" href="../reference/celery.html#celery.signature" title="celery.signature"><code class="xref py py-class docutils literal notranslate"><span class="pre">signature</span></code></a>’s are objects used to pass around
+the signature of a task invocation, (for example to send it over the
+network), and they also support the Calling API:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">task</span><span class="o">.</span><span class="n">s</span><span class="p">(</span><span class="n">arg1</span><span class="p">,</span> <span class="n">arg2</span><span class="p">,</span> <span class="n">kwarg1</span><span class="o">=</span><span class="s1">&#39;x&#39;</span><span class="p">,</span> <span class="n">kwargs2</span><span class="o">=</span><span class="s1">&#39;y&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">apply_async</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="section" id="linking-callbacks-errbacks">
+<span id="calling-links"></span><h2><a class="toc-backref" href="#id2">Linking (callbacks/errbacks)</a><a class="headerlink" href="#linking-callbacks-errbacks" title="Permalink to this headline">¶</a></h2>
+<p>Celery supports linking tasks together so that one task follows another.
+The callback task will be applied with the result of the parent task
+as a partial argument:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">link</span><span class="o">=</span><span class="n">add</span><span class="o">.</span><span class="n">s</span><span class="p">(</span><span class="mi">16</span><span class="p">))</span>
+</pre></div>
+</div>
+<div class="sidebar">
+<p class="first sidebar-title">What’s <code class="docutils literal notranslate"><span class="pre">s</span></code>?</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">add.s</span></code> call used here is called a signature. If you
+don’t know what they are you should read about them in the
+<a class="reference internal" href="canvas.html#guide-canvas"><span class="std std-ref">canvas guide</span></a>.
+There you can also learn about <a class="reference internal" href="../reference/celery.html#celery.chain" title="celery.chain"><code class="xref py py-class docutils literal notranslate"><span class="pre">chain</span></code></a>:  a simpler
+way to chain tasks together.</p>
+<p class="last">In practice the <code class="docutils literal notranslate"><span class="pre">link</span></code> execution option is considered an internal
+primitive, and you’ll probably not use it directly, but
+use chains instead.</p>
+</div>
+<p>Here the result of the first task (4) will be sent to a new
+task that adds 16 to the previous result, forming the expression
+<span class="math">(2 + 2) + 16 = 20</span></p>
+<p>You can also cause a callback to be applied if task raises an exception
+(<em>errback</em>), but this behaves differently from a regular callback
+in that it will be passed the id of the parent task, not the result.
+This is because it may not always be possible to serialize
+the exception raised, and so this way the error callback requires
+a result backend to be enabled, and the task must retrieve the result
+of the task instead.</p>
+<p>This is an example error callback:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@app.task</span>
+<span class="k">def</span> <span class="nf">error_handler</span><span class="p">(</span><span class="n">uuid</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">AsyncResult</span><span class="p">(</span><span class="n">uuid</span><span class="p">)</span>
+    <span class="n">exc</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">propagate</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Task {0} raised exception: {1!r}</span><span class="se">\n</span><span class="s1">{2!r}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+          <span class="n">uuid</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">traceback</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>it can be added to the task using the <code class="docutils literal notranslate"><span class="pre">link_error</span></code> execution
+option:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">link_error</span><span class="o">=</span><span class="n">error_handler</span><span class="o">.</span><span class="n">s</span><span class="p">())</span>
+</pre></div>
+</div>
+<p>In addition, both the <code class="docutils literal notranslate"><span class="pre">link</span></code> and <code class="docutils literal notranslate"><span class="pre">link_error</span></code> options can be expressed
+as a list:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">link</span><span class="o">=</span><span class="p">[</span><span class="n">add</span><span class="o">.</span><span class="n">s</span><span class="p">(</span><span class="mi">16</span><span class="p">),</span> <span class="n">other_task</span><span class="o">.</span><span class="n">s</span><span class="p">()])</span>
+</pre></div>
+</div>
+<p>The callbacks/errbacks will then be called in order, and all
+callbacks will be called with the return value of the parent task
+as a partial argument.</p>
+</div>
+<div class="section" id="on-message">
+<span id="calling-on-message"></span><h2><a class="toc-backref" href="#id3">On message</a><a class="headerlink" href="#on-message" title="Permalink to this headline">¶</a></h2>
+<p>Celery supports catching all states changes by setting on_message callback.</p>
+<p>For example for long-running tasks to send task progress you can do something like this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@app.task</span><span class="p">(</span><span class="n">bind</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">hello</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">update_state</span><span class="p">(</span><span class="n">state</span><span class="o">=</span><span class="s2">&quot;PROGRESS&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;progress&#39;</span><span class="p">:</span> <span class="mi">50</span><span class="p">})</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">update_state</span><span class="p">(</span><span class="n">state</span><span class="o">=</span><span class="s2">&quot;PROGRESS&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;progress&#39;</span><span class="p">:</span> <span class="mi">90</span><span class="p">})</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s1">&#39;hello world: </span><span class="si">%i</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">a</span><span class="o">+</span><span class="n">b</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">on_raw_message</span><span class="p">(</span><span class="n">body</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+
+<span class="n">r</span> <span class="o">=</span> <span class="n">hello</span><span class="o">.</span><span class="n">apply_async</span><span class="p">()</span>
+<span class="k">print</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">on_message</span><span class="o">=</span><span class="n">on_raw_message</span><span class="p">,</span> <span class="n">propagate</span><span class="o">=</span><span class="bp">False</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>Will generate output like this:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>{&#39;task_id&#39;: &#39;5660d3a3-92b8-40df-8ccc-33a5d1d680d7&#39;,
+ &#39;result&#39;: {&#39;progress&#39;: 50},
+ &#39;children&#39;: [],
+ &#39;status&#39;: &#39;PROGRESS&#39;,
+ &#39;traceback&#39;: None}
+{&#39;task_id&#39;: &#39;5660d3a3-92b8-40df-8ccc-33a5d1d680d7&#39;,
+ &#39;result&#39;: {&#39;progress&#39;: 90},
+ &#39;children&#39;: [],
+ &#39;status&#39;: &#39;PROGRESS&#39;,
+ &#39;traceback&#39;: None}
+{&#39;task_id&#39;: &#39;5660d3a3-92b8-40df-8ccc-33a5d1d680d7&#39;,
+ &#39;result&#39;: &#39;hello world: 10&#39;,
+ &#39;children&#39;: [],
+ &#39;status&#39;: &#39;SUCCESS&#39;,
+ &#39;traceback&#39;: None}
+hello world: 10
+</pre></div>
+</div>
+</div>
+<div class="section" id="eta-and-countdown">
+<span id="calling-eta"></span><h2><a class="toc-backref" href="#id4">ETA and Countdown</a><a class="headerlink" href="#eta-and-countdown" title="Permalink to this headline">¶</a></h2>
+<p>The ETA (estimated time of arrival) lets you set a specific date and time that
+is the earliest time at which your task will be executed. <cite>countdown</cite> is
+a shortcut to set ETA by seconds into the future.</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">countdown</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>    <span class="c1"># this takes at least 3 seconds to return</span>
+<span class="go">20</span>
+</pre></div>
+</div>
+<p>The task is guaranteed to be executed at some time <em>after</em> the
+specified date and time, but not necessarily at that exact time.
+Possible reasons for broken deadlines may include many items waiting
+in the queue, or heavy network latency. To make sure your tasks
+are executed in a timely manner you should monitor the queue for congestion. Use
+Munin, or similar tools, to receive alerts, so appropriate action can be
+taken to ease the workload. See <a class="reference internal" href="monitoring.html#monitoring-munin"><span class="std std-ref">Munin</span></a>.</p>
+<p>While <cite>countdown</cite> is an integer, <cite>eta</cite> must be a <a class="reference external" href="https://docs.python.org/dev/library/datetime.html#datetime.datetime" title="(in Python v3.8)"><code class="xref py py-class docutils literal notranslate"><span class="pre">datetime</span></code></a>
+object, specifying an exact date and time (including millisecond precision,
+and timezone information):</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">tomorrow</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">utcnow</span><span class="p">()</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">eta</span><span class="o">=</span><span class="n">tomorrow</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="expiration">
+<span id="calling-expiration"></span><h2><a class="toc-backref" href="#id5">Expiration</a><a class="headerlink" href="#expiration" title="Permalink to this headline">¶</a></h2>
+<p>The <cite>expires</cite> argument defines an optional expiry time,
+either as seconds after task publish, or a specific date and time using
+<a class="reference external" href="https://docs.python.org/dev/library/datetime.html#datetime.datetime" title="(in Python v3.8)"><code class="xref py py-class docutils literal notranslate"><span class="pre">datetime</span></code></a>:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># Task expires after one minute from now.</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="n">expires</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Also supports datetime</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="n">kwargs</span><span class="p">,</span>
+<span class="gp">... </span>                <span class="n">expires</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>When a worker receives an expired task it will mark
+the task as <a class="reference internal" href="tasks.html#std:state-REVOKED"><code class="xref std std-state docutils literal notranslate"><span class="pre">REVOKED</span></code></a> (<a class="reference internal" href="../reference/celery.exceptions.html#celery.exceptions.TaskRevokedError" title="celery.exceptions.TaskRevokedError"><code class="xref py py-exc docutils literal notranslate"><span class="pre">TaskRevokedError</span></code></a>).</p>
+</div>
+<div class="section" id="message-sending-retry">
+<span id="calling-retry"></span><h2><a class="toc-backref" href="#id6">Message Sending Retry</a><a class="headerlink" href="#message-sending-retry" title="Permalink to this headline">¶</a></h2>
+<p>Celery will automatically retry sending messages in the event of connection
+failure, and retry behavior can be configured – like how often to retry, or a maximum
+number of retries – or disabled all together.</p>
+<p>To disable retry you can set the <code class="docutils literal notranslate"><span class="pre">retry</span></code> execution option to <code class="xref py py-const docutils literal notranslate"><span class="pre">False</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">retry</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="topic">
+<p class="topic-title first">Related Settings</p>
+<table class="hlist"><tr><td><ul class="simple">
+<li><a class="reference internal" href="configuration.html#std:setting-task_publish_retry"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_publish_retry</span></code></a></li>
+</ul>
+</td><td><ul class="simple">
+<li><a class="reference internal" href="configuration.html#std:setting-task_publish_retry_policy"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_publish_retry_policy</span></code></a></li>
+</ul>
+</td></tr></table>
+</div>
+<div class="section" id="retry-policy">
+<h3>Retry Policy<a class="headerlink" href="#retry-policy" title="Permalink to this headline">¶</a></h3>
+<p>A retry policy is a mapping that controls how retries behave,
+and can contain the following keys:</p>
+<ul>
+<li><p class="first"><cite>max_retries</cite></p>
+<blockquote>
+<div><p>Maximum number of retries before giving up, in this case the
+exception that caused the retry to fail will be raised.</p>
+<p>A value of <code class="xref py py-const docutils literal notranslate"><span class="pre">None</span></code> means it will retry forever.</p>
+<p>The default is to retry 3 times.</p>
+</div></blockquote>
+</li>
+<li><p class="first"><cite>interval_start</cite></p>
+<blockquote>
+<div><p>Defines the number of seconds (float or integer) to wait between
+retries. Default is 0 (the first retry will be instantaneous).</p>
+</div></blockquote>
+</li>
+<li><p class="first"><cite>interval_step</cite></p>
+<blockquote>
+<div><p>On each consecutive retry this number will be added to the retry
+delay (float or integer). Default is 0.2.</p>
+</div></blockquote>
+</li>
+<li><p class="first"><cite>interval_max</cite></p>
+<blockquote>
+<div><p>Maximum number of seconds (float or integer) to wait between
+retries. Default is 0.2.</p>
+</div></blockquote>
+</li>
+</ul>
+<p>For example, the default policy correlates to:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">retry</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="p">{</span>
+    <span class="s1">&#39;max_retries&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+    <span class="s1">&#39;interval_start&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="s1">&#39;interval_step&#39;</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">,</span>
+    <span class="s1">&#39;interval_max&#39;</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">,</span>
+<span class="p">})</span>
+</pre></div>
+</div>
+<p>the maximum time spent retrying will be 0.4 seconds. It’s set relatively
+short by default because a connection failure could lead to a retry pile effect
+if the broker connection is down – For example, many web server processes waiting
+to retry, blocking other incoming requests.</p>
+</div>
+</div>
+<div class="section" id="connection-error-handling">
+<span id="calling-connection-errors"></span><h2><a class="toc-backref" href="#id7">Connection Error Handling</a><a class="headerlink" href="#connection-error-handling" title="Permalink to this headline">¶</a></h2>
+<p>When you send a task and the message transport connection is lost, or
+the connection cannot be initiated, an <code class="xref py py-exc docutils literal notranslate"><span class="pre">OperationalError</span></code>
+error will be raised:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">proj.tasks</span> <span class="kn">import</span> <span class="n">add</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">delay</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="gt">Traceback (most recent call last):</span>
+  File <span class="nb">&quot;&lt;stdin&gt;&quot;</span>, line <span class="m">1</span>, in <span class="n">&lt;module&gt;</span>
+  File <span class="nb">&quot;celery/app/task.py&quot;</span>, line <span class="m">388</span>, in <span class="n">delay</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span>
+  File <span class="nb">&quot;celery/app/task.py&quot;</span>, line <span class="m">503</span>, in <span class="n">apply_async</span>
+    <span class="o">**</span><span class="n">options</span>
+  File <span class="nb">&quot;celery/app/base.py&quot;</span>, line <span class="m">662</span>, in <span class="n">send_task</span>
+    <span class="n">amqp</span><span class="o">.</span><span class="n">send_task_message</span><span class="p">(</span><span class="n">P</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">)</span>
+  File <span class="nb">&quot;celery/backends/rpc.py&quot;</span>, line <span class="m">275</span>, in <span class="n">on_task_call</span>
+    <span class="n">maybe_declare</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">binding</span><span class="p">(</span><span class="n">producer</span><span class="o">.</span><span class="n">channel</span><span class="p">),</span> <span class="n">retry</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+  File <span class="nb">&quot;/opt/celery/kombu/kombu/messaging.py&quot;</span>, line <span class="m">204</span>, in <span class="n">_get_channel</span>
+    <span class="n">channel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_channel</span> <span class="o">=</span> <span class="n">channel</span><span class="p">()</span>
+  File <span class="nb">&quot;/opt/celery/py-amqp/amqp/connection.py&quot;</span>, line <span class="m">272</span>, in <span class="n">connect</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+  File <span class="nb">&quot;/opt/celery/py-amqp/amqp/transport.py&quot;</span>, line <span class="m">100</span>, in <span class="n">connect</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_connect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">host</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_timeout</span><span class="p">)</span>
+  File <span class="nb">&quot;/opt/celery/py-amqp/amqp/transport.py&quot;</span>, line <span class="m">141</span>, in <span class="n">_connect</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">sock</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">sa</span><span class="p">)</span>
+<span class="gr">  kombu.exceptions.OperationalError</span>: <span class="n">[Errno 61] Connection refused</span>
+</pre></div>
+</div>
+<p>If you have <a class="reference internal" href="#calling-retry"><span class="std std-ref">retries</span></a> enabled this will only happen after
+retries are exhausted, or when disabled immediately.</p>
+<p>You can handle this error too:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="kn">import</span> <span class="n">get_logger</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="k">try</span><span class="p">:</span>
+<span class="gp">... </span>    <span class="n">add</span><span class="o">.</span><span class="n">delay</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="gp">... </span><span class="k">except</span> <span class="n">add</span><span class="o">.</span><span class="n">OperationalError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+<span class="gp">... </span>    <span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s1">&#39;Sending task raised: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="serializers">
+<span id="calling-serializers"></span><h2><a class="toc-backref" href="#id8">Serializers</a><a class="headerlink" href="#serializers" title="Permalink to this headline">¶</a></h2>
+<div class="sidebar">
+<p class="first sidebar-title">Security</p>
+<p>The pickle module allows for execution of arbitrary functions,
+please see the <a class="reference internal" href="security.html#guide-security"><span class="std std-ref">security guide</span></a>.</p>
+<p class="last">Celery also comes with a special serializer that uses
+cryptography to sign your messages.</p>
+</div>
+<p>Data transferred between clients and workers needs to be serialized,
+so every message in Celery has a <code class="docutils literal notranslate"><span class="pre">content_type</span></code> header that
+describes the serialization method used to encode it.</p>
+<p>The default serializer is <cite>JSON</cite>, but you can
+change this using the <a class="reference internal" href="configuration.html#std:setting-task_serializer"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_serializer</span></code></a> setting,
+or for each individual task, or even per message.</p>
+<p>There’s built-in support for <cite>JSON</cite>, <a class="reference external" href="https://docs.python.org/dev/library/pickle.html#module-pickle" title="(in Python v3.8)"><code class="xref py py-mod docutils literal notranslate"><span class="pre">pickle</span></code></a>, <cite>YAML</cite>
+and <code class="docutils literal notranslate"><span class="pre">msgpack</span></code>, and you can also add your own custom serializers by registering
+them into the Kombu serializer registry</p>
+<div class="admonition seealso">
+<p class="first admonition-title">See also</p>
+<p class="last"><a class="reference external" href="http://kombu.readthedocs.io/en/master/userguide/serialization.html#guide-serialization" title="(in Kombu v4.2)"><span class="xref std std-ref">Message Serialization</span></a> in the Kombu user
+guide.</p>
+</div>
+<p>Each option has its advantages and disadvantages.</p>
+<dl class="docutils">
+<dt>json – JSON is supported in many programming languages, is now</dt>
+<dd><p class="first">a standard part of Python (since 2.6), and is fairly fast to decode
+using the modern Python libraries, such as <a class="reference external" href="https://pypi.python.org/pypi/simplejson/">simplejson</a>.</p>
+<p>The primary disadvantage to JSON is that it limits you to the following
+data types: strings, Unicode, floats, Boolean, dictionaries, and lists.
+Decimals and dates are notably missing.</p>
+<p>Binary data will be transferred using Base64 encoding,
+increasing the size of the transferred data by 34% compared to an encoding
+format where native binary types are supported.</p>
+<p>However, if your data fits inside the above constraints and you need
+cross-language support, the default setting of JSON is probably your
+best choice.</p>
+<p class="last">See <a class="reference external" href="http://json.org">http://json.org</a> for more information.</p>
+</dd>
+<dt>pickle – If you have no desire to support any language other than</dt>
+<dd><p class="first">Python, then using the pickle encoding will gain you the support of
+all built-in Python data types (except class instances), smaller
+messages when sending binary files, and a slight speedup over JSON
+processing.</p>
+<p class="last">See <a class="reference external" href="https://docs.python.org/dev/library/pickle.html#module-pickle" title="(in Python v3.8)"><code class="xref py py-mod docutils literal notranslate"><span class="pre">pickle</span></code></a> for more information.</p>
+</dd>
+<dt>yaml – YAML has many of the same characteristics as json,</dt>
+<dd><p class="first">except that it natively supports more data types (including dates,
+recursive references, etc.).</p>
+<p>However, the Python libraries for YAML are a good bit slower than the
+libraries for JSON.</p>
+<p>If you need a more expressive set of data types and need to maintain
+cross-language compatibility, then YAML may be a better fit than the above.</p>
+<p class="last">See <a class="reference external" href="http://yaml.org/">http://yaml.org/</a> for more information.</p>
+</dd>
+<dt>msgpack – msgpack is a binary serialization format that’s closer to JSON</dt>
+<dd><p class="first">in features. It’s very young however, and support should be considered
+experimental at this point.</p>
+<p class="last">See <a class="reference external" href="http://msgpack.org/">http://msgpack.org/</a> for more information.</p>
+</dd>
+</dl>
+<p>The encoding used is available as a message header, so the worker knows how to
+deserialize any task. If you use a custom serializer, this serializer must
+be available for the worker.</p>
+<p>The following order is used to decide the serializer
+used when sending a task:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>The <cite>serializer</cite> execution option.</li>
+<li>The <a class="reference internal" href="../reference/celery.app.task.html#celery.app.task.Task.serializer" title="celery.app.task.Task.serializer"><code class="xref py py-attr docutils literal notranslate"><span class="pre">Task.serializer</span></code></a> attribute</li>
+<li>The <a class="reference internal" href="configuration.html#std:setting-task_serializer"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_serializer</span></code></a> setting.</li>
+</ol>
+</div></blockquote>
+<p>Example setting a custom serializer for a single task invocation:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="n">serializer</span><span class="o">=</span><span class="s1">&#39;json&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="compression">
+<span id="calling-compression"></span><h2><a class="toc-backref" href="#id9">Compression</a><a class="headerlink" href="#compression" title="Permalink to this headline">¶</a></h2>
+<p>Celery can compress the messages using either <em>gzip</em>, or <em>bzip2</em>.
+You can also create your own compression schemes and register
+them in the <a class="reference external" href="http://kombu.readthedocs.io/en/master/reference/kombu.compression.html#kombu.compression.register" title="(in Kombu v4.2)"><code class="xref py py-func docutils literal notranslate"><span class="pre">kombu</span> <span class="pre">compression</span> <span class="pre">registry</span></code></a>.</p>
+<p>The following order is used to decide the compression scheme
+used when sending a task:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>The <cite>compression</cite> execution option.</li>
+<li>The <code class="xref py py-attr docutils literal notranslate"><span class="pre">Task.compression</span></code> attribute.</li>
+<li>The <a class="reference internal" href="configuration.html#std:setting-task_compression"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_compression</span></code></a> attribute.</li>
+</ol>
+</div></blockquote>
+<p>Example specifying the compression used when calling a task:</p>
+<div class="highlight-python3 notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">compression</span><span class="o">=</span><span class="s1">&#39;zlib&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="connections">
+<span id="calling-connections"></span><h2><a class="toc-backref" href="#id10">Connections</a><a class="headerlink" href="#connections" title="Permalink to this headline">¶</a></h2>
+<div class="sidebar">
+<p class="first sidebar-title">Automatic Pool Support</p>
+<p>Since version 2.3 there’s support for automatic connection pools,
+so you don’t have to manually handle connections and publishers
+to reuse connections.</p>
+<p>The connection pool is enabled by default since version 2.5.</p>
+<p class="last">See the <a class="reference internal" href="configuration.html#std:setting-broker_pool_limit"><code class="xref std std-setting docutils literal notranslate"><span class="pre">broker_pool_limit</span></code></a> setting for more information.</p>
+</div>
+<p>You can handle the connection manually by creating a
+publisher:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">with</span> <span class="n">add</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">(</span><span class="n">block</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">connection</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">add</span><span class="o">.</span><span class="n">get_publisher</span><span class="p">(</span><span class="n">connection</span><span class="p">)</span> <span class="k">as</span> <span class="n">publisher</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">args</span> <span class="ow">in</span> <span class="n">numbers</span><span class="p">:</span>
+                <span class="n">res</span> <span class="o">=</span> <span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">publisher</span><span class="o">=</span><span class="n">publisher</span><span class="p">)</span>
+                <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+<span class="k">print</span><span class="p">([</span><span class="n">res</span><span class="o">.</span><span class="n">get</span><span class="p">()</span> <span class="k">for</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">results</span><span class="p">])</span>
+</pre></div>
+</div>
+<p>Though this particular example is much better expressed as a group:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">group</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">numbers</span> <span class="o">=</span> <span class="p">[(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="mi">16</span><span class="p">)]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">res</span> <span class="o">=</span> <span class="n">group</span><span class="p">(</span><span class="n">add</span><span class="o">.</span><span class="n">s</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">numbers</span><span class="p">)</span><span class="o">.</span><span class="n">apply_async</span><span class="p">()</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">res</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+<span class="go">[4, 8, 16, 32]</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="routing-options">
+<span id="calling-routing"></span><h2><a class="toc-backref" href="#id11">Routing options</a><a class="headerlink" href="#routing-options" title="Permalink to this headline">¶</a></h2>
+<p>Celery can route tasks to different queues.</p>
+<p>Simple routing (name &lt;-&gt; name) is accomplished using the <code class="docutils literal notranslate"><span class="pre">queue</span></code> option:</p>
+<div class="highlight-python3 notranslate"><div class="highlight"><pre><span></span><span class="n">add</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">queue</span><span class="o">=</span><span class="s1">&#39;priority.high&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>You can then assign workers to the <code class="docutils literal notranslate"><span class="pre">priority.high</span></code> queue by using
+the workers <a class="reference internal" href="../reference/celery.bin.worker.html#cmdoption-celery-worker-q"><code class="xref std std-option docutils literal notranslate"><span class="pre">-Q</span></code></a> argument:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$</span> celery -A proj worker -l info -Q celery,priority.high
+</pre></div>
+</div>
+<div class="admonition seealso">
+<p class="first admonition-title">See also</p>
+<p>Hard-coding queue names in code isn’t recommended, the best practice
+is to use configuration routers (<a class="reference internal" href="configuration.html#std:setting-task_routes"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_routes</span></code></a>).</p>
+<p class="last">To find out more about routing, please see <a class="reference internal" href="routing.html#guide-routing"><span class="std std-ref">Routing Tasks</span></a>.</p>
+</div>
+<div class="section" id="advanced-options">
+<h3>Advanced Options<a class="headerlink" href="#advanced-options" title="Permalink to this headline">¶</a></h3>
+<p>These options are for advanced users who want to take use of
+AMQP’s full routing capabilities. Interested parties may read the
+<a class="reference internal" href="routing.html#guide-routing"><span class="std std-ref">routing guide</span></a>.</p>
+<ul>
+<li><p class="first">exchange</p>
+<blockquote>
+<div><p>Name of exchange (or a <code class="xref py py-class docutils literal notranslate"><span class="pre">kombu.entity.Exchange</span></code>) to
+send the message to.</p>
+</div></blockquote>
+</li>
+<li><p class="first">routing_key</p>
+<blockquote>
+<div><p>Routing key used to determine.</p>
+</div></blockquote>
+</li>
+<li><p class="first">priority</p>
+<blockquote>
+<div><p>A number between <cite>0</cite> and <cite>255</cite>, where <cite>255</cite> is the highest priority.</p>
+<p>Supported by: RabbitMQ, Redis (priority reversed, 0 is highest).</p>
+</div></blockquote>
+</li>
+</ul>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../index.html">
+              <img class="logo" src="../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="tasks.html"
+                        title="previous chapter">Tasks</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="canvas.html"
+                        title="next chapter">Canvas: Designing Work-flows</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userguide/calling.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="canvas.html" title="Canvas: Designing Work-flows"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="tasks.html" title="Tasks"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >User Guide</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

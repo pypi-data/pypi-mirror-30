@@ -1,0 +1,281 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.concurrency.base &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../concurrency.html" accesskey="U">celery.concurrency</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/concurrency/base.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.concurrency.base</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Base Execution Pool.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+
+<span class="kn">from</span> <span class="nn">billiard.einfo</span> <span class="k">import</span> <span class="n">ExceptionInfo</span>
+<span class="kn">from</span> <span class="nn">billiard.exceptions</span> <span class="k">import</span> <span class="n">WorkerLostError</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.encoding</span> <span class="k">import</span> <span class="n">safe_repr</span>
+
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="n">WorkerShutdown</span><span class="p">,</span> <span class="n">WorkerTerminate</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">monotonic</span><span class="p">,</span> <span class="n">reraise</span>
+<span class="kn">from</span> <span class="nn">celery.utils</span> <span class="k">import</span> <span class="n">timer2</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">celery.utils.text</span> <span class="k">import</span> <span class="n">truncate</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;BasePool&#39;</span><span class="p">,</span> <span class="s1">&#39;apply_target&#39;</span><span class="p">)</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s1">&#39;celery.pool&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="apply_target"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.apply_target">[docs]</a><span class="k">def</span> <span class="nf">apply_target</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(),</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{},</span> <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">accept_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">getpid</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">,</span>
+                 <span class="n">propagate</span><span class="o">=</span><span class="p">(),</span> <span class="n">monotonic</span><span class="o">=</span><span class="n">monotonic</span><span class="p">,</span> <span class="o">**</span><span class="n">_</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Apply function within pool context.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">accept_callback</span><span class="p">:</span>
+        <span class="n">accept_callback</span><span class="p">(</span><span class="n">pid</span> <span class="ow">or</span> <span class="n">getpid</span><span class="p">(),</span> <span class="n">monotonic</span><span class="p">())</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">target</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">propagate</span><span class="p">:</span>
+        <span class="k">raise</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">raise</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">WorkerShutdown</span><span class="p">,</span> <span class="n">WorkerTerminate</span><span class="p">):</span>
+        <span class="k">raise</span>
+    <span class="k">except</span> <span class="ne">BaseException</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">reraise</span><span class="p">(</span><span class="n">WorkerLostError</span><span class="p">,</span> <span class="n">WorkerLostError</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">exc</span><span class="p">)),</span>
+                    <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()[</span><span class="mi">2</span><span class="p">])</span>
+        <span class="k">except</span> <span class="n">WorkerLostError</span><span class="p">:</span>
+            <span class="n">callback</span><span class="p">(</span><span class="n">ExceptionInfo</span><span class="p">())</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">callback</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BasePool"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool">[docs]</a><span class="k">class</span> <span class="nc">BasePool</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Task pool.&quot;&quot;&quot;</span>
+
+    <span class="n">RUN</span> <span class="o">=</span> <span class="mh">0x1</span>
+    <span class="n">CLOSE</span> <span class="o">=</span> <span class="mh">0x2</span>
+    <span class="n">TERMINATE</span> <span class="o">=</span> <span class="mh">0x3</span>
+
+    <span class="n">Timer</span> <span class="o">=</span> <span class="n">timer2</span><span class="o">.</span><span class="n">Timer</span>
+
+    <span class="c1">#: set to true if the pool can be shutdown from within</span>
+    <span class="c1">#: a signal handler.</span>
+    <span class="n">signal_safe</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1">#: set to true if pool uses greenlets.</span>
+    <span class="n">is_green</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">_state</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_pool</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_does_debug</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1">#: only used by multiprocessing pool</span>
+    <span class="n">uses_semaphore</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">task_join_will_block</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">body_can_be_buffer</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">putlocks</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">forking_enable</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                 <span class="n">callbacks_propagate</span><span class="o">=</span><span class="p">(),</span> <span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">limit</span> <span class="o">=</span> <span class="n">limit</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">putlocks</span> <span class="o">=</span> <span class="n">putlocks</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">options</span> <span class="o">=</span> <span class="n">options</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">forking_enable</span> <span class="o">=</span> <span class="n">forking_enable</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">callbacks_propagate</span> <span class="o">=</span> <span class="n">callbacks_propagate</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+
+<div class="viewcode-block" id="BasePool.on_start"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.on_start">[docs]</a>    <span class="k">def</span> <span class="nf">on_start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.did_start_ok"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.did_start_ok">[docs]</a>    <span class="k">def</span> <span class="nf">did_start_ok</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+<div class="viewcode-block" id="BasePool.flush"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.flush">[docs]</a>    <span class="k">def</span> <span class="nf">flush</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.on_stop"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.on_stop">[docs]</a>    <span class="k">def</span> <span class="nf">on_stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.register_with_event_loop"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.register_with_event_loop">[docs]</a>    <span class="k">def</span> <span class="nf">register_with_event_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loop</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.on_apply"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.on_apply">[docs]</a>    <span class="k">def</span> <span class="nf">on_apply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.on_terminate"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.on_terminate">[docs]</a>    <span class="k">def</span> <span class="nf">on_terminate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.on_soft_timeout"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.on_soft_timeout">[docs]</a>    <span class="k">def</span> <span class="nf">on_soft_timeout</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.on_hard_timeout"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.on_hard_timeout">[docs]</a>    <span class="k">def</span> <span class="nf">on_hard_timeout</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.maintain_pool"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.maintain_pool">[docs]</a>    <span class="k">def</span> <span class="nf">maintain_pool</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.terminate_job"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.terminate_job">[docs]</a>    <span class="k">def</span> <span class="nf">terminate_job</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pid</span><span class="p">,</span> <span class="n">signal</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1"> does not implement kill_job&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)))</span></div>
+
+<div class="viewcode-block" id="BasePool.restart"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.restart">[docs]</a>    <span class="k">def</span> <span class="nf">restart</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1"> does not implement restart&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)))</span></div>
+
+<div class="viewcode-block" id="BasePool.stop"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.stop">[docs]</a>    <span class="k">def</span> <span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_stop</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">TERMINATE</span></div>
+
+<div class="viewcode-block" id="BasePool.terminate"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.terminate">[docs]</a>    <span class="k">def</span> <span class="nf">terminate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">TERMINATE</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_terminate</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="BasePool.start"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.start">[docs]</a>    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_does_debug</span> <span class="o">=</span> <span class="n">logger</span><span class="o">.</span><span class="n">isEnabledFor</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_start</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">RUN</span></div>
+
+<div class="viewcode-block" id="BasePool.close"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.close">[docs]</a>    <span class="k">def</span> <span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">CLOSE</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_close</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="BasePool.on_close"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.on_close">[docs]</a>    <span class="k">def</span> <span class="nf">on_close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BasePool.apply_async"><a class="viewcode-back" href="../../../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool.apply_async">[docs]</a>    <span class="k">def</span> <span class="nf">apply_async</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">[],</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{},</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Equivalent of the :func:`apply` built-in function.</span>
+
+<span class="sd">        Callbacks should optimally return as soon as possible since</span>
+<span class="sd">        otherwise the thread which handles the result will get blocked.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_does_debug</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;TaskPool: Apply </span><span class="si">%s</span><span class="s1"> (args:</span><span class="si">%s</span><span class="s1"> kwargs:</span><span class="si">%s</span><span class="s1">)&#39;</span><span class="p">,</span>
+                         <span class="n">target</span><span class="p">,</span> <span class="n">truncate</span><span class="p">(</span><span class="n">safe_repr</span><span class="p">(</span><span class="n">args</span><span class="p">),</span> <span class="mi">1024</span><span class="p">),</span>
+                         <span class="n">truncate</span><span class="p">(</span><span class="n">safe_repr</span><span class="p">(</span><span class="n">kwargs</span><span class="p">),</span> <span class="mi">1024</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_apply</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span>
+                             <span class="n">waitforslot</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">putlocks</span><span class="p">,</span>
+                             <span class="n">callbacks_propagate</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">callbacks_propagate</span><span class="p">,</span>
+                             <span class="o">**</span><span class="n">options</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;max-concurrency&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">limit</span><span class="p">,</span>
+        <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_info</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">active</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">RUN</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">num_processes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">limit</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../concurrency.html" >celery.concurrency</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

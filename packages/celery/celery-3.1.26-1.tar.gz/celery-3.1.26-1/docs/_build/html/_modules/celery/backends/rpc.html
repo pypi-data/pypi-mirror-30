@@ -1,0 +1,454 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.backends.rpc &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../backends.html" accesskey="U">celery.backends</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/backends/rpc.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.backends.rpc</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;The ``RPC`` result backend for AMQP brokers.</span>
+
+<span class="sd">RPC-style result backend, using reply-to and one queue per client.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">time</span>
+
+<span class="kn">import</span> <span class="nn">kombu</span>
+<span class="kn">from</span> <span class="nn">kombu.common</span> <span class="k">import</span> <span class="n">maybe_declare</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.compat</span> <span class="k">import</span> <span class="n">register_after_fork</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.objects</span> <span class="k">import</span> <span class="n">cached_property</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">states</span>
+<span class="kn">from</span> <span class="nn">celery._state</span> <span class="k">import</span> <span class="n">current_task</span><span class="p">,</span> <span class="n">task_join_will_block</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="nb">range</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="k">import</span> <span class="n">base</span>
+<span class="kn">from</span> <span class="nn">.async</span> <span class="k">import</span> <span class="n">AsyncBackendMixin</span><span class="p">,</span> <span class="n">BaseResultConsumer</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;BacklogLimitExceeded&#39;</span><span class="p">,</span> <span class="s1">&#39;RPCBackend&#39;</span><span class="p">)</span>
+
+<span class="n">E_NO_CHORD_SUPPORT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">The &quot;rpc&quot; result backend does not support chords!</span>
+
+<span class="s2">Note that a group chained with a task is also upgraded to be a chord,</span>
+<span class="s2">as this pattern requires synchronization.</span>
+
+<span class="s2">Result backends that supports chords: Redis, Database, Memcached, and more.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="BacklogLimitExceeded"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.BacklogLimitExceeded">[docs]</a><span class="k">class</span> <span class="nc">BacklogLimitExceeded</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Too much state history to fast-forward.&quot;&quot;&quot;</span></div>
+
+
+<span class="k">def</span> <span class="nf">_on_after_fork_cleanup_backend</span><span class="p">(</span><span class="n">backend</span><span class="p">):</span>
+    <span class="n">backend</span><span class="o">.</span><span class="n">_after_fork</span><span class="p">()</span>
+
+
+<span class="k">class</span> <span class="nc">ResultConsumer</span><span class="p">(</span><span class="n">BaseResultConsumer</span><span class="p">):</span>
+    <span class="n">Consumer</span> <span class="o">=</span> <span class="n">kombu</span><span class="o">.</span><span class="n">Consumer</span>
+
+    <span class="n">_connection</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_consumer</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">ResultConsumer</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_create_binding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">backend</span><span class="o">.</span><span class="n">_create_binding</span>
+
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">initial_task_id</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">connection</span><span class="p">()</span>
+        <span class="n">initial_queue</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_binding</span><span class="p">(</span><span class="n">initial_task_id</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">Consumer</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="o">.</span><span class="n">default_channel</span><span class="p">,</span> <span class="p">[</span><span class="n">initial_queue</span><span class="p">],</span>
+            <span class="n">callbacks</span><span class="o">=</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">on_state_change</span><span class="p">],</span> <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span>
+            <span class="n">accept</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">accept</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span><span class="o">.</span><span class="n">consume</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">drain_events</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="o">.</span><span class="n">drain_events</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">timeout</span><span class="p">:</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">timeout</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">on_after_fork</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">consume_from</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_binding</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span><span class="o">.</span><span class="n">consuming_from</span><span class="p">(</span><span class="n">queue</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span><span class="o">.</span><span class="n">add_queue</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span><span class="o">.</span><span class="n">consume</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">cancel_for</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_consumer</span><span class="o">.</span><span class="n">cancel_by_queue</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_create_binding</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="RPCBackend"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend">[docs]</a><span class="k">class</span> <span class="nc">RPCBackend</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">Backend</span><span class="p">,</span> <span class="n">AsyncBackendMixin</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Base class for the RPC result backend.&quot;&quot;&quot;</span>
+
+    <span class="n">Exchange</span> <span class="o">=</span> <span class="n">kombu</span><span class="o">.</span><span class="n">Exchange</span>
+    <span class="n">Producer</span> <span class="o">=</span> <span class="n">kombu</span><span class="o">.</span><span class="n">Producer</span>
+    <span class="n">ResultConsumer</span> <span class="o">=</span> <span class="n">ResultConsumer</span>
+
+    <span class="c1">#: Exception raised when there are too many messages for a task id.</span>
+    <span class="n">BacklogLimitExceeded</span> <span class="o">=</span> <span class="n">BacklogLimitExceeded</span>
+
+    <span class="n">persistent</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">supports_autoexpire</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">supports_native_join</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="n">retry_policy</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;max_retries&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
+        <span class="s1">&#39;interval_start&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s1">&#39;interval_step&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="s1">&#39;interval_max&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+    <span class="p">}</span>
+
+<div class="viewcode-block" id="RPCBackend.Consumer"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.Consumer">[docs]</a>    <span class="k">class</span> <span class="nc">Consumer</span><span class="p">(</span><span class="n">kombu</span><span class="o">.</span><span class="n">Consumer</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Consumer that requires manual declaration of queues.&quot;&quot;&quot;</span>
+
+        <span class="n">auto_declare</span> <span class="o">=</span> <span class="kc">False</span></div>
+
+<div class="viewcode-block" id="RPCBackend.Queue"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.Queue">[docs]</a>    <span class="k">class</span> <span class="nc">Queue</span><span class="p">(</span><span class="n">kombu</span><span class="o">.</span><span class="n">Queue</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Queue that never caches declaration.&quot;&quot;&quot;</span>
+
+        <span class="n">can_cache_declaration</span> <span class="o">=</span> <span class="kc">False</span></div>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">,</span> <span class="n">connection</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">exchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">exchange_type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">persistent</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">auto_delete</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RPCBackend</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">conf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="o">=</span> <span class="n">connection</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_out_of_band</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">persistent</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">prepare_persistent</span><span class="p">(</span><span class="n">persistent</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">delivery_mode</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">persistent</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">exchange</span> <span class="o">=</span> <span class="n">exchange</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">result_exchange</span>
+        <span class="n">exchange_type</span> <span class="o">=</span> <span class="n">exchange_type</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">result_exchange_type</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_exchange</span><span class="p">(</span>
+            <span class="n">exchange</span><span class="p">,</span> <span class="n">exchange_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">delivery_mode</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="o">=</span> <span class="n">serializer</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">result_serializer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">auto_delete</span> <span class="o">=</span> <span class="n">auto_delete</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">result_consumer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ResultConsumer</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">accept</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending_results</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending_messages</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">register_after_fork</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">register_after_fork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_on_after_fork_cleanup_backend</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_after_fork</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># clear state for child processes.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending_results</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">result_consumer</span><span class="o">.</span><span class="n">_after_fork</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">_create_exchange</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;direct&#39;</span><span class="p">,</span> <span class="n">delivery_mode</span><span class="o">=</span><span class="mi">2</span><span class="p">):</span>
+        <span class="c1"># uses direct to queue routing (anon exchange).</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">Exchange</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_create_binding</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create new binding for task with id.&quot;&quot;&quot;</span>
+        <span class="c1"># RPC backend caches the binding, as one queue is used for all tasks.</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">binding</span>
+
+<div class="viewcode-block" id="RPCBackend.ensure_chords_allowed"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.ensure_chords_allowed">[docs]</a>    <span class="k">def</span> <span class="nf">ensure_chords_allowed</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="n">E_NO_CHORD_SUPPORT</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span></div>
+
+<div class="viewcode-block" id="RPCBackend.on_task_call"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.on_task_call">[docs]</a>    <span class="k">def</span> <span class="nf">on_task_call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">producer</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="c1"># Called every time a task is sent when using this backend.</span>
+        <span class="c1"># We declare the queue we receive replies on in advance of sending</span>
+        <span class="c1"># the message, but we skip this if running in the prefork pool</span>
+        <span class="c1"># (task_join_will_block), as we know the queue is already declared.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">task_join_will_block</span><span class="p">():</span>
+            <span class="n">maybe_declare</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">binding</span><span class="p">(</span><span class="n">producer</span><span class="o">.</span><span class="n">channel</span><span class="p">),</span> <span class="n">retry</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="RPCBackend.destination_for"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.destination_for">[docs]</a>    <span class="k">def</span> <span class="nf">destination_for</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the destination for result by task id.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[str, str]: tuple of ``(reply_to, correlation_id)``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Backends didn&#39;t always receive the `request`, so we must still</span>
+        <span class="c1"># support old code that relies on current_task.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">request</span> <span class="o">=</span> <span class="n">request</span> <span class="ow">or</span> <span class="n">current_task</span><span class="o">.</span><span class="n">request</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s1">&#39;RPC backend missing task request for </span><span class="si">{0!r}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">task_id</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">request</span><span class="o">.</span><span class="n">reply_to</span><span class="p">,</span> <span class="n">request</span><span class="o">.</span><span class="n">correlation_id</span> <span class="ow">or</span> <span class="n">task_id</span></div>
+
+<div class="viewcode-block" id="RPCBackend.on_reply_declare"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.on_reply_declare">[docs]</a>    <span class="k">def</span> <span class="nf">on_reply_declare</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="c1"># Return value here is used as the `declare=` argument</span>
+        <span class="c1"># for Producer.publish.</span>
+        <span class="c1"># By default we don&#39;t have to declare anything when sending a result.</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="RPCBackend.on_result_fulfilled"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.on_result_fulfilled">[docs]</a>    <span class="k">def</span> <span class="nf">on_result_fulfilled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="c1"># This usually cancels the queue after the result is received,</span>
+        <span class="c1"># but we don&#39;t have to cancel since we have one queue per process.</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="RPCBackend.as_uri"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.as_uri">[docs]</a>    <span class="k">def</span> <span class="nf">as_uri</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">include_password</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;rpc://&#39;</span></div>
+
+<div class="viewcode-block" id="RPCBackend.store_result"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.store_result">[docs]</a>    <span class="k">def</span> <span class="nf">store_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span>
+                     <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Send task return value and state.&quot;&quot;&quot;</span>
+        <span class="n">routing_key</span><span class="p">,</span> <span class="n">correlation_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">destination_for</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">request</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">routing_key</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">amqp</span><span class="o">.</span><span class="n">producer_pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">(</span><span class="n">block</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">producer</span><span class="p">:</span>
+            <span class="n">producer</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_to_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">traceback</span><span class="p">,</span> <span class="n">request</span><span class="p">),</span>
+                <span class="n">exchange</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">,</span>
+                <span class="n">routing_key</span><span class="o">=</span><span class="n">routing_key</span><span class="p">,</span>
+                <span class="n">correlation_id</span><span class="o">=</span><span class="n">correlation_id</span><span class="p">,</span>
+                <span class="n">serializer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">serializer</span><span class="p">,</span>
+                <span class="n">retry</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">retry_policy</span><span class="p">,</span>
+                <span class="n">declare</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_reply_declare</span><span class="p">(</span><span class="n">task_id</span><span class="p">),</span>
+                <span class="n">delivery_mode</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">delivery_mode</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span></div>
+
+    <span class="k">def</span> <span class="nf">_to_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">traceback</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+            <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">state</span><span class="p">,</span>
+            <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">encode_result</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">),</span>
+            <span class="s1">&#39;traceback&#39;</span><span class="p">:</span> <span class="n">traceback</span><span class="p">,</span>
+            <span class="s1">&#39;children&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_task_children</span><span class="p">(</span><span class="n">request</span><span class="p">),</span>
+        <span class="p">}</span>
+
+<div class="viewcode-block" id="RPCBackend.on_out_of_band_result"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.on_out_of_band_result">[docs]</a>    <span class="k">def</span> <span class="nf">on_out_of_band_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="c1"># Callback called when a reply for a task is received,</span>
+        <span class="c1"># but we have no idea what do do with it.</span>
+        <span class="c1"># Since the result is not pending, we put it in a separate</span>
+        <span class="c1"># buffer: probably it will become pending later.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">result_consumer</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">result_consumer</span><span class="o">.</span><span class="n">on_out_of_band_result</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_out_of_band</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">message</span></div>
+
+<div class="viewcode-block" id="RPCBackend.get_task_meta"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.get_task_meta">[docs]</a>    <span class="k">def</span> <span class="nf">get_task_meta</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">backlog_limit</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
+        <span class="n">buffered</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_out_of_band</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">buffered</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_set_cache_by_message</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">buffered</span><span class="p">)</span>
+
+        <span class="c1"># Polling and using basic_get</span>
+        <span class="n">latest_by_id</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">prev</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">acc</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_slurp_from_queue</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">accept</span><span class="p">,</span> <span class="n">backlog_limit</span><span class="p">):</span>
+            <span class="n">tid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_message_task_id</span><span class="p">(</span><span class="n">acc</span><span class="p">)</span>
+            <span class="n">prev</span><span class="p">,</span> <span class="n">latest_by_id</span><span class="p">[</span><span class="n">tid</span><span class="p">]</span> <span class="o">=</span> <span class="n">latest_by_id</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">tid</span><span class="p">),</span> <span class="n">acc</span>
+            <span class="k">if</span> <span class="n">prev</span><span class="p">:</span>
+                <span class="c1"># backends aren&#39;t expected to keep history,</span>
+                <span class="c1"># so we delete everything except the most recent state.</span>
+                <span class="n">prev</span><span class="o">.</span><span class="n">ack</span><span class="p">()</span>
+                <span class="n">prev</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">latest</span> <span class="o">=</span> <span class="n">latest_by_id</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">tid</span><span class="p">,</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">latest_by_id</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_out_of_band_result</span><span class="p">(</span><span class="n">tid</span><span class="p">,</span> <span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">latest</span><span class="p">:</span>
+            <span class="n">latest</span><span class="o">.</span><span class="n">requeue</span><span class="p">()</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_set_cache_by_message</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">latest</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># no new state, use previous</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span>
+            <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                <span class="c1"># result probably pending.</span>
+                <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">states</span><span class="o">.</span><span class="n">PENDING</span><span class="p">,</span> <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span></div>
+    <span class="n">poll</span> <span class="o">=</span> <span class="n">get_task_meta</span>  <span class="c1"># XXX compat</span>
+
+    <span class="k">def</span> <span class="nf">_set_cache_by_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">meta_from_decoded</span><span class="p">(</span>
+            <span class="n">message</span><span class="o">.</span><span class="n">payload</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">payload</span>
+
+    <span class="k">def</span> <span class="nf">_slurp_from_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">accept</span><span class="p">,</span>
+                          <span class="n">limit</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">acquire_channel</span><span class="p">(</span><span class="n">block</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">channel</span><span class="p">):</span>
+            <span class="n">binding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_binding</span><span class="p">(</span><span class="n">task_id</span><span class="p">)(</span><span class="n">channel</span><span class="p">)</span>
+            <span class="n">binding</span><span class="o">.</span><span class="n">declare</span><span class="p">()</span>
+
+            <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">limit</span><span class="p">):</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="n">binding</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">accept</span><span class="o">=</span><span class="n">accept</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">msg</span><span class="p">:</span>
+                    <span class="k">break</span>
+                <span class="k">yield</span> <span class="n">msg</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="bp">self</span><span class="o">.</span><span class="n">BacklogLimitExceeded</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_message_task_id</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># try property first so we don&#39;t have to deserialize</span>
+            <span class="c1"># the payload.</span>
+            <span class="k">return</span> <span class="n">message</span><span class="o">.</span><span class="n">properties</span><span class="p">[</span><span class="s1">&#39;correlation_id&#39;</span><span class="p">]</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">):</span>
+            <span class="c1"># message sent by old Celery version, need to deserialize.</span>
+            <span class="k">return</span> <span class="n">message</span><span class="o">.</span><span class="n">payload</span><span class="p">[</span><span class="s1">&#39;task_id&#39;</span><span class="p">]</span>
+
+<div class="viewcode-block" id="RPCBackend.revive"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.revive">[docs]</a>    <span class="k">def</span> <span class="nf">revive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="RPCBackend.reload_task_result"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.reload_task_result">[docs]</a>    <span class="k">def</span> <span class="nf">reload_task_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s1">&#39;reload_task_result is not supported by this backend.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="RPCBackend.reload_group_result"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.reload_group_result">[docs]</a>    <span class="k">def</span> <span class="nf">reload_group_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reload group result, even if it has been previously fetched.&quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s1">&#39;reload_group_result is not supported by this backend.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="RPCBackend.save_group"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.save_group">[docs]</a>    <span class="k">def</span> <span class="nf">save_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s1">&#39;save_group is not supported by this backend.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="RPCBackend.restore_group"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.restore_group">[docs]</a>    <span class="k">def</span> <span class="nf">restore_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s1">&#39;restore_group is not supported by this backend.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="RPCBackend.delete_group"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.delete_group">[docs]</a>    <span class="k">def</span> <span class="nf">delete_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s1">&#39;delete_group is not supported by this backend.&#39;</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">__reduce__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(),</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{}):</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">RPCBackend</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__reduce__</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="nb">dict</span><span class="p">(</span>
+            <span class="n">kwargs</span><span class="p">,</span>
+            <span class="n">connection</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="p">,</span>
+            <span class="n">exchange</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+            <span class="n">exchange_type</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">type</span><span class="p">,</span>
+            <span class="n">persistent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">persistent</span><span class="p">,</span>
+            <span class="n">serializer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">serializer</span><span class="p">,</span>
+            <span class="n">auto_delete</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">auto_delete</span><span class="p">,</span>
+            <span class="n">expires</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">,</span>
+        <span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">binding</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">Queue</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">oid</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">oid</span><span class="p">,</span>
+            <span class="n">durable</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">auto_delete</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">expires</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">,</span>
+        <span class="p">)</span>
+
+<div class="viewcode-block" id="RPCBackend.oid"><a class="viewcode-back" href="../../../internals/reference/celery.backends.rpc.html#celery.backends.rpc.RPCBackend.oid">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">oid</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># cached here is the app OID: name of queue we receive results on.</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">oid</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../backends.html" >celery.backends</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

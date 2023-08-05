@@ -1,0 +1,891 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.backends.base &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../backends.html" accesskey="U">celery.backends</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/backends/base.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.backends.base</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Result backend base classes.</span>
+
+<span class="sd">- :class:`BaseBackend` defines the interface.</span>
+
+<span class="sd">- :class:`KeyValueStoreBackend` is a common base class</span>
+<span class="sd">    using K/V semantics like _get and _put.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">timedelta</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">partial</span>
+<span class="kn">from</span> <span class="nn">weakref</span> <span class="k">import</span> <span class="n">WeakValueDictionary</span>
+
+<span class="kn">from</span> <span class="nn">billiard.einfo</span> <span class="k">import</span> <span class="n">ExceptionInfo</span>
+<span class="kn">from</span> <span class="nn">kombu.serialization</span> <span class="k">import</span> <span class="n">dumps</span><span class="p">,</span> <span class="n">loads</span><span class="p">,</span> <span class="n">prepare_accept_content</span>
+<span class="kn">from</span> <span class="nn">kombu.serialization</span> <span class="k">import</span> <span class="n">registry</span> <span class="k">as</span> <span class="n">serializer_registry</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.encoding</span> <span class="k">import</span> <span class="n">bytes_to_str</span><span class="p">,</span> <span class="n">ensure_bytes</span><span class="p">,</span> <span class="n">from_utf8</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.url</span> <span class="k">import</span> <span class="n">maybe_sanitize_url</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">current_app</span><span class="p">,</span> <span class="n">group</span><span class="p">,</span> <span class="n">maybe_signature</span><span class="p">,</span> <span class="n">states</span>
+<span class="kn">from</span> <span class="nn">celery._state</span> <span class="k">import</span> <span class="n">get_current_task</span>
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="p">(</span><span class="n">ChordError</span><span class="p">,</span> <span class="n">ImproperlyConfigured</span><span class="p">,</span>
+                               <span class="n">TaskRevokedError</span><span class="p">,</span> <span class="ne">TimeoutError</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span>
+<span class="kn">from</span> <span class="nn">celery.result</span> <span class="k">import</span> <span class="p">(</span><span class="n">GroupResult</span><span class="p">,</span> <span class="n">ResultBase</span><span class="p">,</span> <span class="n">allow_join_result</span><span class="p">,</span>
+                           <span class="n">result_from_tuple</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">celery.utils.collections</span> <span class="k">import</span> <span class="n">BufferMap</span>
+<span class="kn">from</span> <span class="nn">celery.utils.functional</span> <span class="k">import</span> <span class="n">LRUCache</span><span class="p">,</span> <span class="n">arity_greater</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">celery.utils.serialization</span> <span class="k">import</span> <span class="p">(</span><span class="n">create_exception_cls</span><span class="p">,</span>
+                                        <span class="n">get_pickleable_exception</span><span class="p">,</span>
+                                        <span class="n">get_pickled_exception</span><span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;BaseBackend&#39;</span><span class="p">,</span> <span class="s1">&#39;KeyValueStoreBackend&#39;</span><span class="p">,</span> <span class="s1">&#39;DisabledBackend&#39;</span><span class="p">)</span>
+
+<span class="n">EXCEPTION_ABLE_CODECS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s1">&#39;pickle&#39;</span><span class="p">})</span>
+<span class="n">PY3</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="n">MESSAGE_BUFFER_MAX</span> <span class="o">=</span> <span class="mi">8192</span>
+
+<span class="n">pending_results_t</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;pending_results_t&#39;</span><span class="p">,</span> <span class="p">(</span>
+    <span class="s1">&#39;concrete&#39;</span><span class="p">,</span> <span class="s1">&#39;weak&#39;</span><span class="p">,</span>
+<span class="p">))</span>
+
+<span class="n">E_NO_BACKEND</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">No result backend is configured.</span>
+<span class="s2">Please see the documentation for more information.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">E_CHORD_NO_BACKEND</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">Starting chords requires a result backend to be configured.</span>
+
+<span class="s2">Note that a group chained with a task is also upgraded to be a chord,</span>
+<span class="s2">as this pattern requires synchronization.</span>
+
+<span class="s2">Result backends that supports chords: Redis, Database, Memcached, and more.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="k">def</span> <span class="nf">unpickle_backend</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return an unpickled backend.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="n">current_app</span><span class="o">.</span><span class="n">_get_current_object</span><span class="p">(),</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">_nulldict</span><span class="p">(</span><span class="nb">dict</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">ignore</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">):</span>
+        <span class="k">pass</span>
+    <span class="fm">__setitem__</span> <span class="o">=</span> <span class="n">update</span> <span class="o">=</span> <span class="n">setdefault</span> <span class="o">=</span> <span class="n">ignore</span>
+
+
+<span class="k">class</span> <span class="nc">Backend</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="n">READY_STATES</span> <span class="o">=</span> <span class="n">states</span><span class="o">.</span><span class="n">READY_STATES</span>
+    <span class="n">UNREADY_STATES</span> <span class="o">=</span> <span class="n">states</span><span class="o">.</span><span class="n">UNREADY_STATES</span>
+    <span class="n">EXCEPTION_STATES</span> <span class="o">=</span> <span class="n">states</span><span class="o">.</span><span class="n">EXCEPTION_STATES</span>
+
+    <span class="ne">TimeoutError</span> <span class="o">=</span> <span class="ne">TimeoutError</span>
+
+    <span class="c1">#: Time to sleep between polling each individual item</span>
+    <span class="c1">#: in `ResultSet.iterate`. as opposed to the `interval`</span>
+    <span class="c1">#: argument which is for each pass.</span>
+    <span class="n">subpolling_interval</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: If true the backend must implement :meth:`get_many`.</span>
+    <span class="n">supports_native_join</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="c1">#: If true the backend must automatically expire results.</span>
+    <span class="c1">#: The daily backend_cleanup periodic task won&#39;t be triggered</span>
+    <span class="c1">#: in this case.</span>
+    <span class="n">supports_autoexpire</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="c1">#: Set to true if the backend is peristent by default.</span>
+    <span class="n">persistent</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="n">retry_policy</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;max_retries&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
+        <span class="s1">&#39;interval_start&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s1">&#39;interval_step&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="s1">&#39;interval_max&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">,</span>
+                 <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_cached_results</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">accept</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">expires</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">expires_type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">url</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="n">conf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="o">=</span> <span class="n">serializer</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">result_serializer</span>
+        <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">content_type</span><span class="p">,</span>
+         <span class="bp">self</span><span class="o">.</span><span class="n">content_encoding</span><span class="p">,</span>
+         <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">)</span> <span class="o">=</span> <span class="n">serializer_registry</span><span class="o">.</span><span class="n">_encoders</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">serializer</span><span class="p">]</span>
+        <span class="n">cmax</span> <span class="o">=</span> <span class="n">max_cached_results</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">result_cache_max</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span> <span class="o">=</span> <span class="n">_nulldict</span><span class="p">()</span> <span class="k">if</span> <span class="n">cmax</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="k">else</span> <span class="n">LRUCache</span><span class="p">(</span><span class="n">limit</span><span class="o">=</span><span class="n">cmax</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">prepare_expires</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="n">expires_type</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">accept</span> <span class="o">=</span> <span class="n">prepare_accept_content</span><span class="p">(</span>
+            <span class="n">conf</span><span class="o">.</span><span class="n">accept_content</span> <span class="k">if</span> <span class="n">accept</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">accept</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending_results</span> <span class="o">=</span> <span class="n">pending_results_t</span><span class="p">({},</span> <span class="n">WeakValueDictionary</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending_messages</span> <span class="o">=</span> <span class="n">BufferMap</span><span class="p">(</span><span class="n">MESSAGE_BUFFER_MAX</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">url</span> <span class="o">=</span> <span class="n">url</span>
+
+    <span class="k">def</span> <span class="nf">as_uri</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">include_password</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the backend as an URI, sanitizing the password or not.&quot;&quot;&quot;</span>
+        <span class="c1"># when using maybe_sanitize_url(), &quot;/&quot; is added</span>
+        <span class="c1"># we&#39;re stripping it for consistency</span>
+        <span class="k">if</span> <span class="n">include_password</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">url</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="n">maybe_sanitize_url</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">url</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">url</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">url</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;:///&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="n">url</span>
+
+    <span class="k">def</span> <span class="nf">mark_as_started</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="o">**</span><span class="n">meta</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mark a task as started.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">store_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="n">states</span><span class="o">.</span><span class="n">STARTED</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">mark_as_done</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span>
+                     <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">store_result</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">states</span><span class="o">.</span><span class="n">SUCCESS</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mark task as successfully executed.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">store_result</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">store_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="n">request</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">request</span> <span class="ow">and</span> <span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_chord_part_return</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">mark_as_failure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span>
+                        <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                        <span class="n">store_result</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">call_errbacks</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                        <span class="n">state</span><span class="o">=</span><span class="n">states</span><span class="o">.</span><span class="n">FAILURE</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mark task as executed with failure.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">store_result</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">store_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span>
+                              <span class="n">traceback</span><span class="o">=</span><span class="n">traceback</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="n">request</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">request</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">on_chord_part_return</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">call_errbacks</span> <span class="ow">and</span> <span class="n">request</span><span class="o">.</span><span class="n">errbacks</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_call_task_errbacks</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">traceback</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_call_task_errbacks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">traceback</span><span class="p">):</span>
+        <span class="n">old_signature</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">errback</span> <span class="ow">in</span> <span class="n">request</span><span class="o">.</span><span class="n">errbacks</span><span class="p">:</span>
+            <span class="n">errback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">errback</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="c1"># workaround to support tasks with bind=True executed as</span>
+                <span class="c1"># link errors. Otherwise retries can&#39;t be used</span>
+                <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">errback</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="n">__header__</span><span class="p">,</span> <span class="n">partial</span><span class="p">)</span> <span class="ow">and</span>
+                <span class="n">arity_greater</span><span class="p">(</span><span class="n">errback</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="n">__header__</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="p">):</span>
+                <span class="n">errback</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">traceback</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">old_signature</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">errback</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">old_signature</span><span class="p">:</span>
+            <span class="c1"># Previously errback was called as a task so we still</span>
+            <span class="c1"># need to do so if the errback only takes a single task_id arg.</span>
+            <span class="n">task_id</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">id</span>
+            <span class="n">root_id</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">root_id</span> <span class="ow">or</span> <span class="n">task_id</span>
+            <span class="n">group</span><span class="p">(</span><span class="n">old_signature</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">task_id</span><span class="p">,),</span> <span class="n">parent_id</span><span class="o">=</span><span class="n">task_id</span><span class="p">,</span> <span class="n">root_id</span><span class="o">=</span><span class="n">root_id</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">mark_as_revoked</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">reason</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span>
+                        <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">store_result</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">states</span><span class="o">.</span><span class="n">REVOKED</span><span class="p">):</span>
+        <span class="n">exc</span> <span class="o">=</span> <span class="n">TaskRevokedError</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">store_result</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">store_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span>
+                              <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="n">request</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">request</span> <span class="ow">and</span> <span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_chord_part_return</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">mark_as_retry</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                      <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">store_result</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">states</span><span class="o">.</span><span class="n">RETRY</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Mark task as being retries.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            Stores the current exception (if any).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">store_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span>
+                                 <span class="n">traceback</span><span class="o">=</span><span class="n">traceback</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="n">request</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">chord_error_from_stack</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">callback</span><span class="p">,</span> <span class="n">exc</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="c1"># need below import for test for some crazy reason</span>
+        <span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">group</span>  <span class="c1"># pylint: disable</span>
+        <span class="n">app</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">backend</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">_tasks</span><span class="p">[</span><span class="n">callback</span><span class="o">.</span><span class="n">task</span><span class="p">]</span><span class="o">.</span><span class="n">backend</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="n">backend</span> <span class="o">=</span> <span class="bp">self</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">group</span><span class="p">(</span>
+                <span class="p">[</span><span class="n">app</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">errback</span><span class="p">)</span>
+                 <span class="k">for</span> <span class="n">errback</span> <span class="ow">in</span> <span class="n">callback</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;link_error&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[]],</span>
+                <span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">,</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">apply_async</span><span class="p">((</span><span class="n">callback</span><span class="o">.</span><span class="n">id</span><span class="p">,))</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">eb_exc</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+            <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">fail_from_current_stack</span><span class="p">(</span><span class="n">callback</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">exc</span><span class="o">=</span><span class="n">eb_exc</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">fail_from_current_stack</span><span class="p">(</span><span class="n">callback</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">exc</span><span class="o">=</span><span class="n">exc</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">fail_from_current_stack</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">exc</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">type_</span><span class="p">,</span> <span class="n">real_exc</span><span class="p">,</span> <span class="n">tb</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">exc</span> <span class="o">=</span> <span class="n">real_exc</span> <span class="k">if</span> <span class="n">exc</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">exc</span>
+            <span class="n">ei</span> <span class="o">=</span> <span class="n">ExceptionInfo</span><span class="p">((</span><span class="n">type_</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">tb</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mark_as_failure</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">ei</span><span class="o">.</span><span class="n">traceback</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">ei</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">del</span> <span class="n">tb</span>
+
+    <span class="k">def</span> <span class="nf">prepare_exception</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Prepare exception for serialization.&quot;&quot;&quot;</span>
+        <span class="n">serializer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="k">if</span> <span class="n">serializer</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">serializer</span>
+        <span class="k">if</span> <span class="n">serializer</span> <span class="ow">in</span> <span class="n">EXCEPTION_ABLE_CODECS</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">get_pickleable_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;exc_type&#39;</span><span class="p">:</span> <span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span>
+                <span class="s1">&#39;exc_message&#39;</span><span class="p">:</span> <span class="n">exc</span><span class="o">.</span><span class="n">args</span><span class="p">,</span>
+                <span class="s1">&#39;exc_module&#39;</span><span class="p">:</span> <span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__module__</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">exception_to_python</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Convert serialized exception to Python exception.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="ne">BaseException</span><span class="p">):</span>
+                <span class="n">exc_module</span> <span class="o">=</span> <span class="n">exc</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;exc_module&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">exc_module</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="bp">cls</span> <span class="o">=</span> <span class="n">create_exception_cls</span><span class="p">(</span>
+                        <span class="n">from_utf8</span><span class="p">(</span><span class="n">exc</span><span class="p">[</span><span class="s1">&#39;exc_type&#39;</span><span class="p">]),</span> <span class="vm">__name__</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">exc_module</span> <span class="o">=</span> <span class="n">from_utf8</span><span class="p">(</span><span class="n">exc_module</span><span class="p">)</span>
+                    <span class="n">exc_type</span> <span class="o">=</span> <span class="n">from_utf8</span><span class="p">(</span><span class="n">exc</span><span class="p">[</span><span class="s1">&#39;exc_type&#39;</span><span class="p">])</span>
+                    <span class="bp">cls</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="n">exc_module</span><span class="p">],</span> <span class="n">exc_type</span><span class="p">)</span>
+                <span class="n">exc_msg</span> <span class="o">=</span> <span class="n">exc</span><span class="p">[</span><span class="s1">&#39;exc_message&#39;</span><span class="p">]</span>
+                <span class="n">exc</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">(</span><span class="o">*</span><span class="n">exc_msg</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc_msg</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span> <span class="k">else</span> <span class="n">exc_msg</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="ow">in</span> <span class="n">EXCEPTION_ABLE_CODECS</span><span class="p">:</span>
+                <span class="n">exc</span> <span class="o">=</span> <span class="n">get_pickled_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">exc</span>
+
+    <span class="k">def</span> <span class="nf">prepare_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Prepare value for storage.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="o">!=</span> <span class="s1">&#39;pickle&#39;</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">ResultBase</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">result</span><span class="o">.</span><span class="n">as_tuple</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">encode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">payload</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_encode</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">payload</span>
+
+    <span class="k">def</span> <span class="nf">_encode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">dumps</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">serializer</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">meta_from_decoded</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">meta</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">EXCEPTION_STATES</span><span class="p">:</span>
+            <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">exception_to_python</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">meta</span>
+
+    <span class="k">def</span> <span class="nf">decode_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">payload</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">meta_from_decoded</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">payload</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">decode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">payload</span><span class="p">):</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">PY3</span> <span class="ow">and</span> <span class="n">payload</span> <span class="ow">or</span> <span class="nb">str</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">loads</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span>
+                     <span class="n">content_type</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">content_type</span><span class="p">,</span>
+                     <span class="n">content_encoding</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">content_encoding</span><span class="p">,</span>
+                     <span class="n">accept</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">accept</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">prepare_expires</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">result_expires</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">timedelta</span><span class="p">):</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">total_seconds</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">type</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">value</span>
+
+    <span class="k">def</span> <span class="nf">prepare_persistent</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">enabled</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">enabled</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">enabled</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">result_persistent</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">persistent</span> <span class="k">if</span> <span class="n">p</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">p</span>
+
+    <span class="k">def</span> <span class="nf">encode_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">state</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">EXCEPTION_STATES</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">prepare_exception</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">prepare_value</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">is_cached</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">task_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span>
+
+    <span class="k">def</span> <span class="nf">store_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span>
+                     <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Update task state and result.&quot;&quot;&quot;</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encode_result</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_store_result</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">traceback</span><span class="p">,</span>
+                           <span class="n">request</span><span class="o">=</span><span class="n">request</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">forget</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_forget</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_forget</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;backend does not implement forget.&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_state</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the state of a task.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_task_meta</span><span class="p">(</span><span class="n">task_id</span><span class="p">)[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span>
+    <span class="n">get_status</span> <span class="o">=</span> <span class="n">get_state</span>  <span class="c1"># XXX compat</span>
+
+    <span class="k">def</span> <span class="nf">get_traceback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the traceback for a failed task.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_task_meta</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;traceback&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the result of a task.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_task_meta</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;result&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_children</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the list of subtasks sent by a task.&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_task_meta</span><span class="p">(</span><span class="n">task_id</span><span class="p">)[</span><span class="s1">&#39;children&#39;</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">_ensure_not_eager</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_always_eager</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;Cannot retrieve result with task_always_eager enabled&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_task_meta</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_not_eager</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">cache</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span>
+            <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                <span class="k">pass</span>
+
+        <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_task_meta_for</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cache</span> <span class="ow">and</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;status&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="n">states</span><span class="o">.</span><span class="n">SUCCESS</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span>
+        <span class="k">return</span> <span class="n">meta</span>
+
+    <span class="k">def</span> <span class="nf">reload_task_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reload task result, even if it has been previously fetched.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_task_meta</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">reload_group_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reload group result, even if it has been previously fetched.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">group_id</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_group_meta</span><span class="p">(</span><span class="n">group_id</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_group_meta</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_not_eager</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">cache</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">group_id</span><span class="p">]</span>
+            <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                <span class="k">pass</span>
+
+        <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_restore_group</span><span class="p">(</span><span class="n">group_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cache</span> <span class="ow">and</span> <span class="n">meta</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">group_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span>
+        <span class="k">return</span> <span class="n">meta</span>
+
+    <span class="k">def</span> <span class="nf">restore_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the result for a group.&quot;&quot;&quot;</span>
+        <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_group_meta</span><span class="p">(</span><span class="n">group_id</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="n">cache</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">meta</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">save_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Store the result of an executed group.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_save_group</span><span class="p">(</span><span class="n">group_id</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">delete_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">group_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_delete_group</span><span class="p">(</span><span class="n">group_id</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Backend cleanup.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This is run by :class:`celery.task.DeleteExpiredTaskMetaTask`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">process_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Cleanup actions to do at the end of a task worker process.&quot;&quot;&quot;</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">on_task_call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">producer</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{}</span>
+
+    <span class="k">def</span> <span class="nf">add_to_chord</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">chord_id</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Backend does not support add_to_chord&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">on_chord_part_return</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">fallback_chord_unlock</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">header_result</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">countdown</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                              <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">as_tuple</span><span class="p">()</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">header_result</span><span class="p">]</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="n">body</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;queue&#39;</span><span class="p">,</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">body</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="s1">&#39;queue&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="s1">&#39;celery.chord_unlock&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">header_result</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">body</span><span class="p">,),</span> <span class="n">kwargs</span><span class="p">,</span>
+            <span class="n">countdown</span><span class="o">=</span><span class="n">countdown</span><span class="p">,</span>
+            <span class="n">queue</span><span class="o">=</span><span class="n">queue</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">ensure_chords_allowed</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">apply_chord</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">header_result</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ensure_chords_allowed</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fallback_chord_unlock</span><span class="p">(</span><span class="n">header_result</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">current_task_children</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">request</span> <span class="o">=</span> <span class="n">request</span> <span class="ow">or</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">get_current_task</span><span class="p">(),</span> <span class="s1">&#39;request&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">request</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">as_tuple</span><span class="p">()</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="s1">&#39;children&#39;</span><span class="p">,</span> <span class="p">[])]</span>
+
+    <span class="k">def</span> <span class="nf">__reduce__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(),</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{}):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">unpickle_backend</span><span class="p">,</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">))</span>
+
+
+<span class="k">class</span> <span class="nc">SyncBackendMixin</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">iter_native</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">interval</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                    <span class="n">on_message</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">on_interval</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_not_eager</span><span class="p">()</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">results</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">results</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">iter</span><span class="p">([])</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_many</span><span class="p">(</span>
+            <span class="p">{</span><span class="n">r</span><span class="o">.</span><span class="n">id</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">},</span>
+            <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span> <span class="n">interval</span><span class="o">=</span><span class="n">interval</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span>
+            <span class="n">on_message</span><span class="o">=</span><span class="n">on_message</span><span class="p">,</span> <span class="n">on_interval</span><span class="o">=</span><span class="n">on_interval</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">wait_for_pending</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">interval</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+                         <span class="n">no_ack</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">on_message</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">on_interval</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                         <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">propagate</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_not_eager</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">on_message</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">ImproperlyConfigured</span><span class="p">(</span>
+                <span class="s1">&#39;Backend does not support on_message callback&#39;</span><span class="p">)</span>
+
+        <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait_for</span><span class="p">(</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span>
+            <span class="n">interval</span><span class="o">=</span><span class="n">interval</span><span class="p">,</span>
+            <span class="n">on_interval</span><span class="o">=</span><span class="n">on_interval</span><span class="p">,</span>
+            <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">meta</span><span class="p">:</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">_maybe_set_cache</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">result</span><span class="o">.</span><span class="n">maybe_throw</span><span class="p">(</span><span class="n">propagate</span><span class="o">=</span><span class="n">propagate</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="n">callback</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">wait_for</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span>
+                 <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">interval</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">on_interval</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Wait for task and return its result.</span>
+
+<span class="sd">        If the task raises an exception, this exception</span>
+<span class="sd">        will be re-raised by :func:`wait_for`.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            celery.exceptions.TimeoutError:</span>
+<span class="sd">                If `timeout` is not :const:`None`, and the operation</span>
+<span class="sd">                takes longer than `timeout` seconds.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_not_eager</span><span class="p">()</span>
+
+        <span class="n">time_elapsed</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+        <span class="k">while</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_task_meta</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="n">states</span><span class="o">.</span><span class="n">READY_STATES</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">meta</span>
+            <span class="k">if</span> <span class="n">on_interval</span><span class="p">:</span>
+                <span class="n">on_interval</span><span class="p">()</span>
+            <span class="c1"># avoid hammering the CPU checking status.</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">interval</span><span class="p">)</span>
+            <span class="n">time_elapsed</span> <span class="o">+=</span> <span class="n">interval</span>
+            <span class="k">if</span> <span class="n">timeout</span> <span class="ow">and</span> <span class="n">time_elapsed</span> <span class="o">&gt;=</span> <span class="n">timeout</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">TimeoutError</span><span class="p">(</span><span class="s1">&#39;The operation timed out.&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">add_pending_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">weak</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">remove_pending_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">is_async</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+
+<div class="viewcode-block" id="BaseBackend"><a class="viewcode-back" href="../../../internals/reference/celery.backends.base.html#celery.backends.base.BaseBackend">[docs]</a><span class="k">class</span> <span class="nc">BaseBackend</span><span class="p">(</span><span class="n">Backend</span><span class="p">,</span> <span class="n">SyncBackendMixin</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Base (synchronous) result backend.&quot;&quot;&quot;</span></div>
+
+
+<span class="n">BaseDictBackend</span> <span class="o">=</span> <span class="n">BaseBackend</span>  <span class="c1"># noqa: E305 XXX compat</span>
+
+
+<span class="k">class</span> <span class="nc">BaseKeyValueStoreBackend</span><span class="p">(</span><span class="n">Backend</span><span class="p">):</span>
+    <span class="n">key_t</span> <span class="o">=</span> <span class="n">ensure_bytes</span>
+    <span class="n">task_keyprefix</span> <span class="o">=</span> <span class="s1">&#39;celery-task-meta-&#39;</span>
+    <span class="n">group_keyprefix</span> <span class="o">=</span> <span class="s1">&#39;celery-taskset-meta-&#39;</span>
+    <span class="n">chord_keyprefix</span> <span class="o">=</span> <span class="s1">&#39;chord-unlock-&#39;</span>
+    <span class="n">implements_incr</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">key_t</span><span class="p">,</span> <span class="s1">&#39;__func__&#39;</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span><span class="o">.</span><span class="vm">__func__</span>  <span class="c1"># remove binding</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_encode_prefixes</span><span class="p">()</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">BaseKeyValueStoreBackend</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">implements_incr</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">apply_chord</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_chord_incr</span>
+
+    <span class="k">def</span> <span class="nf">_encode_prefixes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task_keyprefix</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">task_keyprefix</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">group_keyprefix</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">group_keyprefix</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">chord_keyprefix</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">chord_keyprefix</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Must implement the get method.&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">mget</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Does not support get_many&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">set</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Must implement the set method.&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">delete</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Must implement the delete method&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">incr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;Does not implement incr&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">expire</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">get_key_for_task</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the cache key for a task by id.&quot;&quot;&quot;</span>
+        <span class="n">key_t</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span>
+        <span class="k">return</span> <span class="n">key_t</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">task_keyprefix</span><span class="p">,</span> <span class="n">key_t</span><span class="p">(</span><span class="n">task_id</span><span class="p">),</span> <span class="n">key_t</span><span class="p">(</span><span class="n">key</span><span class="p">),</span>
+        <span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">get_key_for_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the cache key for a group by id.&quot;&quot;&quot;</span>
+        <span class="n">key_t</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span>
+        <span class="k">return</span> <span class="n">key_t</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">group_keyprefix</span><span class="p">,</span> <span class="n">key_t</span><span class="p">(</span><span class="n">group_id</span><span class="p">),</span> <span class="n">key_t</span><span class="p">(</span><span class="n">key</span><span class="p">),</span>
+        <span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">get_key_for_chord</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the cache key for the chord waiting on group with given id.&quot;&quot;&quot;</span>
+        <span class="n">key_t</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span>
+        <span class="k">return</span> <span class="n">key_t</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">chord_keyprefix</span><span class="p">,</span> <span class="n">key_t</span><span class="p">(</span><span class="n">group_id</span><span class="p">),</span> <span class="n">key_t</span><span class="p">(</span><span class="n">key</span><span class="p">),</span>
+        <span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">_strip_prefix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Take bytes: emit string.&quot;&quot;&quot;</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">key_t</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">prefix</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_keyprefix</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">group_keyprefix</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">prefix</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">bytes_to_str</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">prefix</span><span class="p">):])</span>
+        <span class="k">return</span> <span class="n">bytes_to_str</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_filter_ready</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">READY_STATES</span><span class="o">=</span><span class="n">states</span><span class="o">.</span><span class="n">READY_STATES</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">values</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">v</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">decode_result</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="n">READY_STATES</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span>
+
+    <span class="k">def</span> <span class="nf">_mget_to_results</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">values</span><span class="p">,</span> <span class="s1">&#39;items&#39;</span><span class="p">):</span>
+            <span class="c1"># client returns dict so mapping preserved.</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_strip_prefix</span><span class="p">(</span><span class="n">k</span><span class="p">):</span> <span class="n">v</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_filter_ready</span><span class="p">(</span><span class="n">items</span><span class="p">(</span><span class="n">values</span><span class="p">))</span>
+            <span class="p">}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># client returns list so need to recreate mapping.</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="n">bytes_to_str</span><span class="p">(</span><span class="n">keys</span><span class="p">[</span><span class="n">i</span><span class="p">]):</span> <span class="n">v</span>
+                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_filter_ready</span><span class="p">(</span><span class="nb">enumerate</span><span class="p">(</span><span class="n">values</span><span class="p">))</span>
+            <span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">get_many</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_ids</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">interval</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                 <span class="n">on_message</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">on_interval</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_iterations</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">READY_STATES</span><span class="o">=</span><span class="n">states</span><span class="o">.</span><span class="n">READY_STATES</span><span class="p">):</span>
+        <span class="n">interval</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="k">if</span> <span class="n">interval</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">interval</span>
+        <span class="n">ids</span> <span class="o">=</span> <span class="n">task_ids</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">task_ids</span><span class="p">,</span> <span class="nb">set</span><span class="p">)</span> <span class="k">else</span> <span class="nb">set</span><span class="p">(</span><span class="n">task_ids</span><span class="p">)</span>
+        <span class="n">cached_ids</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">cache</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span>
+        <span class="k">for</span> <span class="n">task_id</span> <span class="ow">in</span> <span class="n">ids</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">cached</span> <span class="o">=</span> <span class="n">cache</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span>
+            <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                <span class="k">pass</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">cached</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="n">READY_STATES</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="n">bytes_to_str</span><span class="p">(</span><span class="n">task_id</span><span class="p">),</span> <span class="n">cached</span>
+                    <span class="n">cached_ids</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+
+        <span class="n">ids</span><span class="o">.</span><span class="n">difference_update</span><span class="p">(</span><span class="n">cached_ids</span><span class="p">)</span>
+        <span class="n">iterations</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="n">ids</span><span class="p">:</span>
+            <span class="n">keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ids</span><span class="p">)</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mget_to_results</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mget</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_task</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+                                                 <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">]),</span> <span class="n">keys</span><span class="p">)</span>
+            <span class="n">cache</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="n">ids</span><span class="o">.</span><span class="n">difference_update</span><span class="p">({</span><span class="n">bytes_to_str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">r</span><span class="p">})</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">r</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">on_message</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">on_message</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+                <span class="k">yield</span> <span class="n">bytes_to_str</span><span class="p">(</span><span class="n">key</span><span class="p">),</span> <span class="n">value</span>
+            <span class="k">if</span> <span class="n">timeout</span> <span class="ow">and</span> <span class="n">iterations</span> <span class="o">*</span> <span class="n">interval</span> <span class="o">&gt;=</span> <span class="n">timeout</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">TimeoutError</span><span class="p">(</span><span class="s1">&#39;Operation timed out (</span><span class="si">{0}</span><span class="s1">)&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">timeout</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">on_interval</span><span class="p">:</span>
+                <span class="n">on_interval</span><span class="p">()</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">interval</span><span class="p">)</span>  <span class="c1"># don&#39;t busy loop.</span>
+            <span class="n">iterations</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">max_iterations</span> <span class="ow">and</span> <span class="n">iterations</span> <span class="o">&gt;=</span> <span class="n">max_iterations</span><span class="p">:</span>
+                <span class="k">break</span>
+
+    <span class="k">def</span> <span class="nf">_forget</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_task</span><span class="p">(</span><span class="n">task_id</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">_store_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span>
+                      <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">meta</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">state</span><span class="p">,</span> <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="n">result</span><span class="p">,</span> <span class="s1">&#39;traceback&#39;</span><span class="p">:</span> <span class="n">traceback</span><span class="p">,</span>
+            <span class="s1">&#39;children&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_task_children</span><span class="p">(</span><span class="n">request</span><span class="p">),</span>
+            <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">bytes_to_str</span><span class="p">(</span><span class="n">task_id</span><span class="p">),</span>
+        <span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_task</span><span class="p">(</span><span class="n">task_id</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">meta</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">_save_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_group</span><span class="p">(</span><span class="n">group_id</span><span class="p">),</span>
+                 <span class="bp">self</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="n">result</span><span class="o">.</span><span class="n">as_tuple</span><span class="p">()}))</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">_delete_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_group</span><span class="p">(</span><span class="n">group_id</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">_get_task_meta_for</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get task meta-data for a task by id.&quot;&quot;&quot;</span>
+        <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_task</span><span class="p">(</span><span class="n">task_id</span><span class="p">))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">meta</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">states</span><span class="o">.</span><span class="n">PENDING</span><span class="p">,</span> <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">decode_result</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_restore_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get task meta-data for a task by id.&quot;&quot;&quot;</span>
+        <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_group</span><span class="p">(</span><span class="n">group_id</span><span class="p">))</span>
+        <span class="c1"># previously this was always pickled, but later this</span>
+        <span class="c1"># was extended to support other serializers, so the</span>
+        <span class="c1"># structure is kind of weird.</span>
+        <span class="k">if</span> <span class="n">meta</span><span class="p">:</span>
+            <span class="n">meta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">]</span>
+            <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">result_from_tuple</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">meta</span>
+
+    <span class="k">def</span> <span class="nf">_apply_chord_incr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">header_result</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ensure_chords_allowed</span><span class="p">()</span>
+        <span class="n">header_result</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">on_chord_part_return</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">implements_incr</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">app</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span>
+        <span class="n">gid</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">group</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">gid</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_key_for_chord</span><span class="p">(</span><span class="n">gid</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">deps</span> <span class="o">=</span> <span class="n">GroupResult</span><span class="o">.</span><span class="n">restore</span><span class="p">(</span><span class="n">gid</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+            <span class="n">callback</span> <span class="o">=</span> <span class="n">maybe_signature</span><span class="p">(</span><span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s1">&#39;Chord </span><span class="si">%r</span><span class="s1"> raised: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">gid</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">chord_error_from_stack</span><span class="p">(</span>
+                <span class="n">callback</span><span class="p">,</span>
+                <span class="n">ChordError</span><span class="p">(</span><span class="s1">&#39;Cannot restore group: </span><span class="si">{0!r}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">exc</span><span class="p">)),</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="n">deps</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">gid</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="n">callback</span> <span class="o">=</span> <span class="n">maybe_signature</span><span class="p">(</span><span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s1">&#39;Chord callback </span><span class="si">%r</span><span class="s1"> raised: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">gid</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">chord_error_from_stack</span><span class="p">(</span>
+                    <span class="n">callback</span><span class="p">,</span>
+                    <span class="n">ChordError</span><span class="p">(</span><span class="s1">&#39;GroupResult </span><span class="si">{0}</span><span class="s1"> no longer exists&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">gid</span><span class="p">)),</span>
+                <span class="p">)</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">incr</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">size</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">deps</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">val</span> <span class="o">&gt;</span> <span class="n">size</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Chord counter incremented too many times for </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span>
+                           <span class="n">gid</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">val</span> <span class="o">==</span> <span class="n">size</span><span class="p">:</span>
+            <span class="n">callback</span> <span class="o">=</span> <span class="n">maybe_signature</span><span class="p">(</span><span class="n">request</span><span class="o">.</span><span class="n">chord</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">)</span>
+            <span class="n">j</span> <span class="o">=</span> <span class="n">deps</span><span class="o">.</span><span class="n">join_native</span> <span class="k">if</span> <span class="n">deps</span><span class="o">.</span><span class="n">supports_native_join</span> <span class="k">else</span> <span class="n">deps</span><span class="o">.</span><span class="n">join</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">with</span> <span class="n">allow_join_result</span><span class="p">():</span>
+                    <span class="n">ret</span> <span class="o">=</span> <span class="n">j</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span> <span class="n">propagate</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">culprit</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">deps</span><span class="o">.</span><span class="n">_failed_join_report</span><span class="p">())</span>
+                    <span class="n">reason</span> <span class="o">=</span> <span class="s1">&#39;Dependency </span><span class="si">{0.id}</span><span class="s1"> raised </span><span class="si">{1!r}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                        <span class="n">culprit</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span>
+                    <span class="p">)</span>
+                <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+                    <span class="n">reason</span> <span class="o">=</span> <span class="nb">repr</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+
+                <span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s1">&#39;Chord </span><span class="si">%r</span><span class="s1"> raised: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">gid</span><span class="p">,</span> <span class="n">reason</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">chord_error_from_stack</span><span class="p">(</span><span class="n">callback</span><span class="p">,</span> <span class="n">ChordError</span><span class="p">(</span><span class="n">reason</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">callback</span><span class="o">.</span><span class="n">delay</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s1">&#39;Chord </span><span class="si">%r</span><span class="s1"> raised: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">gid</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">chord_error_from_stack</span><span class="p">(</span>
+                        <span class="n">callback</span><span class="p">,</span>
+                        <span class="n">ChordError</span><span class="p">(</span><span class="s1">&#39;Callback error: </span><span class="si">{0!r}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">exc</span><span class="p">)),</span>
+                    <span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="n">deps</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">expire</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">expires</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="KeyValueStoreBackend"><a class="viewcode-back" href="../../../internals/reference/celery.backends.base.html#celery.backends.base.KeyValueStoreBackend">[docs]</a><span class="k">class</span> <span class="nc">KeyValueStoreBackend</span><span class="p">(</span><span class="n">BaseKeyValueStoreBackend</span><span class="p">,</span> <span class="n">SyncBackendMixin</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Result backend base class for key/value stores.&quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="DisabledBackend"><a class="viewcode-back" href="../../../internals/reference/celery.backends.base.html#celery.backends.base.DisabledBackend">[docs]</a><span class="k">class</span> <span class="nc">DisabledBackend</span><span class="p">(</span><span class="n">BaseBackend</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Dummy result backend.&quot;&quot;&quot;</span>
+
+    <span class="n">_cache</span> <span class="o">=</span> <span class="p">{}</span>   <span class="c1"># need this attribute to reset cache in tests.</span>
+
+<div class="viewcode-block" id="DisabledBackend.store_result"><a class="viewcode-back" href="../../../internals/reference/celery.backends.base.html#celery.backends.base.DisabledBackend.store_result">[docs]</a>    <span class="k">def</span> <span class="nf">store_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="DisabledBackend.ensure_chords_allowed"><a class="viewcode-back" href="../../../internals/reference/celery.backends.base.html#celery.backends.base.DisabledBackend.ensure_chords_allowed">[docs]</a>    <span class="k">def</span> <span class="nf">ensure_chords_allowed</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="n">E_CHORD_NO_BACKEND</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span></div>
+
+    <span class="k">def</span> <span class="nf">_is_disabled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="n">E_NO_BACKEND</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+
+<div class="viewcode-block" id="DisabledBackend.as_uri"><a class="viewcode-back" href="../../../internals/reference/celery.backends.base.html#celery.backends.base.DisabledBackend.as_uri">[docs]</a>    <span class="k">def</span> <span class="nf">as_uri</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;disabled://&#39;</span></div>
+
+    <span class="n">get_state</span> <span class="o">=</span> <span class="n">get_status</span> <span class="o">=</span> <span class="n">get_result</span> <span class="o">=</span> <span class="n">get_traceback</span> <span class="o">=</span> <span class="n">_is_disabled</span>
+    <span class="n">get_task_meta_for</span> <span class="o">=</span> <span class="n">wait_for</span> <span class="o">=</span> <span class="n">get_many</span> <span class="o">=</span> <span class="n">_is_disabled</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../backends.html" >celery.backends</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

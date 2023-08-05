@@ -1,0 +1,997 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Extensions and Bootsteps &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="copyright" title="Copyright" href="../copyright.html" />
+    <link rel="next" title="Configuration and defaults" href="configuration.html" />
+    <link rel="prev" title="Testing with Celery" href="testing.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="configuration.html" title="Configuration and defaults"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="testing.html" title="Testing with Celery"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">User Guide</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/userguide/extending.html">go here</a>.
+        </p>
+    
+
+</div>
+    <div class="section" id="extensions-and-bootsteps">
+<span id="guide-extending"></span><h1>Extensions and Bootsteps<a class="headerlink" href="#extensions-and-bootsteps" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><a class="reference internal" href="#custom-message-consumers" id="id4">Custom Message Consumers</a></li>
+<li><a class="reference internal" href="#blueprints" id="id5">Blueprints</a></li>
+<li><a class="reference internal" href="#worker" id="id6">Worker</a><ul>
+<li><a class="reference internal" href="#attributes" id="id7">Attributes</a></li>
+<li><a class="reference internal" href="#example-worker-bootstep" id="id8">Example worker bootstep</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#consumer" id="id9">Consumer</a><ul>
+<li><a class="reference internal" href="#extending-consumer-attributes" id="id10">Attributes</a></li>
+<li><a class="reference internal" href="#methods" id="id11">Methods</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#installing-bootsteps" id="id12">Installing Bootsteps</a></li>
+<li><a class="reference internal" href="#command-line-programs" id="id13">Command-line programs</a><ul>
+<li><a class="reference internal" href="#adding-new-command-line-options" id="id14">Adding new command-line options</a></li>
+<li><a class="reference internal" href="#adding-new-celery-sub-commands" id="id15">Adding new <strong class="program">celery</strong> sub-commands</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#worker-api" id="id16">Worker API</a><ul>
+<li><a class="reference internal" href="#hub-the-workers-async-event-loop" id="id17"><code class="xref py py-class docutils literal notranslate"><span class="pre">Hub</span></code> - The workers async event loop</a></li>
+<li><a class="reference internal" href="#timer-scheduling-events" id="id18">Timer - Scheduling events</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="custom-message-consumers">
+<span id="extending-custom-consumers"></span><h2><a class="toc-backref" href="#id4">Custom Message Consumers</a><a class="headerlink" href="#custom-message-consumers" title="Permalink to this headline">¶</a></h2>
+<p>You may want to embed custom Kombu consumers to manually process your messages.</p>
+<p>For that purpose a special <code class="xref py py-class docutils literal notranslate"><span class="pre">ConsumerStep</span></code> bootstep class
+exists, where you only need to define the <code class="docutils literal notranslate"><span class="pre">get_consumers</span></code> method, that must
+return a list of <a class="reference external" href="http://kombu.readthedocs.io/en/master/reference/kombu.html#kombu.Consumer" title="(in Kombu v4.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">kombu.Consumer</span></code></a> objects to start
+whenever the connection is established:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+<span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">bootsteps</span>
+<span class="kn">from</span> <span class="nn">kombu</span> <span class="kn">import</span> <span class="n">Consumer</span><span class="p">,</span> <span class="n">Exchange</span><span class="p">,</span> <span class="n">Queue</span>
+
+<span class="n">my_queue</span> <span class="o">=</span> <span class="n">Queue</span><span class="p">(</span><span class="s1">&#39;custom&#39;</span><span class="p">,</span> <span class="n">Exchange</span><span class="p">(</span><span class="s1">&#39;custom&#39;</span><span class="p">),</span> <span class="s1">&#39;routing_key&#39;</span><span class="p">)</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">(</span><span class="n">broker</span><span class="o">=</span><span class="s1">&#39;amqp://&#39;</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">MyConsumerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">ConsumerStep</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">get_consumers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">Consumer</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span>
+                         <span class="n">queues</span><span class="o">=</span><span class="p">[</span><span class="n">my_queue</span><span class="p">],</span>
+                         <span class="n">callbacks</span><span class="o">=</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">handle_message</span><span class="p">],</span>
+                         <span class="n">accept</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;json&#39;</span><span class="p">])]</span>
+
+    <span class="k">def</span> <span class="nf">handle_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Received message: {0!r}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">body</span><span class="p">))</span>
+        <span class="n">message</span><span class="o">.</span><span class="n">ack</span><span class="p">()</span>
+<span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;consumer&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">MyConsumerStep</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">send_me_a_message</span><span class="p">(</span><span class="n">who</span><span class="p">,</span> <span class="n">producer</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="k">with</span> <span class="n">app</span><span class="o">.</span><span class="n">producer_or_acquire</span><span class="p">(</span><span class="n">producer</span><span class="p">)</span> <span class="k">as</span> <span class="n">producer</span><span class="p">:</span>
+        <span class="n">producer</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span>
+            <span class="p">{</span><span class="s1">&#39;hello&#39;</span><span class="p">:</span> <span class="n">who</span><span class="p">},</span>
+            <span class="n">serializer</span><span class="o">=</span><span class="s1">&#39;json&#39;</span><span class="p">,</span>
+            <span class="n">exchange</span><span class="o">=</span><span class="n">my_queue</span><span class="o">.</span><span class="n">exchange</span><span class="p">,</span>
+            <span class="n">routing_key</span><span class="o">=</span><span class="s1">&#39;routing_key&#39;</span><span class="p">,</span>
+            <span class="n">declare</span><span class="o">=</span><span class="p">[</span><span class="n">my_queue</span><span class="p">],</span>
+            <span class="n">retry</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+        <span class="p">)</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">send_me_a_message</span><span class="p">(</span><span class="s1">&#39;world!&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p>Kombu Consumers can take use of two different message callback dispatching
+mechanisms. The first one is the <code class="docutils literal notranslate"><span class="pre">callbacks</span></code> argument that accepts
+a list of callbacks with a <code class="docutils literal notranslate"><span class="pre">(body,</span> <span class="pre">message)</span></code> signature,
+the second one is the <code class="docutils literal notranslate"><span class="pre">on_message</span></code> argument that takes a single
+callback with a <code class="docutils literal notranslate"><span class="pre">(message,)</span></code> signature. The latter won’t
+automatically decode and deserialize the payload.</p>
+<div class="last highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">get_consumers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">Consumer</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="n">queues</span><span class="o">=</span><span class="p">[</span><span class="n">my_queue</span><span class="p">],</span>
+                     <span class="n">on_message</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_message</span><span class="p">)]</span>
+
+
+<span class="k">def</span> <span class="nf">on_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">message</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="k">print</span><span class="p">(</span>
+        <span class="s1">&#39;Received message: {0!r} {props!r} rawlen={s}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">payload</span><span class="p">,</span> <span class="n">props</span><span class="o">=</span><span class="n">message</span><span class="o">.</span><span class="n">properties</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">body</span><span class="p">),</span>
+    <span class="p">))</span>
+    <span class="n">message</span><span class="o">.</span><span class="n">ack</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="blueprints">
+<span id="extending-blueprints"></span><h2><a class="toc-backref" href="#id5">Blueprints</a><a class="headerlink" href="#blueprints" title="Permalink to this headline">¶</a></h2>
+<p>Bootsteps is a technique to add functionality to the workers.
+A bootstep is a custom class that defines hooks to do custom actions
+at different stages in the worker. Every bootstep belongs to a blueprint,
+and the worker currently defines two blueprints: <strong>Worker</strong>, and <strong>Consumer</strong></p>
+<hr class="docutils" />
+<dl class="docutils">
+<dt><strong>Figure A:</strong> Bootsteps in the Worker and Consumer blueprints. Starting</dt>
+<dd>from the bottom up the first step in the worker blueprint
+is the Timer, and the last step is to start the Consumer blueprint,
+that then establishes the broker connection and starts
+consuming messages.</dd>
+</dl>
+<div class="figure">
+<img alt="../_images/worker_graph_full.png" src="../_images/worker_graph_full.png" />
+</div>
+<hr class="docutils" />
+</div>
+<div class="section" id="worker">
+<span id="extending-worker-blueprint"></span><h2><a class="toc-backref" href="#id6">Worker</a><a class="headerlink" href="#worker" title="Permalink to this headline">¶</a></h2>
+<p>The Worker is the first blueprint to start, and with it starts major components like
+the event loop, processing pool, and the timer used for ETA tasks and other
+timed events.</p>
+<p>When the worker is fully started it continues with the Consumer blueprint,
+that sets up how tasks are executed, connects to the broker and starts
+the message consumers.</p>
+<p>The <a class="reference internal" href="../reference/celery.worker.html#celery.worker.WorkController" title="celery.worker.WorkController"><code class="xref py py-class docutils literal notranslate"><span class="pre">WorkController</span></code></a> is the core worker implementation,
+and contains several methods and attributes that you can use in your bootstep.</p>
+<div class="section" id="attributes">
+<span id="extending-worker-blueprint-attributes"></span><h3><a class="toc-backref" href="#id7">Attributes</a><a class="headerlink" href="#attributes" title="Permalink to this headline">¶</a></h3>
+<span class="target" id="extending-worker-app"></span><dl class="attribute">
+<dt id="app">
+<code class="descname">app</code><a class="headerlink" href="#app" title="Permalink to this definition">¶</a></dt>
+<dd><p>The current app instance.</p>
+</dd></dl>
+
+<span class="target" id="extending-worker-hostname"></span><dl class="attribute">
+<dt id="hostname">
+<code class="descname">hostname</code><a class="headerlink" href="#hostname" title="Permalink to this definition">¶</a></dt>
+<dd><p>The workers node name (e.g., <cite>worker1&#64;example.com</cite>)</p>
+</dd></dl>
+
+<span class="target" id="id1"></span><dl class="attribute">
+<dt id="blueprint">
+<code class="descname">blueprint</code><a class="headerlink" href="#blueprint" title="Permalink to this definition">¶</a></dt>
+<dd><p>This is the worker <a class="reference internal" href="../reference/celery.bootsteps.html#celery.bootsteps.Blueprint" title="celery.bootsteps.Blueprint"><code class="xref py py-class docutils literal notranslate"><span class="pre">Blueprint</span></code></a>.</p>
+</dd></dl>
+
+<span class="target" id="extending-worker-hub"></span><dl class="attribute">
+<dt id="hub">
+<code class="descname">hub</code><a class="headerlink" href="#hub" title="Permalink to this definition">¶</a></dt>
+<dd><p>Event loop object (<code class="xref py py-class docutils literal notranslate"><span class="pre">Hub</span></code>). You can use
+this to register callbacks in the event loop.</p>
+<p>This is only supported by async I/O enabled transports (amqp, redis),
+in which case the <cite>worker.use_eventloop</cite> attribute should be set.</p>
+<p>Your worker bootstep must require the Hub bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">WorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.components:Hub&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-worker-pool"></span><dl class="attribute">
+<dt id="pool">
+<code class="descname">pool</code><a class="headerlink" href="#pool" title="Permalink to this definition">¶</a></dt>
+<dd><p>The current process/eventlet/gevent/thread pool.
+See <a class="reference internal" href="../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool" title="celery.concurrency.base.BasePool"><code class="xref py py-class docutils literal notranslate"><span class="pre">celery.concurrency.base.BasePool</span></code></a>.</p>
+<p>Your worker bootstep must require the Pool bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">WorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.components:Pool&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-worker-timer"></span><dl class="attribute">
+<dt id="timer">
+<code class="descname">timer</code><a class="headerlink" href="#timer" title="Permalink to this definition">¶</a></dt>
+<dd><p><code class="xref py py-class docutils literal notranslate"><span class="pre">Timer</span></code> used to schedule functions.</p>
+<p>Your worker bootstep must require the Timer bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">WorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.components:Timer&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-worker-statedb"></span><dl class="attribute">
+<dt id="statedb">
+<code class="descname">statedb</code><a class="headerlink" href="#statedb" title="Permalink to this definition">¶</a></dt>
+<dd><p><code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span> <span class="pre">&lt;celery.worker.state.Persistent&gt;`</span></code> to persist state between
+worker restarts.</p>
+<p>This is only defined if the <code class="docutils literal notranslate"><span class="pre">statedb</span></code> argument is enabled.</p>
+<p>Your worker bootstep must require the <code class="docutils literal notranslate"><span class="pre">Statedb</span></code> bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">WorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.components:Statedb&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-worker-autoscaler"></span><dl class="attribute">
+<dt id="autoscaler">
+<code class="descname">autoscaler</code><a class="headerlink" href="#autoscaler" title="Permalink to this definition">¶</a></dt>
+<dd><p><code class="xref py py-class docutils literal notranslate"><span class="pre">Autoscaler</span></code> used to automatically grow
+and shrink the number of processes in the pool.</p>
+<p>This is only defined if the <code class="docutils literal notranslate"><span class="pre">autoscale</span></code> argument is enabled.</p>
+<p>Your worker bootstep must require the <cite>Autoscaler</cite> bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">WorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;celery.worker.autoscaler:Autoscaler&#39;</span><span class="p">,)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-worker-autoreloader"></span><dl class="attribute">
+<dt id="autoreloader">
+<code class="descname">autoreloader</code><a class="headerlink" href="#autoreloader" title="Permalink to this definition">¶</a></dt>
+<dd><p><code class="xref py py-class docutils literal notranslate"><span class="pre">Autoreloader</span></code> used to automatically
+reload use code when the file-system changes.</p>
+<p>This is only defined if the <code class="docutils literal notranslate"><span class="pre">autoreload</span></code> argument is enabled.
+Your worker bootstep must require the <cite>Autoreloader</cite> bootstep to use this;</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">WorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;celery.worker.autoreloader:Autoreloader&#39;</span><span class="p">,)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</div>
+<div class="section" id="example-worker-bootstep">
+<h3><a class="toc-backref" href="#id8">Example worker bootstep</a><a class="headerlink" href="#example-worker-bootstep" title="Permalink to this headline">¶</a></h3>
+<p>An example Worker bootstep could be:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">bootsteps</span>
+
+<span class="k">class</span> <span class="nc">ExampleWorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.components:Pool&#39;</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Called when the WorkController instance is constructed&#39;</span><span class="p">)</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Arguments to WorkController: {0!r}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">kwargs</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">create</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="c1"># this method can be used to delegate the action methods</span>
+        <span class="c1"># to another object that implements ``start`` and ``stop``.</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Called when the worker is started.&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Called when the worker shuts down.&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">terminate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Called when the worker terminates&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Every method is passed the current <code class="docutils literal notranslate"><span class="pre">WorkController</span></code> instance as the first
+argument.</p>
+<p>Another example could use the timer to wake up at regular intervals:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">bootsteps</span>
+
+
+<span class="k">class</span> <span class="nc">DeadlockDetection</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.components:Timer&#39;</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">,</span> <span class="n">deadlock_timeout</span><span class="o">=</span><span class="mi">3600</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timeout</span> <span class="o">=</span> <span class="n">deadlock_timeout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">requests</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tref</span> <span class="o">=</span> <span class="bp">None</span>
+
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="c1"># run every 30 seconds.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tref</span> <span class="o">=</span> <span class="n">worker</span><span class="o">.</span><span class="n">timer</span><span class="o">.</span><span class="n">call_repeatedly</span><span class="p">(</span>
+            <span class="mf">30.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">detect</span><span class="p">,</span> <span class="p">(</span><span class="n">worker</span><span class="p">,),</span> <span class="n">priority</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">tref</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tref</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tref</span> <span class="o">=</span> <span class="bp">None</span>
+
+    <span class="k">def</span> <span class="nf">detect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="c1"># update active requests</span>
+        <span class="k">for</span> <span class="n">req</span> <span class="ow">in</span> <span class="n">worker</span><span class="o">.</span><span class="n">active_requests</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">req</span><span class="o">.</span><span class="n">time_start</span> <span class="ow">and</span> <span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">req</span><span class="o">.</span><span class="n">time_start</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">timeout</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="consumer">
+<span id="extending-consumer-blueprint"></span><h2><a class="toc-backref" href="#id9">Consumer</a><a class="headerlink" href="#consumer" title="Permalink to this headline">¶</a></h2>
+<p>The Consumer blueprint establishes a connection to the broker, and
+is restarted every time this connection is lost. Consumer bootsteps
+include the worker heartbeat, the remote control command consumer, and
+importantly, the task consumer.</p>
+<p>When you create consumer bootsteps you must take into account that it must
+be possible to restart your blueprint. An additional ‘shutdown’ method is
+defined for consumer bootsteps, this method is called when the worker is
+shutdown.</p>
+<div class="section" id="extending-consumer-attributes">
+<span id="id2"></span><h3><a class="toc-backref" href="#id10">Attributes</a><a class="headerlink" href="#extending-consumer-attributes" title="Permalink to this headline">¶</a></h3>
+<span class="target" id="extending-consumer-app"></span><dl class="attribute">
+<dt>
+<code class="descname">app</code></dt>
+<dd><p>The current app instance.</p>
+</dd></dl>
+
+<span class="target" id="extending-consumer-controller"></span><dl class="attribute">
+<dt id="controller">
+<code class="descname">controller</code><a class="headerlink" href="#controller" title="Permalink to this definition">¶</a></dt>
+<dd><p>The parent <a class="reference internal" href="../reference/celery.worker.html#celery.worker.WorkController" title="celery.worker.WorkController"><code class="xref py py-class docutils literal notranslate"><span class="pre">WorkController</span></code></a> object that created this consumer.</p>
+</dd></dl>
+
+<span class="target" id="extending-consumer-hostname"></span><dl class="attribute">
+<dt>
+<code class="descname">hostname</code></dt>
+<dd><p>The workers node name (e.g., <cite>worker1&#64;example.com</cite>)</p>
+</dd></dl>
+
+<span class="target" id="id3"></span><dl class="attribute">
+<dt>
+<code class="descname">blueprint</code></dt>
+<dd><p>This is the worker <a class="reference internal" href="../reference/celery.bootsteps.html#celery.bootsteps.Blueprint" title="celery.bootsteps.Blueprint"><code class="xref py py-class docutils literal notranslate"><span class="pre">Blueprint</span></code></a>.</p>
+</dd></dl>
+
+<span class="target" id="extending-consumer-hub"></span><dl class="attribute">
+<dt>
+<code class="descname">hub</code></dt>
+<dd><p>Event loop object (<code class="xref py py-class docutils literal notranslate"><span class="pre">Hub</span></code>). You can use
+this to register callbacks in the event loop.</p>
+<p>This is only supported by async I/O enabled transports (amqp, redis),
+in which case the <cite>worker.use_eventloop</cite> attribute should be set.</p>
+<p>Your worker bootstep must require the Hub bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">WorkerStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.components:Hub&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-consumer-connection"></span><dl class="attribute">
+<dt id="connection">
+<code class="descname">connection</code><a class="headerlink" href="#connection" title="Permalink to this definition">¶</a></dt>
+<dd><p>The current broker connection (<a class="reference external" href="http://kombu.readthedocs.io/en/master/reference/kombu.html#kombu.Connection" title="(in Kombu v4.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">kombu.Connection</span></code></a>).</p>
+<p>A consumer bootstep must require the ‘Connection’ bootstep
+to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Step</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.consumer.connection:Connection&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-consumer-event-dispatcher"></span><dl class="attribute">
+<dt id="event_dispatcher">
+<code class="descname">event_dispatcher</code><a class="headerlink" href="#event_dispatcher" title="Permalink to this definition">¶</a></dt>
+<dd><p>A <code class="xref py py-class docutils literal notranslate"><span class="pre">app.events.Dispatcher</span></code> object that can be used to send events.</p>
+<p>A consumer bootstep must require the <cite>Events</cite> bootstep to use this.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Step</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.consumer.events:Events&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-consumer-gossip"></span><dl class="attribute">
+<dt id="gossip">
+<code class="descname">gossip</code><a class="headerlink" href="#gossip" title="Permalink to this definition">¶</a></dt>
+<dd><p>Worker to worker broadcast communication
+(<a class="reference internal" href="../reference/celery.worker.consumer.gossip.html#celery.worker.consumer.gossip.Gossip" title="celery.worker.consumer.gossip.Gossip"><code class="xref py py-class docutils literal notranslate"><span class="pre">Gossip</span></code></a>).</p>
+<p>A consumer bootstep must require the <cite>Gossip</cite> bootstep to use this.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">RatelimitStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Rate limit tasks based on the number of workers in the</span>
+<span class="sd">    cluster.&quot;&quot;&quot;</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.consumer.gossip:Gossip&#39;</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">c</span> <span class="o">=</span> <span class="n">c</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">c</span><span class="o">.</span><span class="n">gossip</span><span class="o">.</span><span class="n">on</span><span class="o">.</span><span class="n">node_join</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">on_cluster_size_change</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">c</span><span class="o">.</span><span class="n">gossip</span><span class="o">.</span><span class="n">on</span><span class="o">.</span><span class="n">node_leave</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">on_cluster_size_change</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">c</span><span class="o">.</span><span class="n">gossip</span><span class="o">.</span><span class="n">on</span><span class="o">.</span><span class="n">node_lost</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">on_node_lost</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="s1">&#39;proj.tasks.add&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="s1">&#39;proj.tasks.mul&#39;</span><span class="p">]</span>
+        <span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_size</span> <span class="o">=</span> <span class="bp">None</span>
+
+    <span class="k">def</span> <span class="nf">on_cluster_size_change</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="n">cluster_size</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">c</span><span class="o">.</span><span class="n">gossip</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">alive_workers</span><span class="p">()))</span>
+        <span class="k">if</span> <span class="n">cluster_size</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_size</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">tasks</span><span class="p">:</span>
+                <span class="n">task</span><span class="o">.</span><span class="n">rate_limit</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">cluster_size</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">c</span><span class="o">.</span><span class="n">reset_rate_limits</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">last_size</span> <span class="o">=</span> <span class="n">cluster_size</span>
+
+    <span class="k">def</span> <span class="nf">on_node_lost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">):</span>
+        <span class="c1"># may have processed heartbeat too late, so wake up soon</span>
+        <span class="c1"># in order to see if the worker recovered.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">c</span><span class="o">.</span><span class="n">timer</span><span class="o">.</span><span class="n">call_after</span><span class="p">(</span><span class="mf">10.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">on_cluster_size_change</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Callbacks</strong></p>
+<ul>
+<li><p class="first"><code class="docutils literal notranslate"><span class="pre">&lt;set&gt;</span> <span class="pre">gossip.on.node_join</span></code></p>
+<blockquote>
+<div><p>Called whenever a new node joins the cluster, providing a
+<a class="reference internal" href="../reference/celery.events.state.html#celery.events.state.Worker" title="celery.events.state.Worker"><code class="xref py py-class docutils literal notranslate"><span class="pre">Worker</span></code></a> instance.</p>
+</div></blockquote>
+</li>
+<li><p class="first"><code class="docutils literal notranslate"><span class="pre">&lt;set&gt;</span> <span class="pre">gossip.on.node_leave</span></code></p>
+<blockquote>
+<div><p>Called whenever a new node leaves the cluster (shuts down),
+providing a <a class="reference internal" href="../reference/celery.events.state.html#celery.events.state.Worker" title="celery.events.state.Worker"><code class="xref py py-class docutils literal notranslate"><span class="pre">Worker</span></code></a> instance.</p>
+</div></blockquote>
+</li>
+<li><p class="first"><code class="docutils literal notranslate"><span class="pre">&lt;set&gt;</span> <span class="pre">gossip.on.node_lost</span></code></p>
+<blockquote>
+<div><p>Called whenever heartbeat was missed for a worker instance in the
+cluster (heartbeat not received or processed in time),
+providing a <a class="reference internal" href="../reference/celery.events.state.html#celery.events.state.Worker" title="celery.events.state.Worker"><code class="xref py py-class docutils literal notranslate"><span class="pre">Worker</span></code></a> instance.</p>
+<p>This doesn’t necessarily mean the worker is actually offline, so use a time
+out mechanism if the default heartbeat timeout isn’t sufficient.</p>
+</div></blockquote>
+</li>
+</ul>
+</dd></dl>
+
+<span class="target" id="extending-consumer-pool"></span><dl class="attribute">
+<dt>
+<code class="descname">pool</code></dt>
+<dd><p>The current process/eventlet/gevent/thread pool.
+See <a class="reference internal" href="../internals/reference/celery.concurrency.base.html#celery.concurrency.base.BasePool" title="celery.concurrency.base.BasePool"><code class="xref py py-class docutils literal notranslate"><span class="pre">celery.concurrency.base.BasePool</span></code></a>.</p>
+</dd></dl>
+
+<span class="target" id="extending-consumer-timer"></span><dl class="attribute">
+<dt>
+<code class="descname">timer</code></dt>
+<dd><p><code class="xref py py-class docutils literal notranslate"><span class="pre">Timer</span> <span class="pre">&lt;celery.utils.timer2.Schedule</span></code> used to schedule functions.</p>
+</dd></dl>
+
+<span class="target" id="extending-consumer-heart"></span><dl class="attribute">
+<dt id="heart">
+<code class="descname">heart</code><a class="headerlink" href="#heart" title="Permalink to this definition">¶</a></dt>
+<dd><p>Responsible for sending worker event heartbeats
+(<a class="reference internal" href="../internals/reference/celery.worker.heartbeat.html#celery.worker.heartbeat.Heart" title="celery.worker.heartbeat.Heart"><code class="xref py py-class docutils literal notranslate"><span class="pre">Heart</span></code></a>).</p>
+<p>Your consumer bootstep must require the <cite>Heart</cite> bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Step</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.consumer.heart:Heart&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-consumer-task-consumer"></span><dl class="attribute">
+<dt id="task_consumer">
+<code class="descname">task_consumer</code><a class="headerlink" href="#task_consumer" title="Permalink to this definition">¶</a></dt>
+<dd><p>The <a class="reference external" href="http://kombu.readthedocs.io/en/master/reference/kombu.html#kombu.Consumer" title="(in Kombu v4.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">kombu.Consumer</span></code></a> object used to consume task messages.</p>
+<p>Your consumer bootstep must require the <cite>Tasks</cite> bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Step</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.consumer.tasks:Tasks&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-consumer-strategies"></span><dl class="attribute">
+<dt id="strategies">
+<code class="descname">strategies</code><a class="headerlink" href="#strategies" title="Permalink to this definition">¶</a></dt>
+<dd><p>Every registered task type has an entry in this mapping,
+where the value is used to execute an incoming message of this task type
+(the task execution strategy). This mapping is generated by the Tasks
+bootstep when the consumer starts:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">tasks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="n">strategies</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">start_strategy</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">consumer</span><span class="p">)</span>
+    <span class="n">task</span><span class="o">.</span><span class="n">__trace__</span> <span class="o">=</span> <span class="n">celery</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">build_tracer</span><span class="p">(</span>
+        <span class="n">name</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">loader</span><span class="p">,</span> <span class="n">hostname</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+<p>Your consumer bootstep must require the <cite>Tasks</cite> bootstep to use this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Step</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery.worker.consumer.tasks:Tasks&#39;</span><span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<span class="target" id="extending-consumer-task-buckets"></span><dl class="attribute">
+<dt id="task_buckets">
+<code class="descname">task_buckets</code><a class="headerlink" href="#task_buckets" title="Permalink to this definition">¶</a></dt>
+<dd><p>A <a class="reference external" href="https://docs.python.org/dev/library/collections.html#collections.defaultdict" title="(in Python v3.8)"><code class="xref py py-class docutils literal notranslate"><span class="pre">defaultdict</span></code></a> used to look-up the rate limit for
+a task by type.
+Entries in this dict may be None (for no limit) or a
+<a class="reference external" href="http://kombu.readthedocs.io/en/master/reference/kombu.utils.limits.html#kombu.utils.limits.TokenBucket" title="(in Kombu v4.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">TokenBucket</span></code></a> instance implementing
+<code class="docutils literal notranslate"><span class="pre">consume(tokens)</span></code> and <code class="docutils literal notranslate"><span class="pre">expected_time(tokens)</span></code>.</p>
+<p>TokenBucket implements the <a class="reference external" href="https://en.wikipedia.org/wiki/Token_bucket">token bucket algorithm</a>, but any algorithm
+may be used as long as it conforms to the same interface and defines the
+two methods above.</p>
+</dd></dl>
+
+<span class="target" id="extending-consumer-qos"></span><dl class="attribute">
+<dt id="qos">
+<code class="descname">qos</code><a class="headerlink" href="#qos" title="Permalink to this definition">¶</a></dt>
+<dd><p>The <code class="xref py py-class docutils literal notranslate"><span class="pre">QoS</span></code> object can be used to change the
+task channels current prefetch_count value:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># increment at next cycle</span>
+<span class="n">consumer</span><span class="o">.</span><span class="n">qos</span><span class="o">.</span><span class="n">increment_eventually</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="c1"># decrement at next cycle</span>
+<span class="n">consumer</span><span class="o">.</span><span class="n">qos</span><span class="o">.</span><span class="n">decrement_eventually</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">consumer</span><span class="o">.</span><span class="n">qos</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</div>
+<div class="section" id="methods">
+<h3><a class="toc-backref" href="#id11">Methods</a><a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="consumer.reset_rate_limits">
+<code class="descclassname">consumer.</code><code class="descname">reset_rate_limits</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#consumer.reset_rate_limits" title="Permalink to this definition">¶</a></dt>
+<dd><p>Updates the <code class="docutils literal notranslate"><span class="pre">task_buckets</span></code> mapping for all registered task types.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="consumer.bucket_for_task">
+<code class="descclassname">consumer.</code><code class="descname">bucket_for_task</code><span class="sig-paren">(</span><em>type</em>, <em>Bucket=TokenBucket</em><span class="sig-paren">)</span><a class="headerlink" href="#consumer.bucket_for_task" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates rate limit bucket for a task using its <code class="docutils literal notranslate"><span class="pre">task.rate_limit</span></code>
+attribute.</p>
+</dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descname">consumer.add_task_queue(name, exchange=None, exchange_type=None,</code></dt>
+<dt>
+<code class="descname">routing_key=None, **options):</code></dt>
+<dd><p>Adds new queue to consume from. This will persist on connection restart.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="consumer.cancel_task_queue">
+<code class="descclassname">consumer.</code><code class="descname">cancel_task_queue</code><span class="sig-paren">(</span><em>name</em><span class="sig-paren">)</span><a class="headerlink" href="#consumer.cancel_task_queue" title="Permalink to this definition">¶</a></dt>
+<dd><p>Stop consuming from queue by name. This will persist on connection
+restart.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="apply_eta_task">
+<code class="descname">apply_eta_task</code><span class="sig-paren">(</span><em>request</em><span class="sig-paren">)</span><a class="headerlink" href="#apply_eta_task" title="Permalink to this definition">¶</a></dt>
+<dd><p>Schedule ETA task to execute based on the <code class="docutils literal notranslate"><span class="pre">request.eta</span></code> attribute.
+(<a class="reference internal" href="../reference/celery.worker.request.html#celery.worker.request.Request" title="celery.worker.request.Request"><code class="xref py py-class docutils literal notranslate"><span class="pre">Request</span></code></a>)</p>
+</dd></dl>
+
+</div>
+</div>
+<div class="section" id="installing-bootsteps">
+<span id="extending-bootsteps"></span><h2><a class="toc-backref" href="#id12">Installing Bootsteps</a><a class="headerlink" href="#installing-bootsteps" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">app.steps['worker']</span></code> and <code class="docutils literal notranslate"><span class="pre">app.steps['consumer']</span></code> can be modified
+to add new bootsteps:</p>
+<div class="highlight-pycon notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;worker&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">MyWorkerStep</span><span class="p">)</span>  <span class="c1"># &lt; add class, don&#39;t instantiate</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;consumer&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">MyConsumerStep</span><span class="p">)</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;consumer&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">update</span><span class="p">([</span><span class="n">StepA</span><span class="p">,</span> <span class="n">StepB</span><span class="p">])</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;consumer&#39;</span><span class="p">]</span>
+<span class="go">{step:proj.StepB{()}, step:proj.MyConsumerStep{()}, step:proj.StepA{()}</span>
+</pre></div>
+</div>
+<p>The order of steps isn’t important here as the order is decided by the
+resulting dependency graph (<code class="docutils literal notranslate"><span class="pre">Step.requires</span></code>).</p>
+<p>To illustrate how you can install bootsteps and how they work, this is an example step that
+prints some useless debugging information.
+It can be added both as a worker and consumer bootstep:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+<span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">bootsteps</span>
+
+<span class="k">class</span> <span class="nc">InfoStep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">Step</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># here we can prepare the Worker/Consumer object</span>
+        <span class="c1"># in any way we want, set attribute defaults, and so on.</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{0!r} is in init&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">parent</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent</span><span class="p">):</span>
+        <span class="c1"># our step is started together with all other Worker/Consumer</span>
+        <span class="c1"># bootsteps.</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{0!r} is starting&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">parent</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent</span><span class="p">):</span>
+        <span class="c1"># the Consumer calls stop every time the consumer is</span>
+        <span class="c1"># restarted (i.e., connection is lost) and also at shutdown.</span>
+        <span class="c1"># The Worker will call stop at shutdown only.</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{0!r} is stopping&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">parent</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parent</span><span class="p">):</span>
+        <span class="c1"># shutdown is called by the Consumer at shutdown, it&#39;s not</span>
+        <span class="c1"># called by Worker.</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{0!r} is shutting down&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">parent</span><span class="p">))</span>
+
+    <span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">(</span><span class="n">broker</span><span class="o">=</span><span class="s1">&#39;amqp://&#39;</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;worker&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">InfoStep</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;consumer&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">InfoStep</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Starting the worker with this step installed will give us the following
+logs:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>&lt;Worker: w@example.com (initializing)&gt; is in init
+&lt;Consumer: w@example.com (initializing)&gt; is in init
+[2013-05-29 16:18:20,544: WARNING/MainProcess]
+    &lt;Worker: w@example.com (running)&gt; is starting
+[2013-05-29 16:18:21,577: WARNING/MainProcess]
+    &lt;Consumer: w@example.com (running)&gt; is starting
+&lt;Consumer: w@example.com (closing)&gt; is stopping
+&lt;Worker: w@example.com (closing)&gt; is stopping
+&lt;Consumer: w@example.com (terminating)&gt; is shutting down
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">print</span></code> statements will be redirected to the logging subsystem after
+the worker has been initialized, so the “is starting” lines are time-stamped.
+You may notice that this does no longer happen at shutdown, this is because
+the <code class="docutils literal notranslate"><span class="pre">stop</span></code> and <code class="docutils literal notranslate"><span class="pre">shutdown</span></code> methods are called inside a <em>signal handler</em>,
+and it’s not safe to use logging inside such a handler.
+Logging with the Python logging module isn’t <a class="reference internal" href="../glossary.html#term-reentrant"><span class="xref std std-term">reentrant</span></a>:
+meaning you cannot interrupt the function then
+call it again later. It’s important that the <code class="docutils literal notranslate"><span class="pre">stop</span></code> and <code class="docutils literal notranslate"><span class="pre">shutdown</span></code> methods
+you write is also <a class="reference internal" href="../glossary.html#term-reentrant"><span class="xref std std-term">reentrant</span></a>.</p>
+<p>Starting the worker with <a class="reference internal" href="../reference/celery.bin.worker.html#cmdoption-celery-worker-l"><code class="xref std std-option docutils literal notranslate"><span class="pre">--loglevel=debug</span></code></a>
+will show us more information about the boot process:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>[2013-05-29 16:18:20,509: DEBUG/MainProcess] | Worker: Preparing bootsteps.
+[2013-05-29 16:18:20,511: DEBUG/MainProcess] | Worker: Building graph...
+&lt;celery.apps.worker.Worker object at 0x101ad8410&gt; is in init
+[2013-05-29 16:18:20,511: DEBUG/MainProcess] | Worker: New boot order:
+    {Hub, Pool, Timer, StateDB, Autoscaler, InfoStep, Beat, Consumer}
+[2013-05-29 16:18:20,514: DEBUG/MainProcess] | Consumer: Preparing bootsteps.
+[2013-05-29 16:18:20,514: DEBUG/MainProcess] | Consumer: Building graph...
+&lt;celery.worker.consumer.Consumer object at 0x101c2d8d0&gt; is in init
+[2013-05-29 16:18:20,515: DEBUG/MainProcess] | Consumer: New boot order:
+    {Connection, Mingle, Events, Gossip, InfoStep, Agent,
+     Heart, Control, Tasks, event loop}
+[2013-05-29 16:18:20,522: DEBUG/MainProcess] | Worker: Starting Hub
+[2013-05-29 16:18:20,522: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:20,522: DEBUG/MainProcess] | Worker: Starting Pool
+[2013-05-29 16:18:20,542: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:20,543: DEBUG/MainProcess] | Worker: Starting InfoStep
+[2013-05-29 16:18:20,544: WARNING/MainProcess]
+    &lt;celery.apps.worker.Worker object at 0x101ad8410&gt; is starting
+[2013-05-29 16:18:20,544: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:20,544: DEBUG/MainProcess] | Worker: Starting Consumer
+[2013-05-29 16:18:20,544: DEBUG/MainProcess] | Consumer: Starting Connection
+[2013-05-29 16:18:20,559: INFO/MainProcess] Connected to amqp://guest@127.0.0.1:5672//
+[2013-05-29 16:18:20,560: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:20,560: DEBUG/MainProcess] | Consumer: Starting Mingle
+[2013-05-29 16:18:20,560: INFO/MainProcess] mingle: searching for neighbors
+[2013-05-29 16:18:21,570: INFO/MainProcess] mingle: no one here
+[2013-05-29 16:18:21,570: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:21,571: DEBUG/MainProcess] | Consumer: Starting Events
+[2013-05-29 16:18:21,572: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:21,572: DEBUG/MainProcess] | Consumer: Starting Gossip
+[2013-05-29 16:18:21,577: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:21,577: DEBUG/MainProcess] | Consumer: Starting InfoStep
+[2013-05-29 16:18:21,577: WARNING/MainProcess]
+    &lt;celery.worker.consumer.Consumer object at 0x101c2d8d0&gt; is starting
+[2013-05-29 16:18:21,578: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:21,578: DEBUG/MainProcess] | Consumer: Starting Heart
+[2013-05-29 16:18:21,579: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:21,579: DEBUG/MainProcess] | Consumer: Starting Control
+[2013-05-29 16:18:21,583: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:21,583: DEBUG/MainProcess] | Consumer: Starting Tasks
+[2013-05-29 16:18:21,606: DEBUG/MainProcess] basic.qos: prefetch_count-&gt;80
+[2013-05-29 16:18:21,606: DEBUG/MainProcess] ^-- substep ok
+[2013-05-29 16:18:21,606: DEBUG/MainProcess] | Consumer: Starting event loop
+[2013-05-29 16:18:21,608: WARNING/MainProcess] celery@example.com ready.
+</pre></div>
+</div>
+</div>
+<div class="section" id="command-line-programs">
+<span id="extending-programs"></span><h2><a class="toc-backref" href="#id13">Command-line programs</a><a class="headerlink" href="#command-line-programs" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="adding-new-command-line-options">
+<span id="extending-commandoptions"></span><h3><a class="toc-backref" href="#id14">Adding new command-line options</a><a class="headerlink" href="#adding-new-command-line-options" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="command-specific-options">
+<span id="extending-command-options"></span><h4>Command-specific options<a class="headerlink" href="#command-specific-options" title="Permalink to this headline">¶</a></h4>
+<p>You can add additional command-line options to the <code class="docutils literal notranslate"><span class="pre">worker</span></code>, <code class="docutils literal notranslate"><span class="pre">beat</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">events</span></code> commands by modifying the <a class="reference internal" href="../reference/celery.html#celery.Celery.user_options" title="celery.Celery.user_options"><code class="xref py py-attr docutils literal notranslate"><span class="pre">user_options</span></code></a> attribute of the
+application instance.</p>
+<p>Celery commands uses the <a class="reference external" href="https://docs.python.org/dev/library/argparse.html#module-argparse" title="(in Python v3.8)"><code class="xref py py-mod docutils literal notranslate"><span class="pre">argparse</span></code></a> module to parse command-line
+arguments, and so to add custom arguments you need to specify a callback
+that takes a <a class="reference external" href="https://docs.python.org/dev/library/argparse.html#argparse.ArgumentParser" title="(in Python v3.8)"><code class="xref py py-class docutils literal notranslate"><span class="pre">argparse.ArgumentParser</span></code></a> instance - and adds arguments.
+Please see the <a class="reference external" href="https://docs.python.org/dev/library/argparse.html#module-argparse" title="(in Python v3.8)"><code class="xref py py-mod docutils literal notranslate"><span class="pre">argparse</span></code></a> documentation to read about the fields supported.</p>
+<p>Example adding a custom option to the <strong class="program">celery worker</strong> command:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">(</span><span class="n">broker</span><span class="o">=</span><span class="s1">&#39;amqp://&#39;</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">add_worker_arguments</span><span class="p">(</span><span class="n">parser</span><span class="p">):</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s1">&#39;--enable-my-option&#39;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s1">&#39;store_true&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Enable custom option.&#39;</span><span class="p">,</span>
+    <span class="p">),</span>
+<span class="n">app</span><span class="o">.</span><span class="n">user_options</span><span class="p">[</span><span class="s1">&#39;worker&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">add_worker_arguments</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>All bootsteps will now receive this argument as a keyword argument to
+<code class="docutils literal notranslate"><span class="pre">Bootstep.__init__</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">bootsteps</span>
+
+<span class="k">class</span> <span class="nc">MyBootstep</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">Step</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker</span><span class="p">,</span> <span class="n">enable_my_option</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">enable_my_option</span><span class="p">:</span>
+            <span class="n">party</span><span class="p">()</span>
+
+<span class="n">app</span><span class="o">.</span><span class="n">steps</span><span class="p">[</span><span class="s1">&#39;worker&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">MyBootstep</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="preload-options">
+<span id="extending-preload-options"></span><h4>Preload options<a class="headerlink" href="#preload-options" title="Permalink to this headline">¶</a></h4>
+<p>The <strong class="program">celery</strong> umbrella command supports the concept of ‘preload
+options’.  These are special options passed to all sub-commands and parsed
+outside of the main parsing step.</p>
+<p>The list of default preload options can be found in the API reference:
+<a class="reference internal" href="../reference/celery.bin.base.html#module-celery.bin.base" title="celery.bin.base"><code class="xref py py-mod docutils literal notranslate"><span class="pre">celery.bin.base</span></code></a>.</p>
+<p>You can add new preload options too, for example to specify a configuration
+template:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">Celery</span>
+<span class="kn">from</span> <span class="nn">celery</span> <span class="kn">import</span> <span class="n">signals</span>
+<span class="kn">from</span> <span class="nn">celery.bin</span> <span class="kn">import</span> <span class="n">Option</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Celery</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">add_preload_options</span><span class="p">(</span><span class="n">parser</span><span class="p">):</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s1">&#39;-Z&#39;</span><span class="p">,</span> <span class="s1">&#39;--template&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;default&#39;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Configuration template to use.&#39;</span><span class="p">,</span>
+    <span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">user_options</span><span class="p">[</span><span class="s1">&#39;preload&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">add_preload_options</span><span class="p">)</span>
+
+<span class="nd">@signals.user_preload_options.connect</span>
+<span class="k">def</span> <span class="nf">on_preload_parsed</span><span class="p">(</span><span class="n">options</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="n">use_template</span><span class="p">(</span><span class="n">options</span><span class="p">[</span><span class="s1">&#39;template&#39;</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="adding-new-celery-sub-commands">
+<span id="extending-subcommands"></span><h3><a class="toc-backref" href="#id15">Adding new <strong class="program">celery</strong> sub-commands</a><a class="headerlink" href="#adding-new-celery-sub-commands" title="Permalink to this headline">¶</a></h3>
+<p>New commands can be added to the <strong class="program">celery</strong> umbrella command by using
+<a class="reference external" href="http://reinout.vanrees.org/weblog/2010/01/06/zest-releaser-entry-points.html">setuptools entry-points</a>.</p>
+<p>Entry-points is special meta-data that can be added to your packages <code class="docutils literal notranslate"><span class="pre">setup.py</span></code> program,
+and then after installation, read from the system using the <code class="xref py py-mod docutils literal notranslate"><span class="pre">pkg_resources</span></code> module.</p>
+<p>Celery recognizes <code class="docutils literal notranslate"><span class="pre">celery.commands</span></code> entry-points to install additional
+sub-commands, where the value of the entry-point must point to a valid subclass
+of <a class="reference internal" href="../reference/celery.bin.base.html#celery.bin.base.Command" title="celery.bin.base.Command"><code class="xref py py-class docutils literal notranslate"><span class="pre">celery.bin.base.Command</span></code></a>. There’s limited documentation,
+unfortunately, but you can find inspiration from the various commands in the
+<code class="xref py py-mod docutils literal notranslate"><span class="pre">celery.bin</span></code> package.</p>
+<p>This is how the <a class="reference external" href="https://pypi.python.org/pypi/Flower/">Flower</a> monitoring extension adds the <strong class="program">celery flower</strong> command,
+by adding an entry-point in <code class="file docutils literal notranslate"><span class="pre">setup.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">setup</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s1">&#39;flower&#39;</span><span class="p">,</span>
+    <span class="n">entry_points</span><span class="o">=</span><span class="p">{</span>
+        <span class="s1">&#39;celery.commands&#39;</span><span class="p">:</span> <span class="p">[</span>
+           <span class="s1">&#39;flower = flower.command:FlowerCommand&#39;</span><span class="p">,</span>
+        <span class="p">],</span>
+    <span class="p">}</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>The command definition is in two parts separated by the equal sign, where the
+first part is the name of the sub-command (flower), then the second part is
+the fully qualified symbol path to the class that implements the command:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>flower.command:FlowerCommand
+</pre></div>
+</div>
+<p>The module path and the name of the attribute should be separated by colon
+as above.</p>
+<p>In the module <code class="file docutils literal notranslate"><span class="pre">flower/command.py</span></code>, the command class is defined
+something like this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">celery.bin.base</span> <span class="kn">import</span> <span class="n">Command</span>
+
+
+<span class="k">class</span> <span class="nc">FlowerCommand</span><span class="p">(</span><span class="n">Command</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">add_arguments</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parser</span><span class="p">):</span>
+        <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+            <span class="s1">&#39;--port&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">8888</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">,</span>
+            <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Webserver port&#39;</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+            <span class="s1">&#39;--debug&#39;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s1">&#39;store_true&#39;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Running our command&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="worker-api">
+<h2><a class="toc-backref" href="#id16">Worker API</a><a class="headerlink" href="#worker-api" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="hub-the-workers-async-event-loop">
+<h3><a class="toc-backref" href="#id17"><code class="xref py py-class docutils literal notranslate"><span class="pre">Hub</span></code> - The workers async event loop</a><a class="headerlink" href="#hub-the-workers-async-event-loop" title="Permalink to this headline">¶</a></h3>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name" colspan="2">supported transports:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body">amqp, redis</td>
+</tr>
+</tbody>
+</table>
+<div class="versionadded">
+<p><span class="versionmodified">New in version 3.0.</span></p>
+</div>
+<p>The worker uses asynchronous I/O when the amqp or redis broker transports are
+used. The eventual goal is for all transports to use the event-loop, but that
+will take some time so other transports still use a threading-based solution.</p>
+<dl class="method">
+<dt id="hub.add">
+<code class="descclassname">hub.</code><code class="descname">add</code><span class="sig-paren">(</span><em>fd</em>, <em>callback</em>, <em>flags</em><span class="sig-paren">)</span><a class="headerlink" href="#hub.add" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="hub.add_reader">
+<code class="descclassname">hub.</code><code class="descname">add_reader</code><span class="sig-paren">(</span><em>fd</em>, <em>callback</em>, <em>*args</em><span class="sig-paren">)</span><a class="headerlink" href="#hub.add_reader" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add callback to be called when <code class="docutils literal notranslate"><span class="pre">fd</span></code> is readable.</p>
+<p>The callback will stay registered until explicitly removed using
+<a class="reference internal" href="#hub.remove" title="hub.remove"><code class="xref py py-meth docutils literal notranslate"><span class="pre">hub.remove(fd)</span></code></a>, or the file descriptor is
+automatically discarded because it’s no longer valid.</p>
+<p>Note that only one callback can be registered for any given
+file descriptor at a time, so calling <code class="docutils literal notranslate"><span class="pre">add</span></code> a second time will remove
+any callback that was previously registered for that file descriptor.</p>
+<p>A file descriptor is any file-like object that supports the <code class="docutils literal notranslate"><span class="pre">fileno</span></code>
+method, or it can be the file descriptor number (int).</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="hub.add_writer">
+<code class="descclassname">hub.</code><code class="descname">add_writer</code><span class="sig-paren">(</span><em>fd</em>, <em>callback</em>, <em>*args</em><span class="sig-paren">)</span><a class="headerlink" href="#hub.add_writer" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add callback to be called when <code class="docutils literal notranslate"><span class="pre">fd</span></code> is writable.
+See also notes for <a class="reference internal" href="#hub.add_reader" title="hub.add_reader"><code class="xref py py-meth docutils literal notranslate"><span class="pre">hub.add_reader()</span></code></a> above.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="hub.remove">
+<code class="descclassname">hub.</code><code class="descname">remove</code><span class="sig-paren">(</span><em>fd</em><span class="sig-paren">)</span><a class="headerlink" href="#hub.remove" title="Permalink to this definition">¶</a></dt>
+<dd><p>Remove all callbacks for file descriptor <code class="docutils literal notranslate"><span class="pre">fd</span></code> from the loop.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="timer-scheduling-events">
+<h3><a class="toc-backref" href="#id18">Timer - Scheduling events</a><a class="headerlink" href="#timer-scheduling-events" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt>
+<code class="descname">timer.call_after(secs, callback, args=(), kwargs=(),</code></dt>
+<dt>
+<code class="descname">priority=0)</code></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descname">timer.call_repeatedly(secs, callback, args=(), kwargs=(),</code></dt>
+<dt>
+<code class="descname">priority=0)</code></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descname">timer.call_at(eta, callback, args=(), kwargs=(),</code></dt>
+<dt>
+<code class="descname">priority=0)</code></dt>
+<dd></dd></dl>
+
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../index.html">
+              <img class="logo" src="../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="testing.html"
+                        title="previous chapter">Testing with Celery</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="configuration.html"
+                        title="next chapter">Configuration and defaults</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userguide/extending.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="configuration.html" title="Configuration and defaults"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="testing.html" title="Testing with Celery"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >User Guide</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

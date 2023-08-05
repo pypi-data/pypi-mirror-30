@@ -1,0 +1,422 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.utils.graph &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/utils/graph.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.utils.graph</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Dependency graph implementation.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">Counter</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="k">import</span> <span class="n">dedent</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils.encoding</span> <span class="k">import</span> <span class="n">bytes_to_str</span><span class="p">,</span> <span class="n">safe_str</span>
+
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="n">python_2_unicode_compatible</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;DOT&#39;</span><span class="p">,</span> <span class="s1">&#39;CycleError&#39;</span><span class="p">,</span> <span class="s1">&#39;DependencyGraph&#39;</span><span class="p">,</span> <span class="s1">&#39;GraphFormatter&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="DOT"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DOT">[docs]</a><span class="k">class</span> <span class="nc">DOT</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Constants related to the dot format.&quot;&quot;&quot;</span>
+
+    <span class="n">HEAD</span> <span class="o">=</span> <span class="n">dedent</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        </span><span class="si">{IN}{type}</span><span class="s2"> </span><span class="si">{id}</span><span class="s2"> {{</span>
+<span class="s2">        </span><span class="si">{INp}</span><span class="s2">graph [</span><span class="si">{attrs}</span><span class="s2">]</span>
+<span class="s2">    &quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="n">ATTR</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{name}</span><span class="s1">=</span><span class="si">{value}</span><span class="s1">&#39;</span>
+    <span class="n">NODE</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{INp}</span><span class="s1">&quot;</span><span class="si">{0}</span><span class="s1">&quot; [</span><span class="si">{attrs}</span><span class="s1">]&#39;</span>
+    <span class="n">EDGE</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{INp}</span><span class="s1">&quot;</span><span class="si">{0}</span><span class="s1">&quot; </span><span class="si">{dir}</span><span class="s1"> &quot;</span><span class="si">{1}</span><span class="s1">&quot; [</span><span class="si">{attrs}</span><span class="s1">]&#39;</span>
+    <span class="n">ATTRSEP</span> <span class="o">=</span> <span class="s1">&#39;, &#39;</span>
+    <span class="n">DIRS</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;graph&#39;</span><span class="p">:</span> <span class="s1">&#39;--&#39;</span><span class="p">,</span> <span class="s1">&#39;digraph&#39;</span><span class="p">:</span> <span class="s1">&#39;-&gt;&#39;</span><span class="p">}</span>
+    <span class="n">TAIL</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{IN}</span><span class="s1">}}&#39;</span></div>
+
+
+<div class="viewcode-block" id="CycleError"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.CycleError">[docs]</a><span class="k">class</span> <span class="nc">CycleError</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A cycle was detected in an acyclic graph.&quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="DependencyGraph"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph">[docs]</a><span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">DependencyGraph</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A directed acyclic graph of objects and their dependencies.</span>
+
+<span class="sd">    Supports a robust topological sort</span>
+<span class="sd">    to detect the order in which they must be handled.</span>
+
+<span class="sd">    Takes an optional iterator of ``(obj, dependencies)``</span>
+<span class="sd">    tuples to build the graph from.</span>
+
+<span class="sd">    Warning:</span>
+<span class="sd">        Does not support cycle detection.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">it</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">formatter</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">formatter</span> <span class="o">=</span> <span class="n">formatter</span> <span class="ow">or</span> <span class="n">GraphFormatter</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">it</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">it</span><span class="p">)</span>
+
+<div class="viewcode-block" id="DependencyGraph.add_arc"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.add_arc">[docs]</a>    <span class="k">def</span> <span class="nf">add_arc</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add an object to the graph.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="p">[])</span></div>
+
+<div class="viewcode-block" id="DependencyGraph.add_edge"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.add_edge">[docs]</a>    <span class="k">def</span> <span class="nf">add_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add an edge from object ``A`` to object ``B``.</span>
+
+<span class="sd">        I.e. ``A`` depends on ``B``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="p">[</span><span class="n">A</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">B</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="DependencyGraph.connect"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.connect">[docs]</a>    <span class="k">def</span> <span class="nf">connect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add nodes from another graph.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">adjacent</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="DependencyGraph.topsort"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.topsort">[docs]</a>    <span class="k">def</span> <span class="nf">topsort</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Sort the graph topologically.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            List: of objects in the order in which they must be handled.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">graph</span> <span class="o">=</span> <span class="n">DependencyGraph</span><span class="p">()</span>
+        <span class="n">components</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tarjan72</span><span class="p">()</span>
+
+        <span class="n">NC</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">node</span><span class="p">:</span> <span class="n">component</span> <span class="k">for</span> <span class="n">component</span> <span class="ow">in</span> <span class="n">components</span> <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">component</span>
+        <span class="p">}</span>
+        <span class="k">for</span> <span class="n">component</span> <span class="ow">in</span> <span class="n">components</span><span class="p">:</span>
+            <span class="n">graph</span><span class="o">.</span><span class="n">add_arc</span><span class="p">(</span><span class="n">component</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="n">node_c</span> <span class="o">=</span> <span class="n">NC</span><span class="p">[</span><span class="n">node</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">successor</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">[</span><span class="n">node</span><span class="p">]:</span>
+                <span class="n">successor_c</span> <span class="o">=</span> <span class="n">NC</span><span class="p">[</span><span class="n">successor</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">node_c</span> <span class="o">!=</span> <span class="n">successor_c</span><span class="p">:</span>
+                    <span class="n">graph</span><span class="o">.</span><span class="n">add_edge</span><span class="p">(</span><span class="n">node_c</span><span class="p">,</span> <span class="n">successor_c</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">_khan62</span><span class="p">()]</span></div>
+
+<div class="viewcode-block" id="DependencyGraph.valency_of"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.valency_of">[docs]</a>    <span class="k">def</span> <span class="nf">valency_of</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the valency (degree) of a vertex in the graph.&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">l</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="n">obj</span><span class="p">])]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">[</span><span class="n">obj</span><span class="p">]:</span>
+            <span class="n">l</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">valency_of</span><span class="p">(</span><span class="n">node</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">l</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="DependencyGraph.update"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.update">[docs]</a>    <span class="k">def</span> <span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">it</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Update graph with data from a list of ``(obj, deps)`` tuples.&quot;&quot;&quot;</span>
+        <span class="n">tups</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">it</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">obj</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">tups</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_arc</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">obj</span><span class="p">,</span> <span class="n">deps</span> <span class="ow">in</span> <span class="n">tups</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">dep</span> <span class="ow">in</span> <span class="n">deps</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">add_edge</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">dep</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="DependencyGraph.edges"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.edges">[docs]</a>    <span class="k">def</span> <span class="nf">edges</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return generator that yields for all edges in the graph.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">obj</span> <span class="k">for</span> <span class="n">obj</span><span class="p">,</span> <span class="n">adj</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="k">if</span> <span class="n">adj</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_khan62</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Perform Khan&#39;s simple topological sort algorithm from &#39;62.</span>
+
+<span class="sd">        See https://en.wikipedia.org/wiki/Topological_sorting</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">count</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">successor</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">[</span><span class="n">node</span><span class="p">]:</span>
+                <span class="n">count</span><span class="p">[</span><span class="n">successor</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">ready</span> <span class="o">=</span> <span class="p">[</span><span class="n">node</span> <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">count</span><span class="p">[</span><span class="n">node</span><span class="p">]]</span>
+
+        <span class="k">while</span> <span class="n">ready</span><span class="p">:</span>
+            <span class="n">node</span> <span class="o">=</span> <span class="n">ready</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">successor</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">[</span><span class="n">node</span><span class="p">]:</span>
+                <span class="n">count</span><span class="p">[</span><span class="n">successor</span><span class="p">]</span> <span class="o">-=</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="n">count</span><span class="p">[</span><span class="n">successor</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">ready</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">successor</span><span class="p">)</span>
+        <span class="n">result</span><span class="o">.</span><span class="n">reverse</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">_tarjan72</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Perform Tarjan&#39;s algorithm to find strongly connected components.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            :wikipedia:`Tarjan%27s_strongly_connected_components_algorithm`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">result</span><span class="p">,</span> <span class="n">stack</span><span class="p">,</span> <span class="n">low</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">{}</span>
+
+        <span class="k">def</span> <span class="nf">visit</span><span class="p">(</span><span class="n">node</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">low</span><span class="p">:</span>
+                <span class="k">return</span>
+            <span class="n">num</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">low</span><span class="p">)</span>
+            <span class="n">low</span><span class="p">[</span><span class="n">node</span><span class="p">]</span> <span class="o">=</span> <span class="n">num</span>
+            <span class="n">stack_pos</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">stack</span><span class="p">)</span>
+            <span class="n">stack</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">successor</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">[</span><span class="n">node</span><span class="p">]:</span>
+                <span class="n">visit</span><span class="p">(</span><span class="n">successor</span><span class="p">)</span>
+                <span class="n">low</span><span class="p">[</span><span class="n">node</span><span class="p">]</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">low</span><span class="p">[</span><span class="n">node</span><span class="p">],</span> <span class="n">low</span><span class="p">[</span><span class="n">successor</span><span class="p">])</span>
+
+            <span class="k">if</span> <span class="n">num</span> <span class="o">==</span> <span class="n">low</span><span class="p">[</span><span class="n">node</span><span class="p">]:</span>
+                <span class="n">component</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">stack</span><span class="p">[</span><span class="n">stack_pos</span><span class="p">:])</span>
+                <span class="n">stack</span><span class="p">[</span><span class="n">stack_pos</span><span class="p">:]</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">component</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">component</span><span class="p">:</span>
+                    <span class="n">low</span><span class="p">[</span><span class="n">item</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="n">visit</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">result</span>
+
+<div class="viewcode-block" id="DependencyGraph.to_dot"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.to_dot">[docs]</a>    <span class="k">def</span> <span class="nf">to_dot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fh</span><span class="p">,</span> <span class="n">formatter</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Convert the graph to DOT format.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            fh (IO): A file, or a file-like object to write the graph to.</span>
+<span class="sd">            formatter (celery.utils.graph.GraphFormatter): Custom graph</span>
+<span class="sd">                formatter to use.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">seen</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">draw</span> <span class="o">=</span> <span class="n">formatter</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">formatter</span>
+
+        <span class="k">def</span> <span class="nf">P</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">bytes_to_str</span><span class="p">(</span><span class="n">s</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">fh</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">if_not_seen</span><span class="p">(</span><span class="n">fun</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">draw</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">:</span>
+                <span class="n">P</span><span class="p">(</span><span class="n">fun</span><span class="p">(</span><span class="n">obj</span><span class="p">))</span>
+                <span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">draw</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">obj</span><span class="p">))</span>
+
+        <span class="n">P</span><span class="p">(</span><span class="n">draw</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
+        <span class="k">for</span> <span class="n">obj</span><span class="p">,</span> <span class="n">adjacent</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">adjacent</span><span class="p">:</span>
+                <span class="n">if_not_seen</span><span class="p">(</span><span class="n">draw</span><span class="o">.</span><span class="n">terminal_node</span><span class="p">,</span> <span class="n">obj</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">req</span> <span class="ow">in</span> <span class="n">adjacent</span><span class="p">:</span>
+                <span class="n">if_not_seen</span><span class="p">(</span><span class="n">draw</span><span class="o">.</span><span class="n">node</span><span class="p">,</span> <span class="n">obj</span><span class="p">)</span>
+                <span class="n">P</span><span class="p">(</span><span class="n">draw</span><span class="o">.</span><span class="n">edge</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">req</span><span class="p">))</span>
+        <span class="n">P</span><span class="p">(</span><span class="n">draw</span><span class="o">.</span><span class="n">tail</span><span class="p">())</span></div>
+
+<div class="viewcode-block" id="DependencyGraph.format"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.format">[docs]</a>    <span class="k">def</span> <span class="nf">format</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">formatter</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">formatter</span> <span class="k">else</span> <span class="n">obj</span></div>
+
+    <span class="k">def</span> <span class="nf">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span><span class="p">[</span><span class="n">node</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__contains__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">obj</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span>
+
+    <span class="k">def</span> <span class="nf">_iterate_items</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">items</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">adjacent</span><span class="p">)</span>
+    <span class="n">items</span> <span class="o">=</span> <span class="n">iteritems</span> <span class="o">=</span> <span class="n">_iterate_items</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">repr_node</span><span class="p">(</span><span class="n">N</span><span class="p">)</span> <span class="k">for</span> <span class="n">N</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="DependencyGraph.repr_node"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.DependencyGraph.repr_node">[docs]</a>    <span class="k">def</span> <span class="nf">repr_node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">(</span><span class="si">{1}</span><span class="s1">)&#39;</span><span class="p">):</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="p">[</span><span class="n">fmt</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">valency_of</span><span class="p">(</span><span class="n">obj</span><span class="p">))]</span>
+        <span class="k">if</span> <span class="n">obj</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">other</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">[</span><span class="n">obj</span><span class="p">]:</span>
+                <span class="n">d</span> <span class="o">=</span> <span class="n">fmt</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">valency_of</span><span class="p">(</span><span class="n">other</span><span class="p">))</span>
+                <span class="n">output</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;     &#39;</span> <span class="o">*</span> <span class="n">level</span> <span class="o">+</span> <span class="n">d</span><span class="p">)</span>
+                <span class="n">output</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">repr_node</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">level</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)[</span><span class="mi">1</span><span class="p">:])</span>
+        <span class="k">return</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="GraphFormatter"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter">[docs]</a><span class="k">class</span> <span class="nc">GraphFormatter</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Format dependency graphs.&quot;&quot;&quot;</span>
+
+    <span class="n">_attr</span> <span class="o">=</span> <span class="n">DOT</span><span class="o">.</span><span class="n">ATTR</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">_node</span> <span class="o">=</span> <span class="n">DOT</span><span class="o">.</span><span class="n">NODE</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">_edge</span> <span class="o">=</span> <span class="n">DOT</span><span class="o">.</span><span class="n">EDGE</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">_head</span> <span class="o">=</span> <span class="n">DOT</span><span class="o">.</span><span class="n">HEAD</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">_tail</span> <span class="o">=</span> <span class="n">DOT</span><span class="o">.</span><span class="n">TAIL</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">_attrsep</span> <span class="o">=</span> <span class="n">DOT</span><span class="o">.</span><span class="n">ATTRSEP</span>
+    <span class="n">_dirs</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">DOT</span><span class="o">.</span><span class="n">DIRS</span><span class="p">)</span>
+
+    <span class="n">scheme</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;shape&#39;</span><span class="p">:</span> <span class="s1">&#39;box&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;arrowhead&#39;</span><span class="p">:</span> <span class="s1">&#39;vee&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;style&#39;</span><span class="p">:</span> <span class="s1">&#39;filled&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;fontname&#39;</span><span class="p">:</span> <span class="s1">&#39;HelveticaNeue&#39;</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="n">edge_scheme</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;color&#39;</span><span class="p">:</span> <span class="s1">&#39;darkseagreen4&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;arrowcolor&#39;</span><span class="p">:</span> <span class="s1">&#39;black&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;arrowsize&#39;</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="n">node_scheme</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;fillcolor&#39;</span><span class="p">:</span> <span class="s1">&#39;palegreen3&#39;</span><span class="p">,</span> <span class="s1">&#39;color&#39;</span><span class="p">:</span> <span class="s1">&#39;palegreen4&#39;</span><span class="p">}</span>
+    <span class="n">term_scheme</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;fillcolor&#39;</span><span class="p">:</span> <span class="s1">&#39;palegreen1&#39;</span><span class="p">,</span> <span class="s1">&#39;color&#39;</span><span class="p">:</span> <span class="s1">&#39;palegreen2&#39;</span><span class="p">}</span>
+    <span class="n">graph_scheme</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;bgcolor&#39;</span><span class="p">:</span> <span class="s1">&#39;mintcream&#39;</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">indent</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">inw</span><span class="o">=</span><span class="s1">&#39; &#39;</span> <span class="o">*</span> <span class="mi">4</span><span class="p">,</span> <span class="o">**</span><span class="n">scheme</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="nb">id</span> <span class="ow">or</span> <span class="s1">&#39;dependencies&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">root</span> <span class="o">=</span> <span class="n">root</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="nb">type</span> <span class="ow">or</span> <span class="s1">&#39;digraph&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">direction</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dirs</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">IN</span> <span class="o">=</span> <span class="n">inw</span> <span class="o">*</span> <span class="p">(</span><span class="n">indent</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">INp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">IN</span> <span class="o">+</span> <span class="n">inw</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">,</span> <span class="o">**</span><span class="n">scheme</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">graph_scheme</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">graph_scheme</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">root</span><span class="p">))</span>
+
+<div class="viewcode-block" id="GraphFormatter.attr"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.attr">[docs]</a>    <span class="k">def</span> <span class="nf">attr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="s1">&#39;&quot;</span><span class="si">{0}</span><span class="s1">&quot;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">FMT</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_attr</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.attrs"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.attrs">[docs]</a>    <span class="k">def</span> <span class="nf">attrs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">,</span> <span class="o">**</span><span class="nb">dict</span><span class="p">(</span><span class="n">scheme</span><span class="p">,</span> <span class="o">**</span><span class="n">d</span> <span class="ow">or</span> <span class="p">{})</span> <span class="k">if</span> <span class="n">scheme</span> <span class="k">else</span> <span class="n">d</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_attrsep</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="n">safe_str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attr</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">))</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.head"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.head">[docs]</a>    <span class="k">def</span> <span class="nf">head</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">attrs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">FMT</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_head</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">,</span>
+            <span class="n">attrs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">attrs</span><span class="p">(</span><span class="n">attrs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph_scheme</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.tail"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.tail">[docs]</a>    <span class="k">def</span> <span class="nf">tail</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">FMT</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_tail</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.label"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.label">[docs]</a>    <span class="k">def</span> <span class="nf">label</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">obj</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.node"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.node">[docs]</a>    <span class="k">def</span> <span class="nf">node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="o">**</span><span class="n">attrs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">draw_node</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_scheme</span><span class="p">,</span> <span class="n">attrs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.terminal_node"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.terminal_node">[docs]</a>    <span class="k">def</span> <span class="nf">terminal_node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="o">**</span><span class="n">attrs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">draw_node</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">term_scheme</span><span class="p">,</span> <span class="n">attrs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.edge"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.edge">[docs]</a>    <span class="k">def</span> <span class="nf">edge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="o">**</span><span class="n">attrs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">draw_edge</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="o">**</span><span class="n">attrs</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_enc</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">,</span> <span class="s1">&#39;ignore&#39;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GraphFormatter.FMT"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.FMT">[docs]</a>    <span class="k">def</span> <span class="nf">FMT</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enc</span><span class="p">(</span><span class="n">fmt</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="nb">dict</span><span class="p">(</span><span class="n">kwargs</span><span class="p">,</span> <span class="n">IN</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">IN</span><span class="p">,</span> <span class="n">INp</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">INp</span><span class="p">)</span>
+        <span class="p">))</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.draw_edge"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.draw_edge">[docs]</a>    <span class="k">def</span> <span class="nf">draw_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">attrs</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">FMT</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_edge</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">a</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">b</span><span class="p">),</span>
+            <span class="nb">dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">direction</span><span class="p">,</span> <span class="n">attrs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">attrs</span><span class="p">(</span><span class="n">attrs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">edge_scheme</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="GraphFormatter.draw_node"><a class="viewcode-back" href="../../../internals/reference/celery.utils.graph.html#celery.utils.graph.GraphFormatter.draw_node">[docs]</a>    <span class="k">def</span> <span class="nf">draw_node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">attrs</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">FMT</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_node</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">obj</span><span class="p">),</span> <span class="n">attrs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">attrs</span><span class="p">(</span><span class="n">attrs</span><span class="p">,</span> <span class="n">scheme</span><span class="p">),</span>
+        <span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

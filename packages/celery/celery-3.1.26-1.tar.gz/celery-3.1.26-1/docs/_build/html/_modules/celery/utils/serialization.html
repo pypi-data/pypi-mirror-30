@@ -1,0 +1,383 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.utils.serialization &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/utils/serialization.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.utils.serialization</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Utilities for safely pickling exceptions.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">import</span> <span class="nn">numbers</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">base64</span> <span class="k">import</span> <span class="n">b64decode</span> <span class="k">as</span> <span class="n">base64decode</span>
+<span class="kn">from</span> <span class="nn">base64</span> <span class="k">import</span> <span class="n">b64encode</span> <span class="k">as</span> <span class="n">base64encode</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">partial</span>
+<span class="kn">from</span> <span class="nn">inspect</span> <span class="k">import</span> <span class="n">getmro</span>
+<span class="kn">from</span> <span class="nn">itertools</span> <span class="k">import</span> <span class="n">takewhile</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils.encoding</span> <span class="k">import</span> <span class="n">bytes_to_str</span><span class="p">,</span> <span class="n">str_to_bytes</span>
+
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="p">(</span><span class="n">bytes_if_py2</span><span class="p">,</span> <span class="n">items</span><span class="p">,</span> <span class="n">python_2_unicode_compatible</span><span class="p">,</span>
+                         <span class="n">reraise</span><span class="p">,</span> <span class="n">string_t</span><span class="p">)</span>
+
+<span class="kn">from</span> <span class="nn">.encoding</span> <span class="k">import</span> <span class="n">safe_repr</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">cPickle</span> <span class="k">as</span> <span class="nn">pickle</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">pickle</span>  <span class="c1"># noqa</span>
+
+<span class="n">PY33</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s1">&#39;UnpickleableExceptionWrapper&#39;</span><span class="p">,</span> <span class="s1">&#39;subclass_exception&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;find_pickleable_exception&#39;</span><span class="p">,</span> <span class="s1">&#39;create_exception_cls&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;get_pickleable_exception&#39;</span><span class="p">,</span> <span class="s1">&#39;get_pickleable_etype&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;get_pickled_exception&#39;</span><span class="p">,</span> <span class="s1">&#39;strtobool&#39;</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1">#: List of base classes we probably don&#39;t want to reduce to.</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">unwanted_base_classes</span> <span class="o">=</span> <span class="p">(</span><span class="n">StandardError</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">,</span> <span class="ne">BaseException</span><span class="p">,</span> <span class="nb">object</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">NameError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="n">unwanted_base_classes</span> <span class="o">=</span> <span class="p">(</span><span class="ne">Exception</span><span class="p">,</span> <span class="ne">BaseException</span><span class="p">,</span> <span class="nb">object</span><span class="p">)</span>  <span class="c1"># py3k</span>
+
+
+<div class="viewcode-block" id="subclass_exception"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.subclass_exception">[docs]</a><span class="k">def</span> <span class="nf">subclass_exception</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">parent</span><span class="p">,</span> <span class="n">module</span><span class="p">):</span>  <span class="c1"># noqa</span>
+    <span class="sd">&quot;&quot;&quot;Create new exception class.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">bytes_if_py2</span><span class="p">(</span><span class="n">name</span><span class="p">),</span> <span class="p">(</span><span class="n">parent</span><span class="p">,),</span> <span class="p">{</span><span class="s1">&#39;__module__&#39;</span><span class="p">:</span> <span class="n">module</span><span class="p">})</span></div>
+
+
+<div class="viewcode-block" id="find_pickleable_exception"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.find_pickleable_exception">[docs]</a><span class="k">def</span> <span class="nf">find_pickleable_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">loads</span><span class="o">=</span><span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">,</span>
+                              <span class="n">dumps</span><span class="o">=</span><span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Find first pickleable exception base class.</span>
+
+<span class="sd">    With an exception instance, iterate over its super classes (by MRO)</span>
+<span class="sd">    and find the first super exception that&#39;s pickleable.  It does</span>
+<span class="sd">    not go below :exc:`Exception` (i.e., it skips :exc:`Exception`,</span>
+<span class="sd">    :class:`BaseException` and :class:`object`).  If that happens</span>
+<span class="sd">    you should use :exc:`UnpickleableException` instead.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        exc (BaseException): An exception instance.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Exception: Nearest pickleable parent exception class</span>
+<span class="sd">            (except :exc:`Exception` and parents), or if the exception is</span>
+<span class="sd">            pickleable it will return :const:`None`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">exc_args</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="s1">&#39;args&#39;</span><span class="p">,</span> <span class="p">[])</span>
+    <span class="k">for</span> <span class="n">supercls</span> <span class="ow">in</span> <span class="n">itermro</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="vm">__class__</span><span class="p">,</span> <span class="n">unwanted_base_classes</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">superexc</span> <span class="o">=</span> <span class="n">supercls</span><span class="p">(</span><span class="o">*</span><span class="n">exc_args</span><span class="p">)</span>
+            <span class="n">loads</span><span class="p">(</span><span class="n">dumps</span><span class="p">(</span><span class="n">superexc</span><span class="p">))</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+            <span class="k">pass</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">superexc</span></div>
+
+
+<span class="k">def</span> <span class="nf">itermro</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">stop</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">takewhile</span><span class="p">(</span><span class="k">lambda</span> <span class="n">sup</span><span class="p">:</span> <span class="n">sup</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stop</span><span class="p">,</span> <span class="n">getmro</span><span class="p">(</span><span class="bp">cls</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="create_exception_cls"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.create_exception_cls">[docs]</a><span class="k">def</span> <span class="nf">create_exception_cls</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">module</span><span class="p">,</span> <span class="n">parent</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Dynamically create an exception class.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">parent</span><span class="p">:</span>
+        <span class="n">parent</span> <span class="o">=</span> <span class="ne">Exception</span>
+    <span class="k">return</span> <span class="n">subclass_exception</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">parent</span><span class="p">,</span> <span class="n">module</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="UnpickleableExceptionWrapper"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.UnpickleableExceptionWrapper">[docs]</a><span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">UnpickleableExceptionWrapper</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Wraps unpickleable exceptions.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        exc_module (str): See :attr:`exc_module`.</span>
+<span class="sd">        exc_cls_name (str): See :attr:`exc_cls_name`.</span>
+<span class="sd">        exc_args (Tuple[Any, ...]): See :attr:`exc_args`.</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; def pickle_it(raising_function):</span>
+<span class="sd">        ...     try:</span>
+<span class="sd">        ...         raising_function()</span>
+<span class="sd">        ...     except Exception as e:</span>
+<span class="sd">        ...         exc = UnpickleableExceptionWrapper(</span>
+<span class="sd">        ...             e.__class__.__module__,</span>
+<span class="sd">        ...             e.__class__.__name__,</span>
+<span class="sd">        ...             e.args,</span>
+<span class="sd">        ...         )</span>
+<span class="sd">        ...         pickle.dumps(exc)  # Works fine.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1">#: The module of the original exception.</span>
+    <span class="n">exc_module</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: The name of the original exception class.</span>
+    <span class="n">exc_cls_name</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: The arguments for the original exception.</span>
+    <span class="n">exc_args</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_module</span><span class="p">,</span> <span class="n">exc_cls_name</span><span class="p">,</span> <span class="n">exc_args</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">safe_exc_args</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">exc_args</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span>
+                <span class="n">safe_exc_args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+                <span class="n">safe_exc_args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">safe_repr</span><span class="p">(</span><span class="n">arg</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">exc_module</span> <span class="o">=</span> <span class="n">exc_module</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">exc_cls_name</span> <span class="o">=</span> <span class="n">exc_cls_name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">exc_args</span> <span class="o">=</span> <span class="n">safe_exc_args</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">text</span> <span class="o">=</span> <span class="n">text</span>
+        <span class="ne">Exception</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_module</span><span class="p">,</span> <span class="n">exc_cls_name</span><span class="p">,</span> <span class="n">safe_exc_args</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+
+<div class="viewcode-block" id="UnpickleableExceptionWrapper.restore"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.UnpickleableExceptionWrapper.restore">[docs]</a>    <span class="k">def</span> <span class="nf">restore</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">create_exception_cls</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exc_cls_name</span><span class="p">,</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">exc_module</span><span class="p">)(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">exc_args</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">text</span>
+
+<div class="viewcode-block" id="UnpickleableExceptionWrapper.from_exception"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.UnpickleableExceptionWrapper.from_exception">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">from_exception</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">exc</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__module__</span><span class="p">,</span>
+                   <span class="n">exc</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span>
+                   <span class="nb">getattr</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="s1">&#39;args&#39;</span><span class="p">,</span> <span class="p">[]),</span>
+                   <span class="n">safe_repr</span><span class="p">(</span><span class="n">exc</span><span class="p">))</span></div></div>
+
+
+<div class="viewcode-block" id="get_pickleable_exception"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.get_pickleable_exception">[docs]</a><span class="k">def</span> <span class="nf">get_pickleable_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Make sure exception is pickleable.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">exc</span><span class="p">))</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+        <span class="k">pass</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">exc</span>
+    <span class="n">nearest</span> <span class="o">=</span> <span class="n">find_pickleable_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">nearest</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">nearest</span>
+    <span class="k">return</span> <span class="n">UnpickleableExceptionWrapper</span><span class="o">.</span><span class="n">from_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="get_pickleable_etype"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.get_pickleable_etype">[docs]</a><span class="k">def</span> <span class="nf">get_pickleable_etype</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">loads</span><span class="o">=</span><span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">,</span> <span class="n">dumps</span><span class="o">=</span><span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get pickleable exception type.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">loads</span><span class="p">(</span><span class="n">dumps</span><span class="p">(</span><span class="bp">cls</span><span class="p">))</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+        <span class="k">return</span> <span class="ne">Exception</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">cls</span></div>
+
+
+<div class="viewcode-block" id="get_pickled_exception"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.get_pickled_exception">[docs]</a><span class="k">def</span> <span class="nf">get_pickled_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Reverse of :meth:`get_pickleable_exception`.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">UnpickleableExceptionWrapper</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">exc</span><span class="o">.</span><span class="n">restore</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">exc</span></div>
+
+
+<span class="k">def</span> <span class="nf">b64encode</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">bytes_to_str</span><span class="p">(</span><span class="n">base64encode</span><span class="p">(</span><span class="n">str_to_bytes</span><span class="p">(</span><span class="n">s</span><span class="p">)))</span>
+
+
+<span class="k">def</span> <span class="nf">b64decode</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">base64decode</span><span class="p">(</span><span class="n">str_to_bytes</span><span class="p">(</span><span class="n">s</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="strtobool"><a class="viewcode-back" href="../../../internals/reference/celery.utils.serialization.html#celery.utils.serialization.strtobool">[docs]</a><span class="k">def</span> <span class="nf">strtobool</span><span class="p">(</span><span class="n">term</span><span class="p">,</span> <span class="n">table</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;false&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;no&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;0&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                           <span class="s1">&#39;true&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;yes&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;1&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+                           <span class="s1">&#39;on&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;off&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}):</span>
+    <span class="sd">&quot;&quot;&quot;Convert common terms for true/false to bool.</span>
+
+<span class="sd">    Examples (true/false/yes/no/on/off/1/0).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">term</span><span class="p">,</span> <span class="n">string_t</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">table</span><span class="p">[</span><span class="n">term</span><span class="o">.</span><span class="n">lower</span><span class="p">()]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s1">&#39;Cannot coerce </span><span class="si">{0!r}</span><span class="s1"> to type bool&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">term</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">term</span></div>
+
+
+<span class="k">def</span> <span class="nf">_datetime_to_json</span><span class="p">(</span><span class="n">dt</span><span class="p">):</span>
+    <span class="c1"># See &quot;Date Time String Format&quot; in the ECMA-262 specification.</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">dt</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">dt</span><span class="o">.</span><span class="n">microsecond</span><span class="p">:</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">r</span><span class="p">[:</span><span class="mi">23</span><span class="p">]</span> <span class="o">+</span> <span class="n">r</span><span class="p">[</span><span class="mi">26</span><span class="p">:]</span>
+        <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;+00:00&#39;</span><span class="p">):</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">r</span><span class="p">[:</span><span class="o">-</span><span class="mi">6</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;Z&#39;</span>
+        <span class="k">return</span> <span class="n">r</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">datetime</span><span class="o">.</span><span class="n">time</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">dt</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">dt</span><span class="o">.</span><span class="n">microsecond</span><span class="p">:</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">r</span><span class="p">[:</span><span class="mi">12</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">r</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">dt</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+
+
+<span class="k">def</span> <span class="nf">jsonify</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span>
+            <span class="n">builtin_types</span><span class="o">=</span><span class="p">(</span><span class="n">numbers</span><span class="o">.</span><span class="n">Real</span><span class="p">,</span> <span class="n">string_t</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">keyfilter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">unknown_type_filter</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Transform object making it suitable for json serialization.&quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">kombu.abstract</span> <span class="k">import</span> <span class="n">Object</span> <span class="k">as</span> <span class="n">KombuDictType</span>
+    <span class="n">_jsonify</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">jsonify</span><span class="p">,</span> <span class="n">builtin_types</span><span class="o">=</span><span class="n">builtin_types</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span>
+                       <span class="n">keyfilter</span><span class="o">=</span><span class="n">keyfilter</span><span class="p">,</span>
+                       <span class="n">unknown_type_filter</span><span class="o">=</span><span class="n">unknown_type_filter</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">KombuDictType</span><span class="p">):</span>
+        <span class="n">obj</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="n">as_dict</span><span class="p">(</span><span class="n">recurse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">obj</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">builtin_types</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">obj</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="p">(</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">_jsonify</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">obj</span><span class="p">]</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="n">k</span><span class="p">:</span> <span class="n">_jsonify</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">keyfilter</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">if</span> <span class="n">keyfilter</span> <span class="k">else</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">date</span><span class="p">,</span> <span class="n">datetime</span><span class="o">.</span><span class="n">time</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="n">_datetime_to_json</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">unknown_type_filter</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s1">&#39;Unsupported type: </span><span class="si">{0!r}</span><span class="s1"> </span><span class="si">{1!r}</span><span class="s1"> (parent: </span><span class="si">{2}</span><span class="s1">)&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="nb">type</span><span class="p">(</span><span class="n">obj</span><span class="p">),</span> <span class="n">obj</span><span class="p">,</span> <span class="n">key</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">unknown_type_filter</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+
+
+<span class="c1"># Since PyPy 3 targets Python 3.2, &#39;raise exc from None&#39; will</span>
+<span class="c1"># raise a TypeError so we need to look for Python 3.3 or newer</span>
+<span class="k">if</span> <span class="n">PY33</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="kn">from</span> <span class="nn">vine.five</span> <span class="k">import</span> <span class="n">exec_</span>
+    <span class="n">_raise_with_context</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># for flake8</span>
+    <span class="n">exec_</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;def _raise_with_context(exc, ctx): raise exc from ctx&quot;&quot;&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">raise_with_context</span><span class="p">(</span><span class="n">exc</span><span class="p">):</span>
+        <span class="n">exc_info</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">exc_info</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">exc</span>
+        <span class="k">elif</span> <span class="n">exc_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">is</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">raise</span>
+        <span class="n">_raise_with_context</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">exc_info</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">raise_with_context</span><span class="p">(</span><span class="n">exc</span><span class="p">):</span>
+        <span class="n">exc_info</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">exc_info</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">exc</span>
+        <span class="k">if</span> <span class="n">exc_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">is</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">raise</span>
+        <span class="k">elif</span> <span class="n">exc_info</span><span class="p">[</span><span class="mi">2</span><span class="p">]:</span>
+            <span class="n">reraise</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">),</span> <span class="n">exc</span><span class="p">,</span> <span class="n">exc_info</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+        <span class="k">raise</span> <span class="n">exc</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

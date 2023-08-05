@@ -1,0 +1,287 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.bin.events &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/bin/events.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.bin.events</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;The :program:`celery events` command.</span>
+
+<span class="sd">.. program:: celery events</span>
+
+<span class="sd">.. seealso::</span>
+
+<span class="sd">    See :ref:`preload-options` and :ref:`daemon-options`.</span>
+
+<span class="sd">.. cmdoption:: -d, --dump</span>
+
+<span class="sd">    Dump events to stdout.</span>
+
+<span class="sd">.. cmdoption:: -c, --camera</span>
+
+<span class="sd">    Take snapshots of events using this camera.</span>
+
+<span class="sd">.. cmdoption:: --detach</span>
+
+<span class="sd">    Camera: Detach and run in the background as a daemon.</span>
+
+<span class="sd">.. cmdoption:: -F, --freq, --frequency</span>
+
+<span class="sd">    Camera: Shutter frequency.  Default is every 1.0 seconds.</span>
+
+<span class="sd">.. cmdoption:: -r, --maxrate</span>
+
+<span class="sd">    Camera: Optional shutter rate limit (e.g., 10/m).</span>
+
+<span class="sd">.. cmdoption:: -l, --loglevel</span>
+
+<span class="sd">    Logging level, choose between `DEBUG`, `INFO`, `WARNING`,</span>
+<span class="sd">    `ERROR`, `CRITICAL`, or `FATAL`.  Default is INFO.</span>
+
+<span class="sd">.. cmdoption:: -f, --logfile</span>
+
+<span class="sd">    Path to log file.  If no logfile is specified, `stderr` is used.</span>
+
+<span class="sd">.. cmdoption:: --pidfile</span>
+
+<span class="sd">    Optional file used to store the process pid.</span>
+
+<span class="sd">    The program won&#39;t start if this file already exists</span>
+<span class="sd">    and the pid is still alive.</span>
+
+<span class="sd">.. cmdoption:: --uid</span>
+
+<span class="sd">    User id, or user name of the user to run as after detaching.</span>
+
+<span class="sd">.. cmdoption:: --gid</span>
+
+<span class="sd">    Group id, or group name of the main group to change to after</span>
+<span class="sd">    detaching.</span>
+
+<span class="sd">.. cmdoption:: --umask</span>
+
+<span class="sd">    Effective umask (in octal) of the process after detaching.  Inherits</span>
+<span class="sd">    the umask of the parent process by default.</span>
+
+<span class="sd">.. cmdoption:: --workdir</span>
+
+<span class="sd">    Optional directory to change to after detaching.</span>
+
+<span class="sd">.. cmdoption:: --executable</span>
+
+<span class="sd">    Executable to use for the detached process.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">partial</span>
+
+<span class="kn">from</span> <span class="nn">celery.bin.base</span> <span class="k">import</span> <span class="n">Command</span><span class="p">,</span> <span class="n">daemon_options</span>
+<span class="kn">from</span> <span class="nn">celery.platforms</span> <span class="k">import</span> <span class="n">detached</span><span class="p">,</span> <span class="n">set_process_title</span><span class="p">,</span> <span class="n">strargv</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;events&#39;</span><span class="p">,)</span>
+
+<span class="n">HELP</span> <span class="o">=</span> <span class="vm">__doc__</span>
+
+
+<div class="viewcode-block" id="events"><a class="viewcode-back" href="../../../reference/celery.bin.events.html#celery.bin.events.events">[docs]</a><span class="k">class</span> <span class="nc">events</span><span class="p">(</span><span class="n">Command</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Event-stream utilities.</span>
+
+<span class="sd">    Notes:</span>
+<span class="sd">        .. code-block:: console</span>
+
+<span class="sd">            # - Start graphical monitor (requires curses)</span>
+<span class="sd">            $ celery events --app=proj</span>
+<span class="sd">            $ celery events -d --app=proj</span>
+<span class="sd">            # - Dump events to screen.</span>
+<span class="sd">            $ celery events -b amqp://</span>
+<span class="sd">            # - Run snapshot camera.</span>
+<span class="sd">            $ celery events -c &lt;camera&gt; [options]</span>
+
+<span class="sd">    Examples:</span>
+<span class="sd">        .. code-block:: console</span>
+
+<span class="sd">            $ celery events</span>
+<span class="sd">            $ celery events -d</span>
+<span class="sd">            $ celery events -c mod.attr -F 1.0 --detach --maxrate=100/m -l info</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">doc</span> <span class="o">=</span> <span class="n">HELP</span>
+    <span class="n">supports_args</span> <span class="o">=</span> <span class="kc">False</span>
+
+<div class="viewcode-block" id="events.run"><a class="viewcode-back" href="../../../reference/celery.bin.events.html#celery.bin.events.events.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dump</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">camera</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">frequency</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">maxrate</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">loglevel</span><span class="o">=</span><span class="s1">&#39;INFO&#39;</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">prog_name</span><span class="o">=</span><span class="s1">&#39;celery events&#39;</span><span class="p">,</span>
+            <span class="n">pidfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">uid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">gid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">umask</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">workdir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">detach</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prog_name</span> <span class="o">=</span> <span class="n">prog_name</span>
+
+        <span class="k">if</span> <span class="n">dump</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_evdump</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">camera</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_evcam</span><span class="p">(</span><span class="n">camera</span><span class="p">,</span> <span class="n">freq</span><span class="o">=</span><span class="n">frequency</span><span class="p">,</span> <span class="n">maxrate</span><span class="o">=</span><span class="n">maxrate</span><span class="p">,</span>
+                                  <span class="n">loglevel</span><span class="o">=</span><span class="n">loglevel</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="n">logfile</span><span class="p">,</span>
+                                  <span class="n">pidfile</span><span class="o">=</span><span class="n">pidfile</span><span class="p">,</span> <span class="n">uid</span><span class="o">=</span><span class="n">uid</span><span class="p">,</span> <span class="n">gid</span><span class="o">=</span><span class="n">gid</span><span class="p">,</span>
+                                  <span class="n">umask</span><span class="o">=</span><span class="n">umask</span><span class="p">,</span>
+                                  <span class="n">workdir</span><span class="o">=</span><span class="n">workdir</span><span class="p">,</span>
+                                  <span class="n">detach</span><span class="o">=</span><span class="n">detach</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_evtop</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="events.run_evdump"><a class="viewcode-back" href="../../../reference/celery.bin.events.html#celery.bin.events.events.run_evdump">[docs]</a>    <span class="k">def</span> <span class="nf">run_evdump</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">celery.events.dumper</span> <span class="k">import</span> <span class="n">evdump</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_process_status</span><span class="p">(</span><span class="s1">&#39;dump&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">evdump</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="events.run_evtop"><a class="viewcode-back" href="../../../reference/celery.bin.events.html#celery.bin.events.events.run_evtop">[docs]</a>    <span class="k">def</span> <span class="nf">run_evtop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">celery.events.cursesmon</span> <span class="k">import</span> <span class="n">evtop</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_process_status</span><span class="p">(</span><span class="s1">&#39;top&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">evtop</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="events.run_evcam"><a class="viewcode-back" href="../../../reference/celery.bin.events.html#celery.bin.events.events.run_evcam">[docs]</a>    <span class="k">def</span> <span class="nf">run_evcam</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">camera</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pidfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">uid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                  <span class="n">gid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">umask</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workdir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                  <span class="n">detach</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">celery.events.snapshot</span> <span class="k">import</span> <span class="n">evcam</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_process_status</span><span class="p">(</span><span class="s1">&#39;cam&#39;</span><span class="p">)</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;app&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span>
+        <span class="n">cam</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">evcam</span><span class="p">,</span> <span class="n">camera</span><span class="p">,</span>
+                      <span class="n">logfile</span><span class="o">=</span><span class="n">logfile</span><span class="p">,</span> <span class="n">pidfile</span><span class="o">=</span><span class="n">pidfile</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">detach</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">detached</span><span class="p">(</span><span class="n">logfile</span><span class="p">,</span> <span class="n">pidfile</span><span class="p">,</span> <span class="n">uid</span><span class="p">,</span> <span class="n">gid</span><span class="p">,</span> <span class="n">umask</span><span class="p">,</span> <span class="n">workdir</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">cam</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">cam</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="events.set_process_status"><a class="viewcode-back" href="../../../reference/celery.bin.events.html#celery.bin.events.events.set_process_status">[docs]</a>    <span class="k">def</span> <span class="nf">set_process_status</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prog</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="n">prog</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">:</span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">prog_name</span><span class="p">,</span> <span class="n">prog</span><span class="p">)</span>
+        <span class="n">info</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1"> </span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">info</span><span class="p">,</span> <span class="n">strargv</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">set_process_title</span><span class="p">(</span><span class="n">prog</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="n">info</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="events.add_arguments"><a class="viewcode-back" href="../../../reference/celery.bin.events.html#celery.bin.events.events.add_arguments">[docs]</a>    <span class="k">def</span> <span class="nf">add_arguments</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parser</span><span class="p">):</span>
+        <span class="n">dopts</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_argument_group</span><span class="p">(</span><span class="s1">&#39;Dumper&#39;</span><span class="p">)</span>
+        <span class="n">dopts</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;-d&#39;</span><span class="p">,</span> <span class="s1">&#39;--dump&#39;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s1">&#39;store_true&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="n">copts</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_argument_group</span><span class="p">(</span><span class="s1">&#39;Snapshot&#39;</span><span class="p">)</span>
+        <span class="n">copts</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;-c&#39;</span><span class="p">,</span> <span class="s1">&#39;--camera&#39;</span><span class="p">)</span>
+        <span class="n">copts</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--detach&#39;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s1">&#39;store_true&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">copts</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;-F&#39;</span><span class="p">,</span> <span class="s1">&#39;--frequency&#39;</span><span class="p">,</span> <span class="s1">&#39;--freq&#39;</span><span class="p">,</span>
+                           <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+        <span class="n">copts</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;-r&#39;</span><span class="p">,</span> <span class="s1">&#39;--maxrate&#39;</span><span class="p">)</span>
+        <span class="n">copts</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;-l&#39;</span><span class="p">,</span> <span class="s1">&#39;--loglevel&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;INFO&#39;</span><span class="p">)</span>
+
+        <span class="n">daemon_options</span><span class="p">(</span><span class="n">parser</span><span class="p">,</span> <span class="n">default_pidfile</span><span class="o">=</span><span class="s1">&#39;celeryev.pid&#39;</span><span class="p">)</span>
+
+        <span class="n">user_options</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">user_options</span><span class="p">[</span><span class="s1">&#39;events&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">user_options</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_compat_options</span><span class="p">(</span>
+                <span class="n">parser</span><span class="o">.</span><span class="n">add_argument_group</span><span class="p">(</span><span class="s1">&#39;User Options&#39;</span><span class="p">),</span>
+                <span class="n">user_options</span><span class="p">)</span></div></div>
+
+
+<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+    <span class="n">ev</span> <span class="o">=</span> <span class="n">events</span><span class="p">()</span>
+    <span class="n">ev</span><span class="o">.</span><span class="n">execute_from_commandline</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>              <span class="c1"># pragma: no cover</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

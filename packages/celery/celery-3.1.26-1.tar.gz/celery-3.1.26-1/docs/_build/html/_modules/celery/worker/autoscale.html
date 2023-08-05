@@ -1,0 +1,269 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.worker.autoscale &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/worker/autoscale.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.worker.autoscale</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Pool Autoscaling.</span>
+
+<span class="sd">This module implements the internal thread responsible</span>
+<span class="sd">for growing and shrinking the pool according to the</span>
+<span class="sd">current autoscale settings.</span>
+
+<span class="sd">The autoscale thread is only enabled if</span>
+<span class="sd">the :option:`celery worker --autoscale` option is used.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">from</span> <span class="nn">time</span> <span class="k">import</span> <span class="n">sleep</span>
+
+<span class="kn">from</span> <span class="nn">kombu.async.semaphore</span> <span class="k">import</span> <span class="n">DummyLock</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">bootsteps</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">monotonic</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">celery.utils.threads</span> <span class="k">import</span> <span class="n">bgThread</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="k">import</span> <span class="n">state</span>
+<span class="kn">from</span> <span class="nn">.components</span> <span class="k">import</span> <span class="n">Pool</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Autoscaler&#39;</span><span class="p">,</span> <span class="s1">&#39;WorkerComponent&#39;</span><span class="p">)</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="n">debug</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">error</span> <span class="o">=</span> <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">,</span> <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">,</span> <span class="n">logger</span><span class="o">.</span><span class="n">error</span>
+
+<span class="n">AUTOSCALE_KEEPALIVE</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;AUTOSCALE_KEEPALIVE&#39;</span><span class="p">,</span> <span class="mi">30</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="WorkerComponent"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.WorkerComponent">[docs]</a><span class="k">class</span> <span class="nc">WorkerComponent</span><span class="p">(</span><span class="n">bootsteps</span><span class="o">.</span><span class="n">StartStopStep</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Bootstep that starts the autoscaler thread/timer in the worker.&quot;&quot;&quot;</span>
+
+    <span class="n">label</span> <span class="o">=</span> <span class="s1">&#39;Autoscaler&#39;</span>
+    <span class="n">conditional</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">requires</span> <span class="o">=</span> <span class="p">(</span><span class="n">Pool</span><span class="p">,)</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">enabled</span> <span class="o">=</span> <span class="n">w</span><span class="o">.</span><span class="n">autoscale</span>
+        <span class="n">w</span><span class="o">.</span><span class="n">autoscaler</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="WorkerComponent.create"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.WorkerComponent.create">[docs]</a>    <span class="k">def</span> <span class="nf">create</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">w</span><span class="p">):</span>
+        <span class="n">scaler</span> <span class="o">=</span> <span class="n">w</span><span class="o">.</span><span class="n">autoscaler</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">instantiate</span><span class="p">(</span>
+            <span class="n">w</span><span class="o">.</span><span class="n">autoscaler_cls</span><span class="p">,</span>
+            <span class="n">w</span><span class="o">.</span><span class="n">pool</span><span class="p">,</span> <span class="n">w</span><span class="o">.</span><span class="n">max_concurrency</span><span class="p">,</span> <span class="n">w</span><span class="o">.</span><span class="n">min_concurrency</span><span class="p">,</span>
+            <span class="n">worker</span><span class="o">=</span><span class="n">w</span><span class="p">,</span> <span class="n">mutex</span><span class="o">=</span><span class="n">DummyLock</span><span class="p">()</span> <span class="k">if</span> <span class="n">w</span><span class="o">.</span><span class="n">use_eventloop</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">scaler</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">w</span><span class="o">.</span><span class="n">use_eventloop</span> <span class="k">else</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="WorkerComponent.register_with_event_loop"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.WorkerComponent.register_with_event_loop">[docs]</a>    <span class="k">def</span> <span class="nf">register_with_event_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">hub</span><span class="p">):</span>
+        <span class="n">w</span><span class="o">.</span><span class="n">consumer</span><span class="o">.</span><span class="n">on_task_message</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">autoscaler</span><span class="o">.</span><span class="n">maybe_scale</span><span class="p">)</span>
+        <span class="n">hub</span><span class="o">.</span><span class="n">call_repeatedly</span><span class="p">(</span>
+            <span class="n">w</span><span class="o">.</span><span class="n">autoscaler</span><span class="o">.</span><span class="n">keepalive</span><span class="p">,</span> <span class="n">w</span><span class="o">.</span><span class="n">autoscaler</span><span class="o">.</span><span class="n">maybe_scale</span><span class="p">,</span>
+        <span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="Autoscaler"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler">[docs]</a><span class="k">class</span> <span class="nc">Autoscaler</span><span class="p">(</span><span class="n">bgThread</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Background thread to autoscale pool workers.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pool</span><span class="p">,</span> <span class="n">max_concurrency</span><span class="p">,</span>
+                 <span class="n">min_concurrency</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">worker</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">keepalive</span><span class="o">=</span><span class="n">AUTOSCALE_KEEPALIVE</span><span class="p">,</span> <span class="n">mutex</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">Autoscaler</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pool</span> <span class="o">=</span> <span class="n">pool</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span> <span class="o">=</span> <span class="n">mutex</span> <span class="ow">or</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_concurrency</span> <span class="o">=</span> <span class="n">max_concurrency</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">min_concurrency</span> <span class="o">=</span> <span class="n">min_concurrency</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">keepalive</span> <span class="o">=</span> <span class="n">keepalive</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_scale_up</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">worker</span> <span class="o">=</span> <span class="n">worker</span>
+
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">keepalive</span><span class="p">,</span> <span class="s1">&#39;cannot scale down too fast.&#39;</span>
+
+<div class="viewcode-block" id="Autoscaler.body"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.body">[docs]</a>    <span class="k">def</span> <span class="nf">body</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">maybe_scale</span><span class="p">()</span>
+        <span class="n">sleep</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_maybe_scale</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">req</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">procs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">qty</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_concurrency</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cur</span> <span class="o">&gt;</span> <span class="n">procs</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scale_up</span><span class="p">(</span><span class="n">cur</span> <span class="o">-</span> <span class="n">procs</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">qty</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_concurrency</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cur</span> <span class="o">&lt;</span> <span class="n">procs</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scale_down</span><span class="p">(</span><span class="n">procs</span> <span class="o">-</span> <span class="n">cur</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+
+<div class="viewcode-block" id="Autoscaler.maybe_scale"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.maybe_scale">[docs]</a>    <span class="k">def</span> <span class="nf">maybe_scale</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">req</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_maybe_scale</span><span class="p">(</span><span class="n">req</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">maintain_pool</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Autoscaler.update"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.update">[docs]</a>    <span class="k">def</span> <span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">max</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">min</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">max</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">max</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_shrink</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">processes</span> <span class="o">-</span> <span class="nb">max</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">max_concurrency</span> <span class="o">=</span> <span class="nb">max</span>
+            <span class="k">if</span> <span class="nb">min</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">min</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_grow</span><span class="p">(</span><span class="nb">min</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">min_concurrency</span> <span class="o">=</span> <span class="nb">min</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_concurrency</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_concurrency</span></div>
+
+<div class="viewcode-block" id="Autoscaler.force_scale_up"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.force_scale_up">[docs]</a>    <span class="k">def</span> <span class="nf">force_scale_up</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="p">:</span>
+            <span class="n">new</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span> <span class="o">+</span> <span class="n">n</span>
+            <span class="k">if</span> <span class="n">new</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_concurrency</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">max_concurrency</span> <span class="o">=</span> <span class="n">new</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_grow</span><span class="p">(</span><span class="n">n</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Autoscaler.force_scale_down"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.force_scale_down">[docs]</a>    <span class="k">def</span> <span class="nf">force_scale_down</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="p">:</span>
+            <span class="n">new</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span> <span class="o">-</span> <span class="n">n</span>
+            <span class="k">if</span> <span class="n">new</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_concurrency</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">min_concurrency</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">new</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_shrink</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="Autoscaler.scale_up"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.scale_up">[docs]</a>    <span class="k">def</span> <span class="nf">scale_up</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_scale_up</span> <span class="o">=</span> <span class="n">monotonic</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_grow</span><span class="p">(</span><span class="n">n</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Autoscaler.scale_down"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.scale_down">[docs]</a>    <span class="k">def</span> <span class="nf">scale_down</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_scale_up</span> <span class="ow">and</span> <span class="p">(</span>
+                <span class="n">monotonic</span><span class="p">()</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_scale_up</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">keepalive</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shrink</span><span class="p">(</span><span class="n">n</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_grow</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+        <span class="n">info</span><span class="p">(</span><span class="s1">&#39;Scaling up </span><span class="si">%s</span><span class="s1"> processes.&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">grow</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">consumer</span><span class="o">.</span><span class="n">_update_prefetch_count</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_shrink</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+        <span class="n">info</span><span class="p">(</span><span class="s1">&#39;Scaling down </span><span class="si">%s</span><span class="s1"> processes.&#39;</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">shrink</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Autoscaler won&#39;t scale down: all processes busy.&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">error</span><span class="p">(</span><span class="s1">&#39;Autoscaler: scale_down: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">consumer</span><span class="o">.</span><span class="n">_update_prefetch_count</span><span class="p">(</span><span class="o">-</span><span class="n">n</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Autoscaler.info"><a class="viewcode-back" href="../../../internals/reference/celery.worker.autoscale.html#celery.worker.autoscale.Autoscaler.info">[docs]</a>    <span class="k">def</span> <span class="nf">info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_concurrency</span><span class="p">,</span>
+            <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_concurrency</span><span class="p">,</span>
+            <span class="s1">&#39;current&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">processes</span><span class="p">,</span>
+            <span class="s1">&#39;qty&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">qty</span><span class="p">,</span>
+        <span class="p">}</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">qty</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">reserved_requests</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">processes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">num_processes</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

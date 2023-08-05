@@ -1,0 +1,562 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.app.control &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/app/control.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.app.control</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Worker Remote Control Client.</span>
+
+<span class="sd">Client for worker remote control commands.</span>
+<span class="sd">Server implementation is in :mod:`celery.worker.control`.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="kn">from</span> <span class="nn">billiard.common</span> <span class="k">import</span> <span class="n">TERM_SIGNAME</span>
+<span class="kn">from</span> <span class="nn">kombu.pidbox</span> <span class="k">import</span> <span class="n">Mailbox</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.compat</span> <span class="k">import</span> <span class="n">register_after_fork</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.functional</span> <span class="k">import</span> <span class="n">lazy</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.objects</span> <span class="k">import</span> <span class="n">cached_property</span>
+
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="n">DuplicateNodenameWarning</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">celery.utils.text</span> <span class="k">import</span> <span class="n">pluralize</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Inspect&#39;</span><span class="p">,</span> <span class="s1">&#39;Control&#39;</span><span class="p">,</span> <span class="s1">&#39;flatten_reply&#39;</span><span class="p">)</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="n">W_DUPNODE</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">Received multiple replies from node </span><span class="si">{0}</span><span class="s2">: </span><span class="si">{1}</span><span class="s2">.</span>
+<span class="s2">Please make sure you give each node a unique nodename using</span>
+<span class="s2">the celery worker `-n` option.</span><span class="se">\</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="flatten_reply"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.flatten_reply">[docs]</a><span class="k">def</span> <span class="nf">flatten_reply</span><span class="p">(</span><span class="n">reply</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Flatten node replies.</span>
+
+<span class="sd">    Convert from a list of replies in this format::</span>
+
+<span class="sd">        [{&#39;a@example.com&#39;: reply},</span>
+<span class="sd">         {&#39;b@example.com&#39;: reply}]</span>
+
+<span class="sd">    into this format::</span>
+
+<span class="sd">        {&#39;a@example.com&#39;: reply,</span>
+<span class="sd">         &#39;b@example.com&#39;: reply}</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">nodes</span><span class="p">,</span> <span class="n">dupes</span> <span class="o">=</span> <span class="p">{},</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">reply</span><span class="p">:</span>
+        <span class="p">[</span><span class="n">dupes</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">item</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">nodes</span><span class="p">]</span>
+        <span class="n">nodes</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">dupes</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">DuplicateNodenameWarning</span><span class="p">(</span>
+            <span class="n">W_DUPNODE</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                <span class="n">pluralize</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">dupes</span><span class="p">),</span> <span class="s1">&#39;name&#39;</span><span class="p">),</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">dupes</span><span class="p">)),</span>
+            <span class="p">),</span>
+        <span class="p">))</span>
+    <span class="k">return</span> <span class="n">nodes</span></div>
+
+
+<span class="k">def</span> <span class="nf">_after_fork_cleanup_control</span><span class="p">(</span><span class="n">control</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">control</span><span class="o">.</span><span class="n">_after_fork</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;after fork raised exception: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Inspect"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect">[docs]</a><span class="k">class</span> <span class="nc">Inspect</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;API for app.control.inspect.&quot;&quot;&quot;</span>
+
+    <span class="n">app</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">connection</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">destination</span> <span class="o">=</span> <span class="n">destination</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timeout</span> <span class="o">=</span> <span class="n">timeout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">callback</span> <span class="o">=</span> <span class="n">callback</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">connection</span> <span class="o">=</span> <span class="n">connection</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">limit</span> <span class="o">=</span> <span class="n">limit</span>
+
+    <span class="k">def</span> <span class="nf">_prepare</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reply</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">reply</span><span class="p">:</span>
+            <span class="n">by_node</span> <span class="o">=</span> <span class="n">flatten_reply</span><span class="p">(</span><span class="n">reply</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">destination</span> <span class="ow">and</span>
+                    <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">destination</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">))):</span>
+                <span class="k">return</span> <span class="n">by_node</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">destination</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">by_node</span>
+
+    <span class="k">def</span> <span class="nf">_request</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prepare</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">control</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="n">command</span><span class="p">,</span>
+            <span class="n">arguments</span><span class="o">=</span><span class="n">kwargs</span><span class="p">,</span>
+            <span class="n">destination</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">destination</span><span class="p">,</span>
+            <span class="n">callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">callback</span><span class="p">,</span>
+            <span class="n">connection</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="p">,</span>
+            <span class="n">limit</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">limit</span><span class="p">,</span>
+            <span class="n">timeout</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">timeout</span><span class="p">,</span> <span class="n">reply</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">))</span>
+
+<div class="viewcode-block" id="Inspect.report"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.report">[docs]</a>    <span class="k">def</span> <span class="nf">report</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;report&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.clock"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.clock">[docs]</a>    <span class="k">def</span> <span class="nf">clock</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;clock&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.active"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.active">[docs]</a>    <span class="k">def</span> <span class="nf">active</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">safe</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="c1"># safe is ignored since 4.0</span>
+        <span class="c1"># as no objects will need serialization now that we</span>
+        <span class="c1"># have argsrepr/kwargsrepr.</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;active&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.scheduled"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.scheduled">[docs]</a>    <span class="k">def</span> <span class="nf">scheduled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">safe</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;scheduled&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.reserved"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.reserved">[docs]</a>    <span class="k">def</span> <span class="nf">reserved</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">safe</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;reserved&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.stats"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.stats">[docs]</a>    <span class="k">def</span> <span class="nf">stats</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;stats&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.revoked"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.revoked">[docs]</a>    <span class="k">def</span> <span class="nf">revoked</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;revoked&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.registered"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.registered">[docs]</a>    <span class="k">def</span> <span class="nf">registered</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">taskinfoitems</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;registered&#39;</span><span class="p">,</span> <span class="n">taskinfoitems</span><span class="o">=</span><span class="n">taskinfoitems</span><span class="p">)</span></div>
+    <span class="n">registered_tasks</span> <span class="o">=</span> <span class="n">registered</span>
+
+<div class="viewcode-block" id="Inspect.ping"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.ping">[docs]</a>    <span class="k">def</span> <span class="nf">ping</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;ping&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.active_queues"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.active_queues">[docs]</a>    <span class="k">def</span> <span class="nf">active_queues</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;active_queues&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.query_task"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.query_task">[docs]</a>    <span class="k">def</span> <span class="nf">query_task</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">ids</span><span class="p">):</span>
+        <span class="c1"># signature used be unary: query_task(ids=[id1, id2])</span>
+        <span class="c1"># we need this to preserve backward compatibility.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ids</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ids</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="n">ids</span> <span class="o">=</span> <span class="n">ids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;query_task&#39;</span><span class="p">,</span> <span class="n">ids</span><span class="o">=</span><span class="n">ids</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.conf"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.conf">[docs]</a>    <span class="k">def</span> <span class="nf">conf</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">with_defaults</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;conf&#39;</span><span class="p">,</span> <span class="n">with_defaults</span><span class="o">=</span><span class="n">with_defaults</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.hello"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.hello">[docs]</a>    <span class="k">def</span> <span class="nf">hello</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">from_node</span><span class="p">,</span> <span class="n">revoked</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="n">from_node</span><span class="o">=</span><span class="n">from_node</span><span class="p">,</span> <span class="n">revoked</span><span class="o">=</span><span class="n">revoked</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.memsample"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.memsample">[docs]</a>    <span class="k">def</span> <span class="nf">memsample</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;memsample&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.memdump"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.memdump">[docs]</a>    <span class="k">def</span> <span class="nf">memdump</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">samples</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;memdump&#39;</span><span class="p">,</span> <span class="n">samples</span><span class="o">=</span><span class="n">samples</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Inspect.objgraph"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Inspect.objgraph">[docs]</a>    <span class="k">def</span> <span class="nf">objgraph</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;Request&#39;</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">max_depth</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_request</span><span class="p">(</span><span class="s1">&#39;objgraph&#39;</span><span class="p">,</span> <span class="n">num</span><span class="o">=</span><span class="n">n</span><span class="p">,</span> <span class="n">max_depth</span><span class="o">=</span><span class="n">max_depth</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">type</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="Control"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control">[docs]</a><span class="k">class</span> <span class="nc">Control</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Worker remote control client.&quot;&quot;&quot;</span>
+
+    <span class="n">Mailbox</span> <span class="o">=</span> <span class="n">Mailbox</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">Mailbox</span><span class="p">(</span>
+            <span class="s1">&#39;celery&#39;</span><span class="p">,</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;fanout&#39;</span><span class="p">,</span>
+            <span class="n">accept</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;json&#39;</span><span class="p">],</span>
+            <span class="n">producer_pool</span><span class="o">=</span><span class="n">lazy</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">amqp</span><span class="o">.</span><span class="n">producer_pool</span><span class="p">),</span>
+            <span class="n">queue_ttl</span><span class="o">=</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">control_queue_ttl</span><span class="p">,</span>
+            <span class="n">reply_queue_ttl</span><span class="o">=</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">control_queue_ttl</span><span class="p">,</span>
+            <span class="n">queue_expires</span><span class="o">=</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">control_queue_expires</span><span class="p">,</span>
+            <span class="n">reply_queue_expires</span><span class="o">=</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">control_queue_expires</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">register_after_fork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_after_fork_cleanup_control</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_after_fork</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span><span class="o">.</span><span class="n">producer_pool</span>
+
+<div class="viewcode-block" id="Control.inspect"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.inspect">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">inspect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">subclass_with_self</span><span class="p">(</span><span class="n">Inspect</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="s1">&#39;control.inspect&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.purge"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.purge">[docs]</a>    <span class="k">def</span> <span class="nf">purge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">connection</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Discard all waiting tasks.</span>
+
+<span class="sd">        This will ignore all tasks waiting for execution, and they will</span>
+<span class="sd">        be deleted from the messaging server.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            connection (kombu.Connection): Optional specific connection</span>
+<span class="sd">                instance to use.  If not provided a connection will</span>
+<span class="sd">                be acquired from the connection pool.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            int: the number of tasks discarded.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">connection_or_acquire</span><span class="p">(</span><span class="n">connection</span><span class="p">)</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">amqp</span><span class="o">.</span><span class="n">TaskConsumer</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span><span class="o">.</span><span class="n">purge</span><span class="p">()</span></div>
+    <span class="n">discard_all</span> <span class="o">=</span> <span class="n">purge</span>
+
+<div class="viewcode-block" id="Control.election"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.election">[docs]</a>    <span class="k">def</span> <span class="nf">election</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">,</span> <span class="n">topic</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">connection</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;election&#39;</span><span class="p">,</span> <span class="n">connection</span><span class="o">=</span><span class="n">connection</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">arguments</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="nb">id</span><span class="p">,</span> <span class="s1">&#39;topic&#39;</span><span class="p">:</span> <span class="n">topic</span><span class="p">,</span> <span class="s1">&#39;action&#39;</span><span class="p">:</span> <span class="n">action</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.revoke"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.revoke">[docs]</a>    <span class="k">def</span> <span class="nf">revoke</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">terminate</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+               <span class="n">signal</span><span class="o">=</span><span class="n">TERM_SIGNAME</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to revoke a task by id.</span>
+
+<span class="sd">        If a task is revoked, the workers will ignore the task and</span>
+<span class="sd">        not execute it after all.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            task_id (str): Id of the task to revoke.</span>
+<span class="sd">            terminate (bool): Also terminate the process currently working</span>
+<span class="sd">                on the task (if any).</span>
+<span class="sd">            signal (str): Name of signal to send to process if terminate.</span>
+<span class="sd">                Default is TERM.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            :meth:`broadcast` for supported keyword arguments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span><span class="s1">&#39;revoke&#39;</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+            <span class="s1">&#39;terminate&#39;</span><span class="p">:</span> <span class="n">terminate</span><span class="p">,</span>
+            <span class="s1">&#39;signal&#39;</span><span class="p">:</span> <span class="n">signal</span><span class="p">,</span>
+        <span class="p">},</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.terminate"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.terminate">[docs]</a>    <span class="k">def</span> <span class="nf">terminate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span>
+                  <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">signal</span><span class="o">=</span><span class="n">TERM_SIGNAME</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to terminate a task by id.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            This is just a shortcut to :meth:`revoke` with the terminate</span>
+<span class="sd">            argument enabled.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">revoke</span><span class="p">(</span>
+            <span class="n">task_id</span><span class="p">,</span>
+            <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="n">terminate</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">signal</span><span class="o">=</span><span class="n">signal</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.ping"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.ping">[docs]</a>    <span class="k">def</span> <span class="nf">ping</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Ping all (or specific) workers.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            List[Dict]: List of ``{&#39;hostname&#39;: reply}`` dictionaries.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            :meth:`broadcast` for supported keyword arguments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;ping&#39;</span><span class="p">,</span> <span class="n">reply</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{},</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span>
+            <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.rate_limit"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.rate_limit">[docs]</a>    <span class="k">def</span> <span class="nf">rate_limit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_name</span><span class="p">,</span> <span class="n">rate_limit</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell workers to set a new rate limit for task by type.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            task_name (str): Name of task to change rate limit for.</span>
+<span class="sd">            rate_limit (int, str): The rate limit as tasks per second,</span>
+<span class="sd">                or a rate limit string (`&#39;100/m&#39;`, etc.</span>
+<span class="sd">                see :attr:`celery.task.base.Task.rate_limit` for</span>
+<span class="sd">                more information).</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            :meth:`broadcast` for supported keyword arguments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;rate_limit&#39;</span><span class="p">,</span>
+            <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span>
+            <span class="n">arguments</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;task_name&#39;</span><span class="p">:</span> <span class="n">task_name</span><span class="p">,</span>
+                <span class="s1">&#39;rate_limit&#39;</span><span class="p">:</span> <span class="n">rate_limit</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.add_consumer"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.add_consumer">[docs]</a>    <span class="k">def</span> <span class="nf">add_consumer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span>
+                     <span class="n">exchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">exchange_type</span><span class="o">=</span><span class="s1">&#39;direct&#39;</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                     <span class="n">options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to start consuming from a new queue.</span>
+
+<span class="sd">        Only the queue name is required as if only the queue is specified</span>
+<span class="sd">        then the exchange/routing key will be set to the same name (</span>
+<span class="sd">        like automatic queues do).</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This command does not respect the default queue/exchange</span>
+<span class="sd">            options in the configuration.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            queue (str): Name of queue to start consuming from.</span>
+<span class="sd">            exchange (str): Optional name of exchange.</span>
+<span class="sd">            exchange_type (str): Type of exchange (defaults to &#39;direct&#39;)</span>
+<span class="sd">                command to, when empty broadcast to all workers.</span>
+<span class="sd">            routing_key (str): Optional routing key.</span>
+<span class="sd">            options (Dict): Additional options as supported</span>
+<span class="sd">                by :meth:`kombu.entitiy.Queue.from_dict`.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            :meth:`broadcast` for supported keyword arguments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;add_consumer&#39;</span><span class="p">,</span>
+            <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span>
+            <span class="n">arguments</span><span class="o">=</span><span class="nb">dict</span><span class="p">({</span>
+                <span class="s1">&#39;queue&#39;</span><span class="p">:</span> <span class="n">queue</span><span class="p">,</span>
+                <span class="s1">&#39;exchange&#39;</span><span class="p">:</span> <span class="n">exchange</span><span class="p">,</span>
+                <span class="s1">&#39;exchange_type&#39;</span><span class="p">:</span> <span class="n">exchange_type</span><span class="p">,</span>
+                <span class="s1">&#39;routing_key&#39;</span><span class="p">:</span> <span class="n">routing_key</span><span class="p">,</span>
+            <span class="p">},</span> <span class="o">**</span><span class="n">options</span> <span class="ow">or</span> <span class="p">{}),</span>
+            <span class="o">**</span><span class="n">kwargs</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.cancel_consumer"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.cancel_consumer">[docs]</a>    <span class="k">def</span> <span class="nf">cancel_consumer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to stop consuming from ``queue``.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;cancel_consumer&#39;</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span>
+            <span class="n">arguments</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;queue&#39;</span><span class="p">:</span> <span class="n">queue</span><span class="p">},</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.time_limit"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.time_limit">[docs]</a>    <span class="k">def</span> <span class="nf">time_limit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_name</span><span class="p">,</span> <span class="n">soft</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">hard</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell workers to set time limits for a task by type.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            task_name (str): Name of task to change time limits for.</span>
+<span class="sd">            soft (float): New soft time limit (in seconds).</span>
+<span class="sd">            hard (float): New hard time limit (in seconds).</span>
+<span class="sd">            **kwargs (Any): arguments passed on to :meth:`broadcast`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;time_limit&#39;</span><span class="p">,</span>
+            <span class="n">arguments</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;task_name&#39;</span><span class="p">:</span> <span class="n">task_name</span><span class="p">,</span>
+                <span class="s1">&#39;hard&#39;</span><span class="p">:</span> <span class="n">hard</span><span class="p">,</span>
+                <span class="s1">&#39;soft&#39;</span><span class="p">:</span> <span class="n">soft</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.enable_events"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.enable_events">[docs]</a>    <span class="k">def</span> <span class="nf">enable_events</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to enable events.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;enable_events&#39;</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{},</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.disable_events"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.disable_events">[docs]</a>    <span class="k">def</span> <span class="nf">disable_events</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to disable events.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;disable_events&#39;</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{},</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.pool_grow"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.pool_grow">[docs]</a>    <span class="k">def</span> <span class="nf">pool_grow</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to grow the pool by ``n``.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;pool_grow&#39;</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="n">n</span><span class="p">},</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.pool_shrink"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.pool_shrink">[docs]</a>    <span class="k">def</span> <span class="nf">pool_shrink</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell all (or specific) workers to shrink the pool by ``n``.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;pool_shrink&#39;</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="n">n</span><span class="p">},</span>
+            <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.autoscale"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.autoscale">[docs]</a>    <span class="k">def</span> <span class="nf">autoscale</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">max</span><span class="p">,</span> <span class="nb">min</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Change worker(s) autoscale setting.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;autoscale&#39;</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="nb">max</span><span class="p">,</span> <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">},</span>
+            <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.shutdown"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.shutdown">[docs]</a>    <span class="k">def</span> <span class="nf">shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Shutdown worker(s).</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;shutdown&#39;</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{},</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.pool_restart"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.pool_restart">[docs]</a>    <span class="k">def</span> <span class="nf">pool_restart</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">modules</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reload</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">reloader</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                     <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Restart the execution pools of all or specific workers.</span>
+
+<span class="sd">        Keyword Arguments:</span>
+<span class="sd">            modules (Sequence[str]): List of modules to reload.</span>
+<span class="sd">            reload (bool): Flag to enable module reloading.  Default is False.</span>
+<span class="sd">            reloader (Any): Function to reload a module.</span>
+<span class="sd">            destination (Sequence[str]): List of worker names to send this</span>
+<span class="sd">                command to.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;pool_restart&#39;</span><span class="p">,</span>
+            <span class="n">arguments</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;modules&#39;</span><span class="p">:</span> <span class="n">modules</span><span class="p">,</span>
+                <span class="s1">&#39;reload&#39;</span><span class="p">:</span> <span class="n">reload</span><span class="p">,</span>
+                <span class="s1">&#39;reloader&#39;</span><span class="p">:</span> <span class="n">reloader</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.heartbeat"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.heartbeat">[docs]</a>    <span class="k">def</span> <span class="nf">heartbeat</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Tell worker(s) to send a heartbeat immediately.</span>
+
+<span class="sd">        See Also:</span>
+<span class="sd">            Supports the same arguments as :meth:`broadcast`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span>
+            <span class="s1">&#39;heartbeat&#39;</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{},</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Control.broadcast"><a class="viewcode-back" href="../../../reference/celery.app.control.html#celery.app.control.Control.broadcast">[docs]</a>    <span class="k">def</span> <span class="nf">broadcast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                  <span class="n">connection</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reply</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                  <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">extra_kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Broadcast a control command to the celery workers.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            command (str): Name of command to send.</span>
+<span class="sd">            arguments (Dict): Keyword arguments for the command.</span>
+<span class="sd">            destination (List): If set, a list of the hosts to send the</span>
+<span class="sd">                command to, when empty broadcast to all workers.</span>
+<span class="sd">            connection (kombu.Connection): Custom broker connection to use,</span>
+<span class="sd">                if not set, a connection will be acquired from the pool.</span>
+<span class="sd">            reply (bool): Wait for and return the reply.</span>
+<span class="sd">            timeout (float): Timeout in seconds to wait for the reply.</span>
+<span class="sd">            limit (int): Limit number of replies.</span>
+<span class="sd">            callback (Callable): Callback called immediately for</span>
+<span class="sd">                each reply received.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">connection_or_acquire</span><span class="p">(</span><span class="n">connection</span><span class="p">)</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
+            <span class="n">arguments</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">arguments</span> <span class="ow">or</span> <span class="p">{},</span> <span class="o">**</span><span class="n">extra_kwargs</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span><span class="o">.</span><span class="n">_broadcast</span><span class="p">(</span>
+                <span class="n">command</span><span class="p">,</span> <span class="n">arguments</span><span class="p">,</span> <span class="n">destination</span><span class="p">,</span> <span class="n">reply</span><span class="p">,</span> <span class="n">timeout</span><span class="p">,</span>
+                <span class="n">limit</span><span class="p">,</span> <span class="n">callback</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="n">channel</span><span class="p">,</span>
+            <span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

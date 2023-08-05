@@ -1,0 +1,647 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.events.cursesmon &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/events/cursesmon.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.events.cursesmon</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Graphical monitor of Celery events using curses.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">curses</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">datetime</span>
+<span class="kn">from</span> <span class="nn">itertools</span> <span class="k">import</span> <span class="n">count</span>
+<span class="kn">from</span> <span class="nn">math</span> <span class="k">import</span> <span class="n">ceil</span>
+<span class="kn">from</span> <span class="nn">textwrap</span> <span class="k">import</span> <span class="n">wrap</span>
+<span class="kn">from</span> <span class="nn">time</span> <span class="k">import</span> <span class="n">time</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">VERSION_BANNER</span><span class="p">,</span> <span class="n">states</span>
+<span class="kn">from</span> <span class="nn">celery.app</span> <span class="k">import</span> <span class="n">app_or_default</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="n">values</span>
+<span class="kn">from</span> <span class="nn">celery.utils.text</span> <span class="k">import</span> <span class="n">abbr</span><span class="p">,</span> <span class="n">abbrtask</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;CursesMonitor&#39;</span><span class="p">,</span> <span class="s1">&#39;evtop&#39;</span><span class="p">)</span>
+
+<span class="n">BORDER_SPACING</span> <span class="o">=</span> <span class="mi">4</span>
+<span class="n">LEFT_BORDER_OFFSET</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="n">UUID_WIDTH</span> <span class="o">=</span> <span class="mi">36</span>
+<span class="n">STATE_WIDTH</span> <span class="o">=</span> <span class="mi">8</span>
+<span class="n">TIMESTAMP_WIDTH</span> <span class="o">=</span> <span class="mi">8</span>
+<span class="n">MIN_WORKER_WIDTH</span> <span class="o">=</span> <span class="mi">15</span>
+<span class="n">MIN_TASK_WIDTH</span> <span class="o">=</span> <span class="mi">16</span>
+
+<span class="c1"># this module is considered experimental</span>
+<span class="c1"># we don&#39;t care about coverage.</span>
+
+<span class="n">STATUS_SCREEN</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">events: </span><span class="si">{s.event_count}</span><span class="s2"> tasks:</span><span class="si">{s.task_count}</span><span class="s2"> workers:</span><span class="si">{w_alive}</span><span class="s2">/</span><span class="si">{w_all}</span><span class="s2"></span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="CursesMonitor"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor">[docs]</a><span class="k">class</span> <span class="nc">CursesMonitor</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+    <span class="sd">&quot;&quot;&quot;A curses based Celery task monitor.&quot;&quot;&quot;</span>
+
+    <span class="n">keymap</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">win</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">screen_delay</span> <span class="o">=</span> <span class="mi">10</span>
+    <span class="n">selected_task</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">selected_position</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">selected_str</span> <span class="o">=</span> <span class="s1">&#39;Selected: &#39;</span>
+    <span class="n">foreground</span> <span class="o">=</span> <span class="n">curses</span><span class="o">.</span><span class="n">COLOR_BLACK</span>
+    <span class="n">background</span> <span class="o">=</span> <span class="n">curses</span><span class="o">.</span><span class="n">COLOR_WHITE</span>
+    <span class="n">online_str</span> <span class="o">=</span> <span class="s1">&#39;Workers online: &#39;</span>
+    <span class="n">help_title</span> <span class="o">=</span> <span class="s1">&#39;Keys: &#39;</span>
+    <span class="n">help</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;j:down k:up i:info t:traceback r:result c:revoke ^c: quit&#39;</span><span class="p">)</span>
+    <span class="n">greet</span> <span class="o">=</span> <span class="s1">&#39;celery events </span><span class="si">{0}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">VERSION_BANNER</span><span class="p">)</span>
+    <span class="n">info_str</span> <span class="o">=</span> <span class="s1">&#39;Info: &#39;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">app</span><span class="p">,</span> <span class="n">keymap</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">keymap</span> <span class="o">=</span> <span class="n">keymap</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">keymap</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">state</span> <span class="o">=</span> <span class="n">state</span>
+        <span class="n">default_keymap</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;J&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_selection_down</span><span class="p">,</span>
+            <span class="s1">&#39;K&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_selection_up</span><span class="p">,</span>
+            <span class="s1">&#39;C&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">revoke_selection</span><span class="p">,</span>
+            <span class="s1">&#39;T&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">selection_traceback</span><span class="p">,</span>
+            <span class="s1">&#39;R&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">selection_result</span><span class="p">,</span>
+            <span class="s1">&#39;I&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">selection_info</span><span class="p">,</span>
+            <span class="s1">&#39;L&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">selection_rate_limit</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">keymap</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">default_keymap</span><span class="p">,</span> <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">keymap</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">RLock</span><span class="p">()</span>
+
+<div class="viewcode-block" id="CursesMonitor.format_row"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.format_row">[docs]</a>    <span class="k">def</span> <span class="nf">format_row</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uuid</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">worker</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">,</span> <span class="n">state</span><span class="p">):</span>
+        <span class="n">mx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">display_width</span>
+
+        <span class="c1"># include spacing</span>
+        <span class="n">detail_width</span> <span class="o">=</span> <span class="n">mx</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">STATE_WIDTH</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">TIMESTAMP_WIDTH</span>
+        <span class="n">uuid_space</span> <span class="o">=</span> <span class="n">detail_width</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">MIN_TASK_WIDTH</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">MIN_WORKER_WIDTH</span>
+
+        <span class="k">if</span> <span class="n">uuid_space</span> <span class="o">&lt;</span> <span class="n">UUID_WIDTH</span><span class="p">:</span>
+            <span class="n">uuid_width</span> <span class="o">=</span> <span class="n">uuid_space</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">uuid_width</span> <span class="o">=</span> <span class="n">UUID_WIDTH</span>
+
+        <span class="n">detail_width</span> <span class="o">=</span> <span class="n">detail_width</span> <span class="o">-</span> <span class="n">uuid_width</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="n">task_width</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">ceil</span><span class="p">(</span><span class="n">detail_width</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">))</span>
+        <span class="n">worker_width</span> <span class="o">=</span> <span class="n">detail_width</span> <span class="o">-</span> <span class="n">task_width</span> <span class="o">-</span> <span class="mi">1</span>
+
+        <span class="n">uuid</span> <span class="o">=</span> <span class="n">abbr</span><span class="p">(</span><span class="n">uuid</span><span class="p">,</span> <span class="n">uuid_width</span><span class="p">)</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="n">uuid_width</span><span class="p">)</span>
+        <span class="n">worker</span> <span class="o">=</span> <span class="n">abbr</span><span class="p">(</span><span class="n">worker</span><span class="p">,</span> <span class="n">worker_width</span><span class="p">)</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="n">worker_width</span><span class="p">)</span>
+        <span class="n">task</span> <span class="o">=</span> <span class="n">abbrtask</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">task_width</span><span class="p">)</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="n">task_width</span><span class="p">)</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="n">abbr</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">STATE_WIDTH</span><span class="p">)</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="n">STATE_WIDTH</span><span class="p">)</span>
+        <span class="n">timestamp</span> <span class="o">=</span> <span class="n">timestamp</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="n">TIMESTAMP_WIDTH</span><span class="p">)</span>
+
+        <span class="n">row</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1"> </span><span class="si">{1}</span><span class="s1"> </span><span class="si">{2}</span><span class="s1"> </span><span class="si">{3}</span><span class="s1"> </span><span class="si">{4}</span><span class="s1"> &#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">uuid</span><span class="p">,</span> <span class="n">worker</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span>
+                                            <span class="n">timestamp</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">row</span><span class="p">[:</span><span class="n">mx</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">row</span><span class="p">[:</span><span class="n">mx</span><span class="p">]</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">screen_width</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">mx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">mx</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">screen_height</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">my</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">my</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">display_width</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">mx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">mx</span> <span class="o">-</span> <span class="n">BORDER_SPACING</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">display_height</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">my</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">my</span> <span class="o">-</span> <span class="mi">10</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">limit</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">display_height</span>
+
+<div class="viewcode-block" id="CursesMonitor.find_position"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.find_position">[docs]</a>    <span class="k">def</span> <span class="nf">find_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">tasks</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tasks</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span> <span class="o">==</span> <span class="n">e</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+                <span class="k">return</span> <span class="n">i</span>
+        <span class="k">return</span> <span class="mi">0</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.move_selection_up"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.move_selection_up">[docs]</a>    <span class="k">def</span> <span class="nf">move_selection_up</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">move_selection</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.move_selection_down"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.move_selection_down">[docs]</a>    <span class="k">def</span> <span class="nf">move_selection_down</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">move_selection</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.move_selection"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.move_selection">[docs]</a>    <span class="k">def</span> <span class="nf">move_selection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">direction</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">tasks</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_position</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="n">pos</span> <span class="o">+</span> <span class="n">direction</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">IndexError</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span></div>
+
+    <span class="n">keyalias</span> <span class="o">=</span> <span class="p">{</span><span class="n">curses</span><span class="o">.</span><span class="n">KEY_DOWN</span><span class="p">:</span> <span class="s1">&#39;J&#39;</span><span class="p">,</span>
+                <span class="n">curses</span><span class="o">.</span><span class="n">KEY_UP</span><span class="p">:</span> <span class="s1">&#39;K&#39;</span><span class="p">,</span>
+                <span class="n">curses</span><span class="o">.</span><span class="n">KEY_ENTER</span><span class="p">:</span> <span class="s1">&#39;I&#39;</span><span class="p">}</span>
+
+<div class="viewcode-block" id="CursesMonitor.handle_keypress"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.handle_keypress">[docs]</a>    <span class="k">def</span> <span class="nf">handle_keypress</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getkey</span><span class="p">()</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+            <span class="k">return</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">keyalias</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="ow">or</span> <span class="n">key</span>
+        <span class="n">handler</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">keymap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">handler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">handler</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.alert"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.alert">[docs]</a>    <span class="k">def</span> <span class="nf">alert</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">callback</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">erase</span><span class="p">()</span>
+        <span class="n">my</span><span class="p">,</span> <span class="n">mx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">blank_line</span> <span class="o">=</span> <span class="n">count</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">title</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="mi">3</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span>
+                            <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span> <span class="o">|</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_UNDERLINE</span><span class="p">)</span>
+            <span class="nb">next</span><span class="p">(</span><span class="n">blank_line</span><span class="p">)</span>
+        <span class="n">callback</span><span class="p">(</span><span class="n">my</span><span class="p">,</span> <span class="n">mx</span><span class="p">,</span> <span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s1">&#39;Press any key to continue...&#39;</span><span class="p">,</span>
+                        <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">refresh</span><span class="p">()</span>
+        <span class="k">while</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getkey</span><span class="p">()</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pylint: disable=broad-except</span>
+                <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.selection_rate_limit"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.selection_rate_limit">[docs]</a>    <span class="k">def</span> <span class="nf">selection_rate_limit</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">curses</span><span class="o">.</span><span class="n">beep</span><span class="p">()</span>
+        <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">task</span><span class="o">.</span><span class="n">name</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">curses</span><span class="o">.</span><span class="n">beep</span><span class="p">()</span>
+
+        <span class="n">my</span><span class="p">,</span> <span class="n">mx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="s1">&#39;New rate limit: &#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">r</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span> <span class="o">|</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_UNDERLINE</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">2</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">+</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39; &#39;</span> <span class="o">*</span> <span class="p">(</span><span class="n">mx</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)))</span>
+        <span class="n">rlimit</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">readline</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">rlimit</span><span class="p">:</span>
+            <span class="n">reply</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">control</span><span class="o">.</span><span class="n">rate_limit</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                                                <span class="n">rlimit</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">reply</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">alert_remote_control_reply</span><span class="p">(</span><span class="n">reply</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.alert_remote_control_reply"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.alert_remote_control_reply">[docs]</a>    <span class="k">def</span> <span class="nf">alert_remote_control_reply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reply</span><span class="p">):</span>
+
+        <span class="k">def</span> <span class="nf">callback</span><span class="p">(</span><span class="n">my</span><span class="p">,</span> <span class="n">mx</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">count</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">reply</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span>
+                    <span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;No replies received in 1s deadline.&#39;</span><span class="p">,</span>
+                    <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span> <span class="o">+</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span>
+                <span class="p">)</span>
+                <span class="k">return</span>
+
+            <span class="k">for</span> <span class="n">subreply</span> <span class="ow">in</span> <span class="n">reply</span><span class="p">:</span>
+                <span class="n">curline</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+
+                <span class="n">host</span><span class="p">,</span> <span class="n">response</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">items</span><span class="p">(</span><span class="n">subreply</span><span class="p">))</span>
+                <span class="n">host</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">: &#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">host</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">curline</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+                <span class="n">attr</span> <span class="o">=</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_NORMAL</span>
+                <span class="n">text</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+                <span class="k">if</span> <span class="s1">&#39;error&#39;</span> <span class="ow">in</span> <span class="n">response</span><span class="p">:</span>
+                    <span class="n">text</span> <span class="o">=</span> <span class="n">response</span><span class="p">[</span><span class="s1">&#39;error&#39;</span><span class="p">]</span>
+                    <span class="n">attr</span> <span class="o">|=</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="s1">&#39;ok&#39;</span> <span class="ow">in</span> <span class="n">response</span><span class="p">:</span>
+                    <span class="n">text</span> <span class="o">=</span> <span class="n">response</span><span class="p">[</span><span class="s1">&#39;ok&#39;</span><span class="p">]</span>
+                    <span class="n">attr</span> <span class="o">|=</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">curline</span><span class="p">,</span> <span class="mi">3</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">host</span><span class="p">),</span> <span class="n">text</span><span class="p">,</span> <span class="n">attr</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">alert</span><span class="p">(</span><span class="n">callback</span><span class="p">,</span> <span class="s1">&#39;Remote Control Command Replies&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.readline"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.readline">[docs]</a>    <span class="k">def</span> <span class="nf">readline</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+        <span class="n">buffer</span> <span class="o">=</span> <span class="nb">str</span><span class="p">()</span>
+        <span class="n">curses</span><span class="o">.</span><span class="n">echo</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">while</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">ch</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getch</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">+</span> <span class="n">i</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">ch</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">ch</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">KEY_ENTER</span><span class="p">):</span>            <span class="c1"># enter</span>
+                        <span class="k">break</span>
+                    <span class="k">if</span> <span class="n">ch</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">27</span><span class="p">,):</span>
+                        <span class="n">buffer</span> <span class="o">=</span> <span class="nb">str</span><span class="p">()</span>
+                        <span class="k">break</span>
+                    <span class="n">buffer</span> <span class="o">+=</span> <span class="nb">chr</span><span class="p">(</span><span class="n">ch</span><span class="p">)</span>
+                    <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">noecho</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">buffer</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.revoke_selection"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.revoke_selection">[docs]</a>    <span class="k">def</span> <span class="nf">revoke_selection</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">curses</span><span class="o">.</span><span class="n">beep</span><span class="p">()</span>
+        <span class="n">reply</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">control</span><span class="o">.</span><span class="n">revoke</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">,</span> <span class="n">reply</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">alert_remote_control_reply</span><span class="p">(</span><span class="n">reply</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.selection_info"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.selection_info">[docs]</a>    <span class="k">def</span> <span class="nf">selection_info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="k">def</span> <span class="nf">alert_callback</span><span class="p">(</span><span class="n">mx</span><span class="p">,</span> <span class="n">my</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+            <span class="n">my</span><span class="p">,</span> <span class="n">mx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">count</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+            <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">]</span>
+            <span class="n">info</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">extra</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;state&#39;</span><span class="p">])</span>
+            <span class="n">infoitems</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="p">(</span><span class="s1">&#39;args&#39;</span><span class="p">,</span> <span class="n">info</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;args&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)),</span>
+                <span class="p">(</span><span class="s1">&#39;kwargs&#39;</span><span class="p">,</span> <span class="n">info</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;kwargs&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+            <span class="p">]</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">info</span><span class="o">.</span><span class="n">items</span><span class="p">())</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">infoitems</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">key</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">value</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+                <span class="n">curline</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+                <span class="n">keys</span> <span class="o">=</span> <span class="n">key</span> <span class="o">+</span> <span class="s1">&#39;: &#39;</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">curline</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">keys</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+                <span class="n">wrapped</span> <span class="o">=</span> <span class="n">wrap</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">mx</span> <span class="o">-</span> <span class="mi">2</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">wrapped</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span>
+                        <span class="n">curline</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span> <span class="o">+</span> <span class="mi">3</span><span class="p">,</span>
+                        <span class="n">abbr</span><span class="p">(</span><span class="n">wrapped</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                             <span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span> <span class="o">-</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span> <span class="o">+</span> <span class="mi">3</span><span class="p">)))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">subline</span> <span class="ow">in</span> <span class="n">wrapped</span><span class="p">:</span>
+                        <span class="n">nexty</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">nexty</span> <span class="o">&gt;=</span> <span class="n">my</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                            <span class="n">subline</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span> <span class="o">*</span> <span class="mi">4</span> <span class="o">+</span> <span class="s1">&#39;[...]&#39;</span>
+                        <span class="k">elif</span> <span class="n">nexty</span> <span class="o">&gt;=</span> <span class="n">my</span><span class="p">:</span>
+                            <span class="k">break</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span>
+                            <span class="n">nexty</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span>
+                            <span class="n">abbr</span><span class="p">(</span><span class="s1">&#39; &#39;</span> <span class="o">*</span> <span class="mi">4</span> <span class="o">+</span> <span class="n">subline</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span> <span class="o">-</span> <span class="mi">4</span><span class="p">),</span>
+                            <span class="n">curses</span><span class="o">.</span><span class="n">A_NORMAL</span><span class="p">,</span>
+                        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">alert</span><span class="p">(</span>
+            <span class="n">alert_callback</span><span class="p">,</span> <span class="s1">&#39;Task details for </span><span class="si">{0.selected_task}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.selection_traceback"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.selection_traceback">[docs]</a>    <span class="k">def</span> <span class="nf">selection_traceback</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">curses</span><span class="o">.</span><span class="n">beep</span><span class="p">()</span>
+        <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">state</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">states</span><span class="o">.</span><span class="n">EXCEPTION_STATES</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">curses</span><span class="o">.</span><span class="n">beep</span><span class="p">()</span>
+
+        <span class="k">def</span> <span class="nf">alert_callback</span><span class="p">(</span><span class="n">my</span><span class="p">,</span> <span class="n">mx</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">count</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">task</span><span class="o">.</span><span class="n">traceback</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="mi">3</span><span class="p">,</span> <span class="n">line</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">alert</span><span class="p">(</span>
+            <span class="n">alert_callback</span><span class="p">,</span>
+            <span class="s1">&#39;Task Exception Traceback for </span><span class="si">{0.selected_task}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.selection_result"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.selection_result">[docs]</a>    <span class="k">def</span> <span class="nf">selection_result</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="k">def</span> <span class="nf">alert_callback</span><span class="p">(</span><span class="n">my</span><span class="p">,</span> <span class="n">mx</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">count</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+            <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">]</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="s1">&#39;result&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span>
+                      <span class="nb">getattr</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="s1">&#39;exception&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">wrap</span><span class="p">(</span><span class="n">result</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">mx</span> <span class="o">-</span> <span class="mi">2</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="mi">3</span><span class="p">,</span> <span class="n">line</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">alert</span><span class="p">(</span>
+            <span class="n">alert_callback</span><span class="p">,</span>
+            <span class="s1">&#39;Task Result for </span><span class="si">{0.selected_task}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.display_task_row"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.display_task_row">[docs]</a>    <span class="k">def</span> <span class="nf">display_task_row</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lineno</span><span class="p">,</span> <span class="n">task</span><span class="p">):</span>
+        <span class="n">state_color</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state_colors</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">state</span><span class="p">)</span>
+        <span class="n">attr</span> <span class="o">=</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_NORMAL</span>
+        <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">uuid</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">:</span>
+            <span class="n">attr</span> <span class="o">=</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_STANDOUT</span>
+        <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">utcfromtimestamp</span><span class="p">(</span>
+            <span class="n">task</span><span class="o">.</span><span class="n">timestamp</span> <span class="ow">or</span> <span class="n">time</span><span class="p">(),</span>
+        <span class="p">)</span>
+        <span class="n">timef</span> <span class="o">=</span> <span class="n">timestamp</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%H:%M:%S&#39;</span><span class="p">)</span>
+        <span class="n">hostname</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">hostname</span> <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">worker</span> <span class="k">else</span> <span class="s1">&#39;*NONE*&#39;</span>
+        <span class="n">line</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_row</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">uuid</span><span class="p">,</span> <span class="n">task</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                               <span class="n">hostname</span><span class="p">,</span>
+                               <span class="n">timef</span><span class="p">,</span> <span class="n">task</span><span class="o">.</span><span class="n">state</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">lineno</span><span class="p">,</span> <span class="n">LEFT_BORDER_OFFSET</span><span class="p">,</span> <span class="n">line</span><span class="p">,</span> <span class="n">attr</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">state_color</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">lineno</span><span class="p">,</span>
+                            <span class="nb">len</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="o">-</span> <span class="n">STATE_WIDTH</span> <span class="o">+</span> <span class="n">BORDER_SPACING</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span>
+                            <span class="n">task</span><span class="o">.</span><span class="n">state</span><span class="p">,</span> <span class="n">state_color</span> <span class="o">|</span> <span class="n">attr</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.draw"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.draw">[docs]</a>    <span class="k">def</span> <span class="nf">draw</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">lock</span><span class="p">:</span>
+            <span class="n">win</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">win</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">handle_keypress</span><span class="p">()</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">LEFT_BORDER_OFFSET</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">blank_line</span> <span class="o">=</span> <span class="n">count</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+            <span class="n">my</span><span class="p">,</span> <span class="n">mx</span> <span class="o">=</span> <span class="n">win</span><span class="o">.</span><span class="n">getmaxyx</span><span class="p">()</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">erase</span><span class="p">()</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">bkgd</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">border</span><span class="p">()</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">greet</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_DIM</span> <span class="o">|</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">5</span><span class="p">))</span>
+            <span class="nb">next</span><span class="p">(</span><span class="n">blank_line</span><span class="p">)</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_row</span><span class="p">(</span><span class="s1">&#39;UUID&#39;</span><span class="p">,</span> <span class="s1">&#39;TASK&#39;</span><span class="p">,</span>
+                                                   <span class="s1">&#39;WORKER&#39;</span><span class="p">,</span> <span class="s1">&#39;TIME&#39;</span><span class="p">,</span> <span class="s1">&#39;STATE&#39;</span><span class="p">),</span>
+                       <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span> <span class="o">|</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_UNDERLINE</span><span class="p">)</span>
+            <span class="n">tasks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tasks</span>
+            <span class="k">if</span> <span class="n">tasks</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">row</span><span class="p">,</span> <span class="p">(</span><span class="n">uuid</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">tasks</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">row</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">display_height</span><span class="p">:</span>
+                        <span class="k">break</span>
+
+                    <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">uuid</span><span class="p">:</span>
+                        <span class="n">lineno</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">display_task_row</span><span class="p">(</span><span class="n">lineno</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span>
+
+            <span class="c1"># -- Footer</span>
+            <span class="nb">next</span><span class="p">(</span><span class="n">blank_line</span><span class="p">)</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">hline</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">6</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">ACS_HLINE</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)</span>
+
+            <span class="c1"># Selected Task Info</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">:</span>
+                <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">5</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">selected_str</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+                <span class="n">info</span> <span class="o">=</span> <span class="s1">&#39;Missing extended info&#39;</span>
+                <span class="n">detail</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">selection</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_task</span><span class="p">]</span>
+                <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                    <span class="k">pass</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">info</span> <span class="o">=</span> <span class="n">selection</span><span class="o">.</span><span class="n">info</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="s1">&#39;runtime&#39;</span> <span class="ow">in</span> <span class="n">info</span><span class="p">:</span>
+                        <span class="n">info</span><span class="p">[</span><span class="s1">&#39;runtime&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{0:.2f}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;runtime&#39;</span><span class="p">])</span>
+                    <span class="k">if</span> <span class="s1">&#39;result&#39;</span> <span class="ow">in</span> <span class="n">info</span><span class="p">:</span>
+                        <span class="n">info</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">abbr</span><span class="p">(</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">],</span> <span class="mi">16</span><span class="p">)</span>
+                    <span class="n">info</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+                        <span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">=</span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+                        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">info</span><span class="p">)</span>
+                    <span class="p">)</span>
+                    <span class="n">detail</span> <span class="o">=</span> <span class="s1">&#39;... -&gt; key i&#39;</span>
+                <span class="n">infowin</span> <span class="o">=</span> <span class="n">abbr</span><span class="p">(</span><span class="n">info</span><span class="p">,</span>
+                               <span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_str</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span><span class="p">,</span>
+                               <span class="n">detail</span><span class="p">)</span>
+                <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">5</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_str</span><span class="p">),</span> <span class="n">infowin</span><span class="p">)</span>
+                <span class="c1"># Make ellipsis bold</span>
+                <span class="k">if</span> <span class="n">detail</span> <span class="ow">in</span> <span class="n">infowin</span><span class="p">:</span>
+                    <span class="n">detailpos</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">infowin</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">detail</span><span class="p">)</span>
+                    <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">5</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">selected_str</span><span class="p">)</span> <span class="o">+</span> <span class="n">detailpos</span><span class="p">,</span>
+                               <span class="n">detail</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">5</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="s1">&#39;No task selected&#39;</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_NORMAL</span><span class="p">)</span>
+
+            <span class="c1"># Workers</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">workers</span><span class="p">:</span>
+                <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">4</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">online_str</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+                <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">4</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">online_str</span><span class="p">),</span>
+                           <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">workers</span><span class="p">)),</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_NORMAL</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">4</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="s1">&#39;No workers discovered.&#39;</span><span class="p">)</span>
+
+            <span class="c1"># Info</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">3</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">info_str</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span>
+                <span class="n">my</span> <span class="o">-</span> <span class="mi">3</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">info_str</span><span class="p">),</span>
+                <span class="n">STATUS_SCREEN</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">s</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                    <span class="n">w_alive</span><span class="o">=</span><span class="nb">len</span><span class="p">([</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">values</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">workers</span><span class="p">)</span>
+                                 <span class="k">if</span> <span class="n">w</span><span class="o">.</span><span class="n">alive</span><span class="p">]),</span>
+                    <span class="n">w_all</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">workers</span><span class="p">),</span>
+                <span class="p">),</span>
+                <span class="n">curses</span><span class="o">.</span><span class="n">A_DIM</span><span class="p">,</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Help</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">safe_add_str</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">2</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">help_title</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">A_BOLD</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">safe_add_str</span><span class="p">(</span><span class="n">my</span> <span class="o">-</span> <span class="mi">2</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">help_title</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">help</span><span class="p">,</span>
+                              <span class="n">curses</span><span class="o">.</span><span class="n">A_DIM</span><span class="p">)</span>
+            <span class="n">win</span><span class="o">.</span><span class="n">refresh</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.safe_add_str"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.safe_add_str">[docs]</a>    <span class="k">def</span> <span class="nf">safe_add_str</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">string</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">x</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">string</span><span class="p">)</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span><span class="p">:</span>
+            <span class="n">string</span> <span class="o">=</span> <span class="n">string</span><span class="p">[:</span><span class="bp">self</span><span class="o">.</span><span class="n">screen_width</span> <span class="o">-</span> <span class="n">x</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">addstr</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">string</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.init_screen"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.init_screen">[docs]</a>    <span class="k">def</span> <span class="nf">init_screen</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">lock</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">win</span> <span class="o">=</span> <span class="n">curses</span><span class="o">.</span><span class="n">initscr</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">nodelay</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">keypad</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">start_color</span><span class="p">()</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">init_pair</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">foreground</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">background</span><span class="p">)</span>
+            <span class="c1"># exception states</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">init_pair</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">COLOR_RED</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">background</span><span class="p">)</span>
+            <span class="c1"># successful state</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">init_pair</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">COLOR_GREEN</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">background</span><span class="p">)</span>
+            <span class="c1"># revoked state</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">init_pair</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">COLOR_MAGENTA</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">background</span><span class="p">)</span>
+            <span class="c1"># greeting</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">init_pair</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">COLOR_BLUE</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">background</span><span class="p">)</span>
+            <span class="c1"># started state</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">init_pair</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="n">curses</span><span class="o">.</span><span class="n">COLOR_YELLOW</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">foreground</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">state_colors</span> <span class="o">=</span> <span class="p">{</span><span class="n">states</span><span class="o">.</span><span class="n">SUCCESS</span><span class="p">:</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">3</span><span class="p">),</span>
+                                 <span class="n">states</span><span class="o">.</span><span class="n">REVOKED</span><span class="p">:</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">4</span><span class="p">),</span>
+                                 <span class="n">states</span><span class="o">.</span><span class="n">STARTED</span><span class="p">:</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">6</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="n">state</span> <span class="ow">in</span> <span class="n">states</span><span class="o">.</span><span class="n">EXCEPTION_STATES</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">state_colors</span><span class="p">[</span><span class="n">state</span><span class="p">]</span> <span class="o">=</span> <span class="n">curses</span><span class="o">.</span><span class="n">color_pair</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+
+            <span class="n">curses</span><span class="o">.</span><span class="n">cbreak</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.resetscreen"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.resetscreen">[docs]</a>    <span class="k">def</span> <span class="nf">resetscreen</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">lock</span><span class="p">:</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">nocbreak</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">win</span><span class="o">.</span><span class="n">keypad</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">echo</span><span class="p">()</span>
+            <span class="n">curses</span><span class="o">.</span><span class="n">endwin</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="CursesMonitor.nap"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.CursesMonitor.nap">[docs]</a>    <span class="k">def</span> <span class="nf">nap</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">curses</span><span class="o">.</span><span class="n">napms</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">screen_delay</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">tasks</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">tasks_by_time</span><span class="p">(</span><span class="n">limit</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">limit</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">workers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">hostname</span> <span class="k">for</span> <span class="n">hostname</span><span class="p">,</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">workers</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">w</span><span class="o">.</span><span class="n">alive</span><span class="p">]</span></div>
+
+
+<span class="k">class</span> <span class="nc">DisplayThread</span><span class="p">(</span><span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">display</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">display</span> <span class="o">=</span> <span class="n">display</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">shutdown</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">shutdown</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">display</span><span class="o">.</span><span class="n">draw</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">display</span><span class="o">.</span><span class="n">nap</span><span class="p">()</span>
+
+
+<span class="k">def</span> <span class="nf">capture_events</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">display</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+
+    <span class="k">def</span> <span class="nf">on_connection_error</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">interval</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Connection Error: </span><span class="si">{0!r}</span><span class="s1">.  Retry in </span><span class="si">{1}</span><span class="s1">s.&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="n">exc</span><span class="p">,</span> <span class="n">interval</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+
+    <span class="k">while</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;-&gt; evtop: starting capture...&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">app</span><span class="o">.</span><span class="n">connection_for_read</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">conn</span><span class="o">.</span><span class="n">ensure_connection</span><span class="p">(</span><span class="n">on_connection_error</span><span class="p">,</span>
+                                       <span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">broker_connection_max_retries</span><span class="p">)</span>
+                <span class="n">recv</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">events</span><span class="o">.</span><span class="n">Receiver</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">handlers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;*&#39;</span><span class="p">:</span> <span class="n">state</span><span class="o">.</span><span class="n">event</span><span class="p">})</span>
+                <span class="n">display</span><span class="o">.</span><span class="n">resetscreen</span><span class="p">()</span>
+                <span class="n">display</span><span class="o">.</span><span class="n">init_screen</span><span class="p">()</span>
+                <span class="n">recv</span><span class="o">.</span><span class="n">capture</span><span class="p">()</span>
+            <span class="k">except</span> <span class="n">conn</span><span class="o">.</span><span class="n">connection_errors</span> <span class="o">+</span> <span class="n">conn</span><span class="o">.</span><span class="n">channel_errors</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Connection lost: </span><span class="si">{0!r}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">exc</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="evtop"><a class="viewcode-back" href="../../../internals/reference/celery.events.cursesmon.html#celery.events.cursesmon.evtop">[docs]</a><span class="k">def</span> <span class="nf">evtop</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+    <span class="sd">&quot;&quot;&quot;Start curses monitor.&quot;&quot;&quot;</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">app_or_default</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="n">state</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">events</span><span class="o">.</span><span class="n">State</span><span class="p">()</span>
+    <span class="n">display</span> <span class="o">=</span> <span class="n">CursesMonitor</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">app</span><span class="p">)</span>
+    <span class="n">display</span><span class="o">.</span><span class="n">init_screen</span><span class="p">()</span>
+    <span class="n">refresher</span> <span class="o">=</span> <span class="n">DisplayThread</span><span class="p">(</span><span class="n">display</span><span class="p">)</span>
+    <span class="n">refresher</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">capture_events</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">display</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">refresher</span><span class="o">.</span><span class="n">shutdown</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">refresher</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="n">display</span><span class="o">.</span><span class="n">resetscreen</span><span class="p">()</span>
+        <span class="k">raise</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">KeyboardInterrupt</span><span class="p">,</span> <span class="ne">SystemExit</span><span class="p">):</span>
+        <span class="n">refresher</span><span class="o">.</span><span class="n">shutdown</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">refresher</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="n">display</span><span class="o">.</span><span class="n">resetscreen</span><span class="p">()</span></div>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="n">evtop</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,739 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.app.amqp &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/app/amqp.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.app.amqp</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Sending/Receiving Messages (Kombu integration).&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">numbers</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">Mapping</span><span class="p">,</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">timedelta</span>
+<span class="kn">from</span> <span class="nn">weakref</span> <span class="k">import</span> <span class="n">WeakValueDictionary</span>
+
+<span class="kn">from</span> <span class="nn">kombu</span> <span class="k">import</span> <span class="n">Connection</span><span class="p">,</span> <span class="n">Consumer</span><span class="p">,</span> <span class="n">Exchange</span><span class="p">,</span> <span class="n">Producer</span><span class="p">,</span> <span class="n">Queue</span><span class="p">,</span> <span class="n">pools</span>
+<span class="kn">from</span> <span class="nn">kombu.common</span> <span class="k">import</span> <span class="n">Broadcast</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.functional</span> <span class="k">import</span> <span class="n">maybe_list</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.objects</span> <span class="k">import</span> <span class="n">cached_property</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">signals</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="n">string_t</span>
+<span class="kn">from</span> <span class="nn">celery.local</span> <span class="k">import</span> <span class="n">try_import</span>
+<span class="kn">from</span> <span class="nn">celery.utils.nodenames</span> <span class="k">import</span> <span class="n">anon_nodename</span>
+<span class="kn">from</span> <span class="nn">celery.utils.saferepr</span> <span class="k">import</span> <span class="n">saferepr</span>
+<span class="kn">from</span> <span class="nn">celery.utils.text</span> <span class="k">import</span> <span class="n">indent</span> <span class="k">as</span> <span class="n">textindent</span>
+<span class="kn">from</span> <span class="nn">celery.utils.time</span> <span class="k">import</span> <span class="n">maybe_make_aware</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="k">import</span> <span class="n">routes</span> <span class="k">as</span> <span class="n">_routes</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;AMQP&#39;</span><span class="p">,</span> <span class="s1">&#39;Queues&#39;</span><span class="p">,</span> <span class="s1">&#39;task_message&#39;</span><span class="p">)</span>
+
+<span class="n">PY3</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">3</span>
+
+<span class="c1">#: earliest date supported by time.mktime.</span>
+<span class="n">INT_MIN</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2147483648</span>
+
+<span class="c1"># json in Python 2.7 borks if dict contains byte keys.</span>
+<span class="n">JSON_NEEDS_UNICODE_KEYS</span> <span class="o">=</span> <span class="ow">not</span> <span class="n">PY3</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">try_import</span><span class="p">(</span><span class="s1">&#39;simplejson&#39;</span><span class="p">)</span>
+
+<span class="c1">#: Human readable queue declaration.</span>
+<span class="n">QUEUE_FORMAT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">.&gt; </span><span class="si">{0.name:&lt;16}</span><span class="s2"> exchange=</span><span class="si">{0.exchange.name}</span><span class="s2">(</span><span class="si">{0.exchange.type}</span><span class="s2">) </span><span class="se">\</span>
+<span class="s2">key=</span><span class="si">{0.routing_key}</span><span class="s2"></span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">task_message</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;task_message&#39;</span><span class="p">,</span>
+                          <span class="p">(</span><span class="s1">&#39;headers&#39;</span><span class="p">,</span> <span class="s1">&#39;properties&#39;</span><span class="p">,</span> <span class="s1">&#39;body&#39;</span><span class="p">,</span> <span class="s1">&#39;sent_event&#39;</span><span class="p">))</span>
+
+
+<span class="k">def</span> <span class="nf">utf8dict</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">encoding</span><span class="p">)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">)</span> <span class="k">else</span> <span class="n">k</span><span class="p">:</span> <span class="n">v</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">d</span><span class="p">)}</span>
+
+
+<div class="viewcode-block" id="Queues"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues">[docs]</a><span class="k">class</span> <span class="nc">Queues</span><span class="p">(</span><span class="nb">dict</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Queue name⇒ declaration mapping.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        queues (Iterable): Initial list/tuple or dict of queues.</span>
+<span class="sd">        create_missing (bool): By default any unknown queues will be</span>
+<span class="sd">            added automatically, but if this flag is disabled the occurrence</span>
+<span class="sd">            of unknown queues in `wanted` will raise :exc:`KeyError`.</span>
+<span class="sd">        ha_policy (Sequence, str): Default HA policy for queues with none set.</span>
+<span class="sd">        max_priority (int): Default x-max-priority for queues with none set.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1">#: If set, this is a subset of queues to consume from.</span>
+    <span class="c1">#: The rest of the queues are then used for routing only.</span>
+    <span class="n">_consume_from</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queues</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">default_exchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">create_missing</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">ha_policy</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">autoexchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">max_priority</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">default_routing_key</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="nb">dict</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">aliases</span> <span class="o">=</span> <span class="n">WeakValueDictionary</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">default_exchange</span> <span class="o">=</span> <span class="n">default_exchange</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">default_routing_key</span> <span class="o">=</span> <span class="n">default_routing_key</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_missing</span> <span class="o">=</span> <span class="n">create_missing</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ha_policy</span> <span class="o">=</span> <span class="n">ha_policy</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">autoexchange</span> <span class="o">=</span> <span class="n">Exchange</span> <span class="k">if</span> <span class="n">autoexchange</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">autoexchange</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_priority</span> <span class="o">=</span> <span class="n">max_priority</span>
+        <span class="k">if</span> <span class="n">queues</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">queues</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">):</span>
+            <span class="n">queues</span> <span class="o">=</span> <span class="p">{</span><span class="n">q</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">q</span> <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">queues</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">queues</span> <span class="ow">or</span> <span class="p">{}):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">q</span><span class="p">)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">Queue</span><span class="p">)</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_compat</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="n">q</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">aliases</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">dict</span><span class="o">.</span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">queue</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_exchange</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span><span class="p">:</span>
+            <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_exchange</span>
+        <span class="nb">dict</span><span class="o">.</span><span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">queue</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">queue</span><span class="o">.</span><span class="n">alias</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">aliases</span><span class="p">[</span><span class="n">queue</span><span class="o">.</span><span class="n">alias</span><span class="p">]</span> <span class="o">=</span> <span class="n">queue</span>
+
+    <span class="k">def</span> <span class="nf">__missing__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_missing</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">new_missing</span><span class="p">(</span><span class="n">name</span><span class="p">))</span>
+        <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Queues.add"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues.add">[docs]</a>    <span class="k">def</span> <span class="nf">add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add new queue.</span>
+
+<span class="sd">        The first argument can either be a :class:`kombu.Queue` instance,</span>
+<span class="sd">        or the name of a queue.  If the former the rest of the keyword</span>
+<span class="sd">        arguments are ignored, and options are simply taken from the queue</span>
+<span class="sd">        instance.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            queue (kombu.Queue, str): Queue to add.</span>
+<span class="sd">            exchange (kombu.Exchange, str):</span>
+<span class="sd">                if queue is str, specifies exchange name.</span>
+<span class="sd">            routing_key (str): if queue is str, specifies binding key.</span>
+<span class="sd">            exchange_type (str): if queue is str, specifies type of exchange.</span>
+<span class="sd">            **options (Any): Additional declaration options used when</span>
+<span class="sd">                queue is a str.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="n">Queue</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_compat</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Queues.add_compat"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues.add_compat">[docs]</a>    <span class="k">def</span> <span class="nf">add_compat</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="c1"># docs used to use binding_key as routing key</span>
+        <span class="n">options</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s1">&#39;routing_key&#39;</span><span class="p">,</span> <span class="n">options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;binding_key&#39;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">options</span><span class="p">[</span><span class="s1">&#39;routing_key&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">options</span><span class="p">[</span><span class="s1">&#39;routing_key&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">name</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add</span><span class="p">(</span><span class="n">Queue</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">))</span></div>
+
+    <span class="k">def</span> <span class="nf">_add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">queue</span><span class="o">.</span><span class="n">routing_key</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
+                <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_exchange</span>
+            <span class="n">queue</span><span class="o">.</span><span class="n">routing_key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_routing_key</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ha_policy</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">queue</span><span class="o">.</span><span class="n">queue_arguments</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">queue</span><span class="o">.</span><span class="n">queue_arguments</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_ha_policy</span><span class="p">(</span><span class="n">queue</span><span class="o">.</span><span class="n">queue_arguments</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_priority</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">queue</span><span class="o">.</span><span class="n">queue_arguments</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">queue</span><span class="o">.</span><span class="n">queue_arguments</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_set_max_priority</span><span class="p">(</span><span class="n">queue</span><span class="o">.</span><span class="n">queue_arguments</span><span class="p">)</span>
+        <span class="bp">self</span><span class="p">[</span><span class="n">queue</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">queue</span>
+        <span class="k">return</span> <span class="n">queue</span>
+
+    <span class="k">def</span> <span class="nf">_set_ha_policy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="n">policy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ha_policy</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">policy</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="k">return</span> <span class="n">args</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;x-ha-policy&#39;</span><span class="p">:</span> <span class="s1">&#39;nodes&#39;</span><span class="p">,</span>
+                                <span class="s1">&#39;x-ha-policy-params&#39;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">policy</span><span class="p">)})</span>
+        <span class="n">args</span><span class="p">[</span><span class="s1">&#39;x-ha-policy&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">policy</span>
+
+    <span class="k">def</span> <span class="nf">_set_max_priority</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s1">&#39;x-max-priority&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">args</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_priority</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">args</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;x-max-priority&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_priority</span><span class="p">})</span>
+
+<div class="viewcode-block" id="Queues.format"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues.format">[docs]</a>    <span class="k">def</span> <span class="nf">format</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">indent_first</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Format routing table into string for log dumps.&quot;&quot;&quot;</span>
+        <span class="n">active</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">consume_from</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">active</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s1">&#39;&#39;</span>
+        <span class="n">info</span> <span class="o">=</span> <span class="p">[</span><span class="n">QUEUE_FORMAT</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">q</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">q</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">items</span><span class="p">(</span><span class="n">active</span><span class="p">))]</span>
+        <span class="k">if</span> <span class="n">indent_first</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">textindent</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">info</span><span class="p">),</span> <span class="n">indent</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">+</span> <span class="n">textindent</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">info</span><span class="p">[</span><span class="mi">1</span><span class="p">:]),</span> <span class="n">indent</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Queues.select_add"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues.select_add">[docs]</a>    <span class="k">def</span> <span class="nf">select_add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add new task queue that&#39;ll be consumed from.</span>
+
+<span class="sd">        The queue will be active even when a subset has been selected</span>
+<span class="sd">        using the :option:`celery worker -Q` option.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consume_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_consume_from</span><span class="p">[</span><span class="n">q</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">q</span>
+        <span class="k">return</span> <span class="n">q</span></div>
+
+<div class="viewcode-block" id="Queues.select"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues.select">[docs]</a>    <span class="k">def</span> <span class="nf">select</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">include</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Select a subset of currently defined queues to consume from.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            include (Sequence[str], str): Names of queues to consume from.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">include</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_consume_from</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">name</span><span class="p">:</span> <span class="bp">self</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">maybe_list</span><span class="p">(</span><span class="n">include</span><span class="p">)</span>
+            <span class="p">}</span></div>
+
+<div class="viewcode-block" id="Queues.deselect"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues.deselect">[docs]</a>    <span class="k">def</span> <span class="nf">deselect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exclude</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Deselect queues so that they won&#39;t be consumed from.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            exclude (Sequence[str], str): Names of queues to avoid</span>
+<span class="sd">                consuming from.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">exclude</span><span class="p">:</span>
+            <span class="n">exclude</span> <span class="o">=</span> <span class="n">maybe_list</span><span class="p">(</span><span class="n">exclude</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consume_from</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># using all queues</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="bp">self</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">exclude</span><span class="p">)</span>
+            <span class="c1"># using selection</span>
+            <span class="k">for</span> <span class="n">queue</span> <span class="ow">in</span> <span class="n">exclude</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_consume_from</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Queues.new_missing"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.Queues.new_missing">[docs]</a>    <span class="k">def</span> <span class="nf">new_missing</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">Queue</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">autoexchange</span><span class="p">(</span><span class="n">name</span><span class="p">),</span> <span class="n">name</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">consume_from</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consume_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consume_from</span>
+        <span class="k">return</span> <span class="bp">self</span></div>
+
+
+<div class="viewcode-block" id="AMQP"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP">[docs]</a><span class="k">class</span> <span class="nc">AMQP</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;App AMQP API: app.amqp.&quot;&quot;&quot;</span>
+
+    <span class="n">Connection</span> <span class="o">=</span> <span class="n">Connection</span>
+    <span class="n">Consumer</span> <span class="o">=</span> <span class="n">Consumer</span>
+    <span class="n">Producer</span> <span class="o">=</span> <span class="n">Producer</span>
+
+    <span class="c1">#: compat alias to Connection</span>
+    <span class="n">BrokerConnection</span> <span class="o">=</span> <span class="n">Connection</span>
+
+    <span class="n">queues_cls</span> <span class="o">=</span> <span class="n">Queues</span>
+
+    <span class="c1">#: Cached and prepared routing table.</span>
+    <span class="n">_rtable</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Underlying producer pool instance automatically</span>
+    <span class="c1">#: set by the :attr:`producer_pool`.</span>
+    <span class="n">_producer_pool</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1"># Exchange class/function used when defining automatic queues.</span>
+    <span class="c1"># For example, you can use ``autoexchange = lambda n: None`` to use the</span>
+    <span class="c1"># AMQP default exchange: a shortcut to bypass routing</span>
+    <span class="c1"># and instead send directly to the queue named in the routing key.</span>
+    <span class="n">autoexchange</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Max size of positional argument representation used for</span>
+    <span class="c1">#: logging purposes.</span>
+    <span class="n">argsrepr_maxsize</span> <span class="o">=</span> <span class="mi">1024</span>
+
+    <span class="c1">#: Max size of keyword argument representation used for logging purposes.</span>
+    <span class="n">kwargsrepr_maxsize</span> <span class="o">=</span> <span class="mi">1024</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task_protocols</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="mi">1</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_task_v1</span><span class="p">,</span>
+            <span class="mi">2</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_task_v2</span><span class="p">,</span>
+        <span class="p">}</span>
+
+<div class="viewcode-block" id="AMQP.create_task_message"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.create_task_message">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">create_task_message</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_protocols</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_protocol</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="AMQP.send_task_message"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.send_task_message">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">send_task_message</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_task_sender</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="AMQP.Queues"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.Queues">[docs]</a>    <span class="k">def</span> <span class="nf">Queues</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queues</span><span class="p">,</span> <span class="n">create_missing</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ha_policy</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+               <span class="n">autoexchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_priority</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="c1"># Create new :class:`Queues` instance, using queue defaults</span>
+        <span class="c1"># from the current configuration.</span>
+        <span class="n">conf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span>
+        <span class="n">default_routing_key</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">task_default_routing_key</span>
+        <span class="k">if</span> <span class="n">create_missing</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">create_missing</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">task_create_missing_queues</span>
+        <span class="k">if</span> <span class="n">ha_policy</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ha_policy</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">task_queue_ha_policy</span>
+        <span class="k">if</span> <span class="n">max_priority</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">max_priority</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">task_queue_max_priority</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">queues</span> <span class="ow">and</span> <span class="n">conf</span><span class="o">.</span><span class="n">task_default_queue</span><span class="p">:</span>
+            <span class="n">queues</span> <span class="o">=</span> <span class="p">(</span><span class="n">Queue</span><span class="p">(</span><span class="n">conf</span><span class="o">.</span><span class="n">task_default_queue</span><span class="p">,</span>
+                            <span class="n">exchange</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">default_exchange</span><span class="p">,</span>
+                            <span class="n">routing_key</span><span class="o">=</span><span class="n">default_routing_key</span><span class="p">),)</span>
+        <span class="n">autoexchange</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">autoexchange</span> <span class="k">if</span> <span class="n">autoexchange</span> <span class="ow">is</span> <span class="kc">None</span>
+                        <span class="k">else</span> <span class="n">autoexchange</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">queues_cls</span><span class="p">(</span>
+            <span class="n">queues</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_exchange</span><span class="p">,</span> <span class="n">create_missing</span><span class="p">,</span>
+            <span class="n">ha_policy</span><span class="p">,</span> <span class="n">autoexchange</span><span class="p">,</span> <span class="n">max_priority</span><span class="p">,</span> <span class="n">default_routing_key</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="AMQP.Router"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.Router">[docs]</a>    <span class="k">def</span> <span class="nf">Router</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queues</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">create_missing</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the current task router.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_routes</span><span class="o">.</span><span class="n">Router</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">routes</span><span class="p">,</span> <span class="n">queues</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">queues</span><span class="p">,</span>
+                              <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">either</span><span class="p">(</span><span class="s1">&#39;task_create_missing_queues&#39;</span><span class="p">,</span>
+                                              <span class="n">create_missing</span><span class="p">),</span> <span class="n">app</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AMQP.flush_routes"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.flush_routes">[docs]</a>    <span class="k">def</span> <span class="nf">flush_routes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rtable</span> <span class="o">=</span> <span class="n">_routes</span><span class="o">.</span><span class="n">prepare</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_routes</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">TaskConsumer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">,</span> <span class="n">queues</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">accept</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">accept</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">accept</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">accept_content</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">Consumer</span><span class="p">(</span>
+            <span class="n">channel</span><span class="p">,</span> <span class="n">accept</span><span class="o">=</span><span class="n">accept</span><span class="p">,</span>
+            <span class="n">queues</span><span class="o">=</span><span class="n">queues</span> <span class="ow">or</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">queues</span><span class="o">.</span><span class="n">consume_from</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span>
+            <span class="o">**</span><span class="n">kw</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">as_task_v2</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">countdown</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">eta</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">group_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">expires</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">chord</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">callbacks</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">errbacks</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reply_to</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">time_limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">soft_time_limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">create_sent_event</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">root_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">parent_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">shadow</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chain</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">now</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timezone</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">origin</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">argsrepr</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">kwargsrepr</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="n">args</span> <span class="ow">or</span> <span class="p">()</span>
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="n">kwargs</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s1">&#39;task args must be a list or tuple&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">kwargs</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s1">&#39;task keyword arguments must be a mapping&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">countdown</span><span class="p">:</span>  <span class="c1"># convert countdown to ETA</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_verify_seconds</span><span class="p">(</span><span class="n">countdown</span><span class="p">,</span> <span class="s1">&#39;countdown&#39;</span><span class="p">)</span>
+            <span class="n">now</span> <span class="o">=</span> <span class="n">now</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+            <span class="n">timezone</span> <span class="o">=</span> <span class="n">timezone</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">timezone</span>
+            <span class="n">eta</span> <span class="o">=</span> <span class="n">maybe_make_aware</span><span class="p">(</span>
+                <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">countdown</span><span class="p">),</span> <span class="n">tz</span><span class="o">=</span><span class="n">timezone</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="n">numbers</span><span class="o">.</span><span class="n">Real</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_verify_seconds</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="s1">&#39;expires&#39;</span><span class="p">)</span>
+            <span class="n">now</span> <span class="o">=</span> <span class="n">now</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+            <span class="n">timezone</span> <span class="o">=</span> <span class="n">timezone</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">timezone</span>
+            <span class="n">expires</span> <span class="o">=</span> <span class="n">maybe_make_aware</span><span class="p">(</span>
+                <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">expires</span><span class="p">),</span> <span class="n">tz</span><span class="o">=</span><span class="n">timezone</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="n">eta</span> <span class="o">=</span> <span class="n">eta</span> <span class="ow">and</span> <span class="n">eta</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+        <span class="c1"># If we retry a task `expires` will already be ISO8601-formatted.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="n">string_t</span><span class="p">):</span>
+            <span class="n">expires</span> <span class="o">=</span> <span class="n">expires</span> <span class="ow">and</span> <span class="n">expires</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">argsrepr</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">argsrepr</span> <span class="o">=</span> <span class="n">saferepr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">argsrepr_maxsize</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">kwargsrepr</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">kwargsrepr</span> <span class="o">=</span> <span class="n">saferepr</span><span class="p">(</span><span class="n">kwargs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">kwargsrepr_maxsize</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">JSON_NEEDS_UNICODE_KEYS</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+            <span class="k">if</span> <span class="n">callbacks</span><span class="p">:</span>
+                <span class="n">callbacks</span> <span class="o">=</span> <span class="p">[</span><span class="n">utf8dict</span><span class="p">(</span><span class="n">callback</span><span class="p">)</span> <span class="k">for</span> <span class="n">callback</span> <span class="ow">in</span> <span class="n">callbacks</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">errbacks</span><span class="p">:</span>
+                <span class="n">errbacks</span> <span class="o">=</span> <span class="p">[</span><span class="n">utf8dict</span><span class="p">(</span><span class="n">errback</span><span class="p">)</span> <span class="k">for</span> <span class="n">errback</span> <span class="ow">in</span> <span class="n">errbacks</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">chord</span><span class="p">:</span>
+                <span class="n">chord</span> <span class="o">=</span> <span class="n">utf8dict</span><span class="p">(</span><span class="n">chord</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">root_id</span><span class="p">:</span>  <span class="c1"># empty root_id defaults to task_id</span>
+            <span class="n">root_id</span> <span class="o">=</span> <span class="n">task_id</span>
+
+        <span class="k">return</span> <span class="n">task_message</span><span class="p">(</span>
+            <span class="n">headers</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;lang&#39;</span><span class="p">:</span> <span class="s1">&#39;py&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;task&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+                <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+                <span class="s1">&#39;shadow&#39;</span><span class="p">:</span> <span class="n">shadow</span><span class="p">,</span>
+                <span class="s1">&#39;eta&#39;</span><span class="p">:</span> <span class="n">eta</span><span class="p">,</span>
+                <span class="s1">&#39;expires&#39;</span><span class="p">:</span> <span class="n">expires</span><span class="p">,</span>
+                <span class="s1">&#39;group&#39;</span><span class="p">:</span> <span class="n">group_id</span><span class="p">,</span>
+                <span class="s1">&#39;retries&#39;</span><span class="p">:</span> <span class="n">retries</span><span class="p">,</span>
+                <span class="s1">&#39;timelimit&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">time_limit</span><span class="p">,</span> <span class="n">soft_time_limit</span><span class="p">],</span>
+                <span class="s1">&#39;root_id&#39;</span><span class="p">:</span> <span class="n">root_id</span><span class="p">,</span>
+                <span class="s1">&#39;parent_id&#39;</span><span class="p">:</span> <span class="n">parent_id</span><span class="p">,</span>
+                <span class="s1">&#39;argsrepr&#39;</span><span class="p">:</span> <span class="n">argsrepr</span><span class="p">,</span>
+                <span class="s1">&#39;kwargsrepr&#39;</span><span class="p">:</span> <span class="n">kwargsrepr</span><span class="p">,</span>
+                <span class="s1">&#39;origin&#39;</span><span class="p">:</span> <span class="n">origin</span> <span class="ow">or</span> <span class="n">anon_nodename</span><span class="p">()</span>
+            <span class="p">},</span>
+            <span class="n">properties</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;correlation_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+                <span class="s1">&#39;reply_to&#39;</span><span class="p">:</span> <span class="n">reply_to</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="n">body</span><span class="o">=</span><span class="p">(</span>
+                <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="p">{</span>
+                    <span class="s1">&#39;callbacks&#39;</span><span class="p">:</span> <span class="n">callbacks</span><span class="p">,</span>
+                    <span class="s1">&#39;errbacks&#39;</span><span class="p">:</span> <span class="n">errbacks</span><span class="p">,</span>
+                    <span class="s1">&#39;chain&#39;</span><span class="p">:</span> <span class="n">chain</span><span class="p">,</span>
+                    <span class="s1">&#39;chord&#39;</span><span class="p">:</span> <span class="n">chord</span><span class="p">,</span>
+                <span class="p">},</span>
+            <span class="p">),</span>
+            <span class="n">sent_event</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;uuid&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+                <span class="s1">&#39;root_id&#39;</span><span class="p">:</span> <span class="n">root_id</span><span class="p">,</span>
+                <span class="s1">&#39;parent_id&#39;</span><span class="p">:</span> <span class="n">parent_id</span><span class="p">,</span>
+                <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+                <span class="s1">&#39;args&#39;</span><span class="p">:</span> <span class="n">argsrepr</span><span class="p">,</span>
+                <span class="s1">&#39;kwargs&#39;</span><span class="p">:</span> <span class="n">kwargsrepr</span><span class="p">,</span>
+                <span class="s1">&#39;retries&#39;</span><span class="p">:</span> <span class="n">retries</span><span class="p">,</span>
+                <span class="s1">&#39;eta&#39;</span><span class="p">:</span> <span class="n">eta</span><span class="p">,</span>
+                <span class="s1">&#39;expires&#39;</span><span class="p">:</span> <span class="n">expires</span><span class="p">,</span>
+            <span class="p">}</span> <span class="k">if</span> <span class="n">create_sent_event</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">as_task_v1</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">countdown</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">eta</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">group_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">expires</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                   <span class="n">chord</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">callbacks</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">errbacks</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reply_to</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">time_limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">soft_time_limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">create_sent_event</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">root_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">parent_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">shadow</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">now</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timezone</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="o">**</span><span class="n">compat_kwargs</span><span class="p">):</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="n">args</span> <span class="ow">or</span> <span class="p">()</span>
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="n">kwargs</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">utc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">utc</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s1">&#39;task args must be a list or tuple&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">kwargs</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s1">&#39;task keyword arguments must be a mapping&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">countdown</span><span class="p">:</span>  <span class="c1"># convert countdown to ETA</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_verify_seconds</span><span class="p">(</span><span class="n">countdown</span><span class="p">,</span> <span class="s1">&#39;countdown&#39;</span><span class="p">)</span>
+            <span class="n">now</span> <span class="o">=</span> <span class="n">now</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+            <span class="n">eta</span> <span class="o">=</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">countdown</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="n">numbers</span><span class="o">.</span><span class="n">Real</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_verify_seconds</span><span class="p">(</span><span class="n">expires</span><span class="p">,</span> <span class="s1">&#39;expires&#39;</span><span class="p">)</span>
+            <span class="n">now</span> <span class="o">=</span> <span class="n">now</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+            <span class="n">expires</span> <span class="o">=</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">expires</span><span class="p">)</span>
+        <span class="n">eta</span> <span class="o">=</span> <span class="n">eta</span> <span class="ow">and</span> <span class="n">eta</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+        <span class="n">expires</span> <span class="o">=</span> <span class="n">expires</span> <span class="ow">and</span> <span class="n">expires</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">JSON_NEEDS_UNICODE_KEYS</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+            <span class="k">if</span> <span class="n">callbacks</span><span class="p">:</span>
+                <span class="n">callbacks</span> <span class="o">=</span> <span class="p">[</span><span class="n">utf8dict</span><span class="p">(</span><span class="n">callback</span><span class="p">)</span> <span class="k">for</span> <span class="n">callback</span> <span class="ow">in</span> <span class="n">callbacks</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">errbacks</span><span class="p">:</span>
+                <span class="n">errbacks</span> <span class="o">=</span> <span class="p">[</span><span class="n">utf8dict</span><span class="p">(</span><span class="n">errback</span><span class="p">)</span> <span class="k">for</span> <span class="n">errback</span> <span class="ow">in</span> <span class="n">errbacks</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">chord</span><span class="p">:</span>
+                <span class="n">chord</span> <span class="o">=</span> <span class="n">utf8dict</span><span class="p">(</span><span class="n">chord</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">task_message</span><span class="p">(</span>
+            <span class="n">headers</span><span class="o">=</span><span class="p">{},</span>
+            <span class="n">properties</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;correlation_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+                <span class="s1">&#39;reply_to&#39;</span><span class="p">:</span> <span class="n">reply_to</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="n">body</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;task&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+                <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+                <span class="s1">&#39;args&#39;</span><span class="p">:</span> <span class="n">args</span><span class="p">,</span>
+                <span class="s1">&#39;kwargs&#39;</span><span class="p">:</span> <span class="n">kwargs</span><span class="p">,</span>
+                <span class="s1">&#39;group&#39;</span><span class="p">:</span> <span class="n">group_id</span><span class="p">,</span>
+                <span class="s1">&#39;retries&#39;</span><span class="p">:</span> <span class="n">retries</span><span class="p">,</span>
+                <span class="s1">&#39;eta&#39;</span><span class="p">:</span> <span class="n">eta</span><span class="p">,</span>
+                <span class="s1">&#39;expires&#39;</span><span class="p">:</span> <span class="n">expires</span><span class="p">,</span>
+                <span class="s1">&#39;utc&#39;</span><span class="p">:</span> <span class="n">utc</span><span class="p">,</span>
+                <span class="s1">&#39;callbacks&#39;</span><span class="p">:</span> <span class="n">callbacks</span><span class="p">,</span>
+                <span class="s1">&#39;errbacks&#39;</span><span class="p">:</span> <span class="n">errbacks</span><span class="p">,</span>
+                <span class="s1">&#39;timelimit&#39;</span><span class="p">:</span> <span class="p">(</span><span class="n">time_limit</span><span class="p">,</span> <span class="n">soft_time_limit</span><span class="p">),</span>
+                <span class="s1">&#39;taskset&#39;</span><span class="p">:</span> <span class="n">group_id</span><span class="p">,</span>
+                <span class="s1">&#39;chord&#39;</span><span class="p">:</span> <span class="n">chord</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="n">sent_event</span><span class="o">=</span><span class="p">{</span>
+                <span class="s1">&#39;uuid&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+                <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+                <span class="s1">&#39;args&#39;</span><span class="p">:</span> <span class="n">saferepr</span><span class="p">(</span><span class="n">args</span><span class="p">),</span>
+                <span class="s1">&#39;kwargs&#39;</span><span class="p">:</span> <span class="n">saferepr</span><span class="p">(</span><span class="n">kwargs</span><span class="p">),</span>
+                <span class="s1">&#39;retries&#39;</span><span class="p">:</span> <span class="n">retries</span><span class="p">,</span>
+                <span class="s1">&#39;eta&#39;</span><span class="p">:</span> <span class="n">eta</span><span class="p">,</span>
+                <span class="s1">&#39;expires&#39;</span><span class="p">:</span> <span class="n">expires</span><span class="p">,</span>
+            <span class="p">}</span> <span class="k">if</span> <span class="n">create_sent_event</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_verify_seconds</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">what</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">s</span> <span class="o">&lt;</span> <span class="n">INT_MIN</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%s</span><span class="s1"> is out of range: </span><span class="si">%r</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">what</span><span class="p">,</span> <span class="n">s</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">s</span>
+
+    <span class="k">def</span> <span class="nf">_create_task_sender</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">default_retry</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_publish_retry</span>
+        <span class="n">default_policy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_publish_retry_policy</span>
+        <span class="n">default_delivery_mode</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_default_delivery_mode</span>
+        <span class="n">default_queue</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_queue</span>
+        <span class="n">queues</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">queues</span>
+        <span class="n">send_before_publish</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">before_task_publish</span><span class="o">.</span><span class="n">send</span>
+        <span class="n">before_receivers</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">before_task_publish</span><span class="o">.</span><span class="n">receivers</span>
+        <span class="n">send_after_publish</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">after_task_publish</span><span class="o">.</span><span class="n">send</span>
+        <span class="n">after_receivers</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">after_task_publish</span><span class="o">.</span><span class="n">receivers</span>
+
+        <span class="n">send_task_sent</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">task_sent</span><span class="o">.</span><span class="n">send</span>   <span class="c1"># XXX compat</span>
+        <span class="n">sent_receivers</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">task_sent</span><span class="o">.</span><span class="n">receivers</span>
+
+        <span class="n">default_evd</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_event_dispatcher</span>
+        <span class="n">default_exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_exchange</span>
+
+        <span class="n">default_rkey</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_default_routing_key</span>
+        <span class="n">default_serializer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_serializer</span>
+        <span class="n">default_compressor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">result_compression</span>
+
+        <span class="k">def</span> <span class="nf">send_task_message</span><span class="p">(</span><span class="n">producer</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span>
+                              <span class="n">exchange</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">queue</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                              <span class="n">event_dispatcher</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                              <span class="n">retry</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                              <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">delivery_mode</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                              <span class="n">compression</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">declare</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                              <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">exchange_type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="n">retry</span> <span class="o">=</span> <span class="n">default_retry</span> <span class="k">if</span> <span class="n">retry</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">retry</span>
+            <span class="n">headers2</span><span class="p">,</span> <span class="n">properties</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">sent_event</span> <span class="o">=</span> <span class="n">message</span>
+            <span class="k">if</span> <span class="n">headers</span><span class="p">:</span>
+                <span class="n">headers2</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">headers</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">kwargs</span><span class="p">:</span>
+                <span class="n">properties</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+
+            <span class="n">qname</span> <span class="o">=</span> <span class="n">queue</span>
+            <span class="k">if</span> <span class="n">queue</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">exchange</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">queue</span> <span class="o">=</span> <span class="n">default_queue</span>
+            <span class="k">if</span> <span class="n">queue</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="n">string_t</span><span class="p">):</span>
+                    <span class="n">qname</span><span class="p">,</span> <span class="n">queue</span> <span class="o">=</span> <span class="n">queue</span><span class="p">,</span> <span class="n">queues</span><span class="p">[</span><span class="n">queue</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">qname</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">name</span>
+
+            <span class="k">if</span> <span class="n">delivery_mode</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">delivery_mode</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">delivery_mode</span>
+                <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                    <span class="k">pass</span>
+                <span class="n">delivery_mode</span> <span class="o">=</span> <span class="n">delivery_mode</span> <span class="ow">or</span> <span class="n">default_delivery_mode</span>
+
+            <span class="k">if</span> <span class="n">exchange_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">exchange_type</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">type</span>
+                <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                    <span class="n">exchange_type</span> <span class="o">=</span> <span class="s1">&#39;direct&#39;</span>
+
+            <span class="c1"># convert to anon-exchange, when exchange not set and direct ex.</span>
+            <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">exchange</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">routing_key</span><span class="p">)</span> <span class="ow">and</span> <span class="n">exchange_type</span> <span class="o">==</span> <span class="s1">&#39;direct&#39;</span><span class="p">:</span>
+                <span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">qname</span>
+            <span class="k">elif</span> <span class="n">exchange</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># not topic exchange, and exchange not undefined</span>
+                <span class="n">exchange</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">exchange</span><span class="o">.</span><span class="n">name</span> <span class="ow">or</span> <span class="n">default_exchange</span>
+                <span class="n">routing_key</span> <span class="o">=</span> <span class="n">routing_key</span> <span class="ow">or</span> <span class="n">queue</span><span class="o">.</span><span class="n">routing_key</span> <span class="ow">or</span> <span class="n">default_rkey</span>
+            <span class="k">if</span> <span class="n">declare</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">queue</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">queue</span><span class="p">,</span> <span class="n">Broadcast</span><span class="p">):</span>
+                <span class="n">declare</span> <span class="o">=</span> <span class="p">[</span><span class="n">queue</span><span class="p">]</span>
+
+            <span class="c1"># merge default and custom policy</span>
+            <span class="n">retry</span> <span class="o">=</span> <span class="n">default_retry</span> <span class="k">if</span> <span class="n">retry</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">retry</span>
+            <span class="n">_rp</span> <span class="o">=</span> <span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">default_policy</span><span class="p">,</span> <span class="o">**</span><span class="n">retry_policy</span><span class="p">)</span> <span class="k">if</span> <span class="n">retry_policy</span>
+                   <span class="k">else</span> <span class="n">default_policy</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">before_receivers</span><span class="p">:</span>
+                <span class="n">send_before_publish</span><span class="p">(</span>
+                    <span class="n">sender</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="n">body</span><span class="p">,</span>
+                    <span class="n">exchange</span><span class="o">=</span><span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="n">routing_key</span><span class="p">,</span>
+                    <span class="n">declare</span><span class="o">=</span><span class="n">declare</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="n">headers2</span><span class="p">,</span>
+                    <span class="n">properties</span><span class="o">=</span><span class="n">properties</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="n">retry_policy</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="n">ret</span> <span class="o">=</span> <span class="n">producer</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span>
+                <span class="n">body</span><span class="p">,</span>
+                <span class="n">exchange</span><span class="o">=</span><span class="n">exchange</span><span class="p">,</span>
+                <span class="n">routing_key</span><span class="o">=</span><span class="n">routing_key</span><span class="p">,</span>
+                <span class="n">serializer</span><span class="o">=</span><span class="n">serializer</span> <span class="ow">or</span> <span class="n">default_serializer</span><span class="p">,</span>
+                <span class="n">compression</span><span class="o">=</span><span class="n">compression</span> <span class="ow">or</span> <span class="n">default_compressor</span><span class="p">,</span>
+                <span class="n">retry</span><span class="o">=</span><span class="n">retry</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="n">_rp</span><span class="p">,</span>
+                <span class="n">delivery_mode</span><span class="o">=</span><span class="n">delivery_mode</span><span class="p">,</span> <span class="n">declare</span><span class="o">=</span><span class="n">declare</span><span class="p">,</span>
+                <span class="n">headers</span><span class="o">=</span><span class="n">headers2</span><span class="p">,</span>
+                <span class="o">**</span><span class="n">properties</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">after_receivers</span><span class="p">:</span>
+                <span class="n">send_after_publish</span><span class="p">(</span><span class="n">sender</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="n">body</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="n">headers2</span><span class="p">,</span>
+                                   <span class="n">exchange</span><span class="o">=</span><span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="n">routing_key</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">sent_receivers</span><span class="p">:</span>  <span class="c1"># XXX deprecated</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>  <span class="c1"># protocol version 2</span>
+                    <span class="n">send_task_sent</span><span class="p">(</span>
+                        <span class="n">sender</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="n">headers2</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span> <span class="n">task</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
+                        <span class="n">args</span><span class="o">=</span><span class="n">body</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">kwargs</span><span class="o">=</span><span class="n">body</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                        <span class="n">eta</span><span class="o">=</span><span class="n">headers2</span><span class="p">[</span><span class="s1">&#39;eta&#39;</span><span class="p">],</span> <span class="n">taskset</span><span class="o">=</span><span class="n">headers2</span><span class="p">[</span><span class="s1">&#39;group&#39;</span><span class="p">],</span>
+                    <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>  <span class="c1"># protocol version 1</span>
+                    <span class="n">send_task_sent</span><span class="p">(</span>
+                        <span class="n">sender</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="n">body</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span> <span class="n">task</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
+                        <span class="n">args</span><span class="o">=</span><span class="n">body</span><span class="p">[</span><span class="s1">&#39;args&#39;</span><span class="p">],</span> <span class="n">kwargs</span><span class="o">=</span><span class="n">body</span><span class="p">[</span><span class="s1">&#39;kwargs&#39;</span><span class="p">],</span>
+                        <span class="n">eta</span><span class="o">=</span><span class="n">body</span><span class="p">[</span><span class="s1">&#39;eta&#39;</span><span class="p">],</span> <span class="n">taskset</span><span class="o">=</span><span class="n">body</span><span class="p">[</span><span class="s1">&#39;taskset&#39;</span><span class="p">],</span>
+                    <span class="p">)</span>
+            <span class="k">if</span> <span class="n">sent_event</span><span class="p">:</span>
+                <span class="n">evd</span> <span class="o">=</span> <span class="n">event_dispatcher</span> <span class="ow">or</span> <span class="n">default_evd</span>
+                <span class="n">exname</span> <span class="o">=</span> <span class="n">exchange</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exname</span><span class="p">,</span> <span class="n">Exchange</span><span class="p">):</span>
+                    <span class="n">exname</span> <span class="o">=</span> <span class="n">exname</span><span class="o">.</span><span class="n">name</span>
+                <span class="n">sent_event</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+                    <span class="s1">&#39;queue&#39;</span><span class="p">:</span> <span class="n">qname</span><span class="p">,</span>
+                    <span class="s1">&#39;exchange&#39;</span><span class="p">:</span> <span class="n">exname</span><span class="p">,</span>
+                    <span class="s1">&#39;routing_key&#39;</span><span class="p">:</span> <span class="n">routing_key</span><span class="p">,</span>
+                <span class="p">})</span>
+                <span class="n">evd</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="s1">&#39;task-sent&#39;</span><span class="p">,</span> <span class="n">sent_event</span><span class="p">,</span>
+                            <span class="n">producer</span><span class="p">,</span> <span class="n">retry</span><span class="o">=</span><span class="n">retry</span><span class="p">,</span> <span class="n">retry_policy</span><span class="o">=</span><span class="n">retry_policy</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">ret</span>
+        <span class="k">return</span> <span class="n">send_task_message</span>
+
+<div class="viewcode-block" id="AMQP.default_queue"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.default_queue">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">default_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">queues</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_default_queue</span><span class="p">]</span></div>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">queues</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Queue name⇒ declaration mapping.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">Queues</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_queues</span><span class="p">)</span>
+
+<div class="viewcode-block" id="AMQP.queues"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.queues">[docs]</a>    <span class="nd">@queues</span><span class="o">.</span><span class="n">setter</span>  <span class="c1"># noqa</span>
+    <span class="k">def</span> <span class="nf">queues</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queues</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">Queues</span><span class="p">(</span><span class="n">queues</span><span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">routes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rtable</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">flush_routes</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rtable</span>
+
+<div class="viewcode-block" id="AMQP.router"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.router">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">router</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">Router</span><span class="p">()</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">producer_pool</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_producer_pool</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_producer_pool</span> <span class="o">=</span> <span class="n">pools</span><span class="o">.</span><span class="n">producers</span><span class="p">[</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">connection_for_write</span><span class="p">()]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_producer_pool</span><span class="o">.</span><span class="n">limit</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">limit</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_producer_pool</span>
+    <span class="n">publisher_pool</span> <span class="o">=</span> <span class="n">producer_pool</span>  <span class="c1"># compat alias</span>
+
+<div class="viewcode-block" id="AMQP.default_exchange"><a class="viewcode-back" href="../../../reference/celery.app.amqp.html#celery.app.amqp.AMQP.default_exchange">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">default_exchange</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">Exchange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_default_exchange</span><span class="p">,</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">task_default_exchange_type</span><span class="p">)</span></div>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">utc</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">enable_utc</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">_event_dispatcher</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># We call Dispatcher.publish with a custom producer</span>
+        <span class="c1"># so don&#39;t need the diuspatcher to be enabled.</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">events</span><span class="o">.</span><span class="n">Dispatcher</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

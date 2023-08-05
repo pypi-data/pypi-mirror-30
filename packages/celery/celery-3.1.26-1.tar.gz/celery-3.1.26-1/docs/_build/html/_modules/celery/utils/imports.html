@@ -1,0 +1,269 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.utils.imports &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/utils/imports.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.utils.imports</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Utilities related to importing modules and symbols by name.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">imp</span> <span class="k">as</span> <span class="nn">_imp</span>
+<span class="kn">import</span> <span class="nn">importlib</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="k">import</span> <span class="n">contextmanager</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils.imports</span> <span class="k">import</span> <span class="n">symbol_by_name</span>
+
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">reload</span>
+
+<span class="c1">#: Billiard sets this when execv is enabled.</span>
+<span class="c1">#: We use it to find out the name of the original ``__main__``</span>
+<span class="c1">#: module, so that we can properly rewrite the name of the</span>
+<span class="c1">#: task to be that of ``App.main``.</span>
+<span class="n">MP_MAIN_FILE</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;MP_MAIN_FILE&#39;</span><span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s1">&#39;NotAPackage&#39;</span><span class="p">,</span> <span class="s1">&#39;qualname&#39;</span><span class="p">,</span> <span class="s1">&#39;instantiate&#39;</span><span class="p">,</span> <span class="s1">&#39;symbol_by_name&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;cwd_in_path&#39;</span><span class="p">,</span> <span class="s1">&#39;find_module&#39;</span><span class="p">,</span> <span class="s1">&#39;import_from_cwd&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;reload_from_cwd&#39;</span><span class="p">,</span> <span class="s1">&#39;module_file&#39;</span><span class="p">,</span> <span class="s1">&#39;gen_task_name&#39;</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="NotAPackage"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.NotAPackage">[docs]</a><span class="k">class</span> <span class="nc">NotAPackage</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Raised when importing a package, but it&#39;s not a package.&quot;&quot;&quot;</span></div>
+
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+    <span class="k">def</span> <span class="nf">qualname</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return object name.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__name__&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__class__&#39;</span><span class="p">):</span>
+            <span class="n">obj</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="vm">__class__</span>
+        <span class="n">q</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__qualname__&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;.&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">q</span><span class="p">:</span>
+            <span class="n">q</span> <span class="o">=</span> <span class="s1">&#39;.&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">((</span><span class="n">obj</span><span class="o">.</span><span class="vm">__module__</span><span class="p">,</span> <span class="n">q</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">q</span>
+<span class="k">else</span><span class="p">:</span>
+<div class="viewcode-block" id="qualname"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.qualname">[docs]</a>    <span class="k">def</span> <span class="nf">qualname</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>  <span class="c1"># noqa</span>
+        <span class="sd">&quot;&quot;&quot;Return object name.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__name__&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__class__&#39;</span><span class="p">):</span>
+            <span class="n">obj</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="vm">__class__</span>
+        <span class="k">return</span> <span class="s1">&#39;.&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">((</span><span class="n">obj</span><span class="o">.</span><span class="vm">__module__</span><span class="p">,</span> <span class="n">obj</span><span class="o">.</span><span class="vm">__name__</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="instantiate"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.instantiate">[docs]</a><span class="k">def</span> <span class="nf">instantiate</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Instantiate class by name.</span>
+
+<span class="sd">    See Also:</span>
+<span class="sd">        :func:`symbol_by_name`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">symbol_by_name</span><span class="p">(</span><span class="n">name</span><span class="p">)(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="cwd_in_path"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.cwd_in_path">[docs]</a><span class="nd">@contextmanager</span>
+<span class="k">def</span> <span class="nf">cwd_in_path</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Context adding the current working directory to sys.path.&quot;&quot;&quot;</span>
+    <span class="n">cwd</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getcwd</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">cwd</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="p">:</span>
+        <span class="k">yield</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">cwd</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="n">cwd</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">cwd</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+                <span class="k">pass</span></div>
+
+
+<div class="viewcode-block" id="find_module"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.find_module">[docs]</a><span class="k">def</span> <span class="nf">find_module</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Version of :func:`imp.find_module` supporting dots.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">imp</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">imp</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span>
+    <span class="k">with</span> <span class="n">cwd_in_path</span><span class="p">():</span>
+        <span class="k">if</span> <span class="s1">&#39;.&#39;</span> <span class="ow">in</span> <span class="n">module</span><span class="p">:</span>
+            <span class="n">last</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">module</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">part</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">parts</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]):</span>
+                <span class="n">mpart</span> <span class="o">=</span> <span class="n">imp</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">[:</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]))</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">path</span> <span class="o">=</span> <span class="n">mpart</span><span class="o">.</span><span class="n">__path__</span>
+                <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">NotAPackage</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+                <span class="n">last</span> <span class="o">=</span> <span class="n">_imp</span><span class="o">.</span><span class="n">find_module</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">],</span> <span class="n">path</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">last</span>
+        <span class="k">return</span> <span class="n">_imp</span><span class="o">.</span><span class="n">find_module</span><span class="p">(</span><span class="n">module</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="import_from_cwd"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.import_from_cwd">[docs]</a><span class="k">def</span> <span class="nf">import_from_cwd</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Import module, temporarily including modules in the current directory.</span>
+
+<span class="sd">    Modules located in the current directory has</span>
+<span class="sd">    precedence over modules located in `sys.path`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">imp</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">imp</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span>
+    <span class="k">with</span> <span class="n">cwd_in_path</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">imp</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="reload_from_cwd"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.reload_from_cwd">[docs]</a><span class="k">def</span> <span class="nf">reload_from_cwd</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">reloader</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Reload module (ensuring that CWD is in sys.path).&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">reloader</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">reloader</span> <span class="o">=</span> <span class="n">reload</span>
+    <span class="k">with</span> <span class="n">cwd_in_path</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">reloader</span><span class="p">(</span><span class="n">module</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="module_file"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.module_file">[docs]</a><span class="k">def</span> <span class="nf">module_file</span><span class="p">(</span><span class="n">module</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return the correct original file name of a module.&quot;&quot;&quot;</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">module</span><span class="o">.</span><span class="vm">__file__</span>
+    <span class="k">return</span> <span class="n">name</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.pyc&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="n">name</span></div>
+
+
+<div class="viewcode-block" id="gen_task_name"><a class="viewcode-back" href="../../../internals/reference/celery.utils.imports.html#celery.utils.gen_task_name">[docs]</a><span class="k">def</span> <span class="nf">gen_task_name</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">module_name</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Generate task name from name/module pair.&quot;&quot;&quot;</span>
+    <span class="n">module_name</span> <span class="o">=</span> <span class="n">module_name</span> <span class="ow">or</span> <span class="s1">&#39;__main__&#39;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">module</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="n">module_name</span><span class="p">]</span>
+    <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+        <span class="c1"># Fix for manage.py shell_plus (Issue #366)</span>
+        <span class="n">module</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="n">module</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">module_name</span> <span class="o">=</span> <span class="n">module</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="c1"># - If the task module is used as the __main__ script</span>
+        <span class="c1"># - we need to rewrite the module part of the task name</span>
+        <span class="c1"># - to match App.main.</span>
+        <span class="k">if</span> <span class="n">MP_MAIN_FILE</span> <span class="ow">and</span> <span class="n">module</span><span class="o">.</span><span class="vm">__file__</span> <span class="o">==</span> <span class="n">MP_MAIN_FILE</span><span class="p">:</span>
+            <span class="c1"># - see comment about :envvar:`MP_MAIN_FILE` above.</span>
+            <span class="n">module_name</span> <span class="o">=</span> <span class="s1">&#39;__main__&#39;</span>
+    <span class="k">if</span> <span class="n">module_name</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span> <span class="ow">and</span> <span class="n">app</span><span class="o">.</span><span class="n">main</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s1">&#39;.&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">app</span><span class="o">.</span><span class="n">main</span><span class="p">,</span> <span class="n">name</span><span class="p">])</span>
+    <span class="k">return</span> <span class="s1">&#39;.&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="p">(</span><span class="n">module_name</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span> <span class="k">if</span> <span class="n">p</span><span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">load_extension_class_names</span><span class="p">(</span><span class="n">namespace</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span> <span class="nn">pkg_resources</span> <span class="k">import</span> <span class="n">iter_entry_points</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+        <span class="k">return</span>
+
+    <span class="k">for</span> <span class="n">ep</span> <span class="ow">in</span> <span class="n">iter_entry_points</span><span class="p">(</span><span class="n">namespace</span><span class="p">):</span>
+        <span class="k">yield</span> <span class="n">ep</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s1">&#39;:&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">ep</span><span class="o">.</span><span class="n">module_name</span><span class="p">,</span> <span class="n">ep</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="mi">0</span><span class="p">]])</span>
+
+
+<span class="k">def</span> <span class="nf">load_extension_classes</span><span class="p">(</span><span class="n">namespace</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">class_name</span> <span class="ow">in</span> <span class="n">load_extension_class_names</span><span class="p">(</span><span class="n">namespace</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">cls</span> <span class="o">=</span> <span class="n">symbol_by_name</span><span class="p">(</span><span class="n">class_name</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">SyntaxError</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="s1">&#39;Cannot load </span><span class="si">{0}</span><span class="s1"> extension </span><span class="si">{1!r}</span><span class="s1">: </span><span class="si">{2!r}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">namespace</span><span class="p">,</span> <span class="n">class_name</span><span class="p">,</span> <span class="n">exc</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="n">name</span><span class="p">,</span> <span class="bp">cls</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

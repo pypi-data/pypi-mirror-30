@@ -1,0 +1,379 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.loaders.base &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../loaders.html" accesskey="U">celery.loaders</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/loaders/base.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.loaders.base</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Loader base class.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">importlib</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">datetime</span>
+
+<span class="kn">from</span> <span class="nn">kombu.utils</span> <span class="k">import</span> <span class="n">json</span>
+<span class="kn">from</span> <span class="nn">kombu.utils.objects</span> <span class="k">import</span> <span class="n">cached_property</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">signals</span>
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">reraise</span><span class="p">,</span> <span class="n">string_t</span>
+<span class="kn">from</span> <span class="nn">celery.utils.collections</span> <span class="k">import</span> <span class="n">DictAttribute</span><span class="p">,</span> <span class="n">force_mapping</span>
+<span class="kn">from</span> <span class="nn">celery.utils.functional</span> <span class="k">import</span> <span class="n">maybe_list</span>
+<span class="kn">from</span> <span class="nn">celery.utils.imports</span> <span class="k">import</span> <span class="p">(</span><span class="n">NotAPackage</span><span class="p">,</span> <span class="n">find_module</span><span class="p">,</span> <span class="n">import_from_cwd</span><span class="p">,</span>
+                                  <span class="n">symbol_by_name</span><span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;BaseLoader&#39;</span><span class="p">,)</span>
+
+<span class="n">_RACE_PROTECTION</span> <span class="o">=</span> <span class="kc">False</span>
+
+<span class="n">CONFIG_INVALID_NAME</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">Error: Module &#39;</span><span class="si">{module}</span><span class="s2">&#39; doesn&#39;t exist, or it&#39;s not a valid </span><span class="se">\</span>
+<span class="s2">Python module name.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">CONFIG_WITH_SUFFIX</span> <span class="o">=</span> <span class="n">CONFIG_INVALID_NAME</span> <span class="o">+</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">Did you mean &#39;</span><span class="si">{suggest}</span><span class="s2">&#39;?</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">unconfigured</span> <span class="o">=</span> <span class="nb">object</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="BaseLoader"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader">[docs]</a><span class="k">class</span> <span class="nc">BaseLoader</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Base class for loaders.</span>
+
+<span class="sd">    Loaders handles,</span>
+
+<span class="sd">        * Reading celery client/worker configurations.</span>
+
+<span class="sd">        * What happens when a task starts?</span>
+<span class="sd">            See :meth:`on_task_init`.</span>
+
+<span class="sd">        * What happens when the worker starts?</span>
+<span class="sd">            See :meth:`on_worker_init`.</span>
+
+<span class="sd">        * What happens when the worker shuts down?</span>
+<span class="sd">            See :meth:`on_worker_shutdown`.</span>
+
+<span class="sd">        * What modules are imported to find tasks?</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">builtin_modules</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">()</span>
+    <span class="n">configured</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">override_backends</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">worker_initialized</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">_conf</span> <span class="o">=</span> <span class="n">unconfigured</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">app</span> <span class="o">=</span> <span class="n">app</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task_modules</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+<div class="viewcode-block" id="BaseLoader.now"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.now">[docs]</a>    <span class="k">def</span> <span class="nf">now</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">utc</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">utc</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">datetime</span><span class="o">.</span><span class="n">utcnow</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="BaseLoader.on_task_init"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.on_task_init">[docs]</a>    <span class="k">def</span> <span class="nf">on_task_init</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">task</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Called before a task is executed.&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BaseLoader.on_process_cleanup"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.on_process_cleanup">[docs]</a>    <span class="k">def</span> <span class="nf">on_process_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Called after a task is executed.&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BaseLoader.on_worker_init"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.on_worker_init">[docs]</a>    <span class="k">def</span> <span class="nf">on_worker_init</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Called when the worker (:program:`celery worker`) starts.&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BaseLoader.on_worker_shutdown"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.on_worker_shutdown">[docs]</a>    <span class="k">def</span> <span class="nf">on_worker_shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Called when the worker (:program:`celery worker`) shuts down.&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BaseLoader.on_worker_process_init"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.on_worker_process_init">[docs]</a>    <span class="k">def</span> <span class="nf">on_worker_process_init</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Called when a child process starts.&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="BaseLoader.import_task_module"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.import_task_module">[docs]</a>    <span class="k">def</span> <span class="nf">import_task_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task_modules</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">import_from_cwd</span><span class="p">(</span><span class="n">module</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="BaseLoader.import_module"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.import_module">[docs]</a>    <span class="k">def</span> <span class="nf">import_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="BaseLoader.import_from_cwd"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.import_from_cwd">[docs]</a>    <span class="k">def</span> <span class="nf">import_from_cwd</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">import_from_cwd</span><span class="p">(</span>
+            <span class="n">module</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">import_module</span> <span class="k">if</span> <span class="n">imp</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">imp</span><span class="p">,</span>
+            <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="BaseLoader.import_default_modules"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.import_default_modules">[docs]</a>    <span class="k">def</span> <span class="nf">import_default_modules</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">responses</span> <span class="o">=</span> <span class="n">signals</span><span class="o">.</span><span class="n">import_modules</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">sender</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="p">)</span>
+        <span class="c1"># Prior to this point loggers are not yet set up properly, need to</span>
+        <span class="c1">#   check responses manually and reraised exceptions if any, otherwise</span>
+        <span class="c1">#   they&#39;ll be silenced, making it incredibly difficult to debug.</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">response</span> <span class="ow">in</span> <span class="n">responses</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">response</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="n">response</span>
+        <span class="k">return</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">import_task_module</span><span class="p">(</span><span class="n">m</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_modules</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="BaseLoader.init_worker"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.init_worker">[docs]</a>    <span class="k">def</span> <span class="nf">init_worker</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">worker_initialized</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">worker_initialized</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">import_default_modules</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">on_worker_init</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="BaseLoader.shutdown_worker"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.shutdown_worker">[docs]</a>    <span class="k">def</span> <span class="nf">shutdown_worker</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_worker_shutdown</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="BaseLoader.init_worker_process"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.init_worker_process">[docs]</a>    <span class="k">def</span> <span class="nf">init_worker_process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">on_worker_process_init</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="BaseLoader.config_from_object"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.config_from_object">[docs]</a>    <span class="k">def</span> <span class="nf">config_from_object</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">silent</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">string_t</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">obj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_smart_import</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">import_from_cwd</span><span class="p">)</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">silent</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="kc">False</span>
+                <span class="k">raise</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_conf</span> <span class="o">=</span> <span class="n">force_mapping</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+    <span class="k">def</span> <span class="nf">_smart_import</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">imp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">import_module</span> <span class="k">if</span> <span class="n">imp</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">imp</span>
+        <span class="k">if</span> <span class="s1">&#39;:&#39;</span> <span class="ow">in</span> <span class="n">path</span><span class="p">:</span>
+            <span class="c1"># Path includes attribute so can just jump</span>
+            <span class="c1"># here (e.g., ``os.path:abspath``).</span>
+            <span class="k">return</span> <span class="n">symbol_by_name</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="n">imp</span><span class="p">)</span>
+
+        <span class="c1"># Not sure if path is just a module name or if it includes an</span>
+        <span class="c1"># attribute name (e.g., ``os.path``, vs, ``os.path.abspath``).</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">imp</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+            <span class="c1"># Not a module name, so try module + attribute.</span>
+            <span class="k">return</span> <span class="n">symbol_by_name</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">imp</span><span class="o">=</span><span class="n">imp</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_import_config_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">find_module</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">NotAPackage</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.py&#39;</span><span class="p">):</span>
+                <span class="n">reraise</span><span class="p">(</span><span class="n">NotAPackage</span><span class="p">,</span> <span class="n">NotAPackage</span><span class="p">(</span><span class="n">CONFIG_WITH_SUFFIX</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">module</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">suggest</span><span class="o">=</span><span class="n">name</span><span class="p">[:</span><span class="o">-</span><span class="mi">3</span><span class="p">])),</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()[</span><span class="mi">2</span><span class="p">])</span>
+            <span class="n">reraise</span><span class="p">(</span><span class="n">NotAPackage</span><span class="p">,</span> <span class="n">NotAPackage</span><span class="p">(</span><span class="n">CONFIG_INVALID_NAME</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                <span class="n">module</span><span class="o">=</span><span class="n">name</span><span class="p">)),</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()[</span><span class="mi">2</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">import_from_cwd</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+
+<div class="viewcode-block" id="BaseLoader.find_module"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.find_module">[docs]</a>    <span class="k">def</span> <span class="nf">find_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">find_module</span><span class="p">(</span><span class="n">module</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="BaseLoader.cmdline_config_parser"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.cmdline_config_parser">[docs]</a>    <span class="k">def</span> <span class="nf">cmdline_config_parser</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="s1">&#39;celery&#39;</span><span class="p">,</span>
+            <span class="n">re_type</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\((\w+)\)&#39;</span><span class="p">),</span>
+            <span class="n">extra_types</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;json&#39;</span><span class="p">:</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">},</span>
+            <span class="n">override_types</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;tuple&#39;</span><span class="p">:</span> <span class="s1">&#39;json&#39;</span><span class="p">,</span>
+                            <span class="s1">&#39;list&#39;</span><span class="p">:</span> <span class="s1">&#39;json&#39;</span><span class="p">,</span>
+                            <span class="s1">&#39;dict&#39;</span><span class="p">:</span> <span class="s1">&#39;json&#39;</span><span class="p">}):</span>
+        <span class="kn">from</span> <span class="nn">celery.app.defaults</span> <span class="k">import</span> <span class="n">Option</span><span class="p">,</span> <span class="n">NAMESPACES</span>
+        <span class="n">namespace</span> <span class="o">=</span> <span class="n">namespace</span> <span class="ow">and</span> <span class="n">namespace</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="n">typemap</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">Option</span><span class="o">.</span><span class="n">typemap</span><span class="p">,</span> <span class="o">**</span><span class="n">extra_types</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">getarg</span><span class="p">(</span><span class="n">arg</span><span class="p">):</span>
+            <span class="sd">&quot;&quot;&quot;Parse single configuration from command-line.&quot;&quot;&quot;</span>
+            <span class="c1"># ## find key/value</span>
+            <span class="c1"># ns.key=value|ns_key=value (case insensitive)</span>
+            <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">arg</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;=&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="s1">&#39;_&#39;</span><span class="p">)</span>
+
+            <span class="c1"># ## find name-space.</span>
+            <span class="c1"># .key=value|_key=value expands to default name-space.</span>
+            <span class="k">if</span> <span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;_&#39;</span><span class="p">:</span>
+                <span class="n">ns</span><span class="p">,</span> <span class="n">key</span> <span class="o">=</span> <span class="n">namespace</span><span class="p">,</span> <span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># find name-space part of key</span>
+                <span class="n">ns</span><span class="p">,</span> <span class="n">key</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="n">ns_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">ns</span> <span class="ow">and</span> <span class="n">ns</span> <span class="o">+</span> <span class="s1">&#39;_&#39;</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">)</span> <span class="o">+</span> <span class="n">key</span>
+
+            <span class="c1"># (type)value makes cast to custom type.</span>
+            <span class="n">cast</span> <span class="o">=</span> <span class="n">re_type</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cast</span><span class="p">:</span>
+                <span class="n">type_</span> <span class="o">=</span> <span class="n">cast</span><span class="o">.</span><span class="n">groups</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">type_</span> <span class="o">=</span> <span class="n">override_types</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">type_</span><span class="p">,</span> <span class="n">type_</span><span class="p">)</span>
+                <span class="n">value</span> <span class="o">=</span> <span class="n">value</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">cast</span><span class="o">.</span><span class="n">group</span><span class="p">()):]</span>
+                <span class="n">value</span> <span class="o">=</span> <span class="n">typemap</span><span class="p">[</span><span class="n">type_</span><span class="p">](</span><span class="n">value</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">value</span> <span class="o">=</span> <span class="n">NAMESPACES</span><span class="p">[</span><span class="n">ns</span><span class="o">.</span><span class="n">lower</span><span class="p">()][</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">to_python</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                    <span class="c1"># display key name in error message.</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">{0!r}</span><span class="s1">: </span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">ns_key</span><span class="p">,</span> <span class="n">exc</span><span class="p">))</span>
+            <span class="k">return</span> <span class="n">ns_key</span><span class="p">,</span> <span class="n">value</span>
+        <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="n">getarg</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span> <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">args</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="BaseLoader.read_configuration"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.read_configuration">[docs]</a>    <span class="k">def</span> <span class="nf">read_configuration</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="s1">&#39;CELERY_CONFIG_MODULE&#39;</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">custom_config</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="n">env</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">custom_config</span><span class="p">:</span>
+                <span class="n">usercfg</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_import_config_module</span><span class="p">(</span><span class="n">custom_config</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">DictAttribute</span><span class="p">(</span><span class="n">usercfg</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="BaseLoader.autodiscover_tasks"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.autodiscover_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">autodiscover_tasks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">packages</span><span class="p">,</span> <span class="n">related_name</span><span class="o">=</span><span class="s1">&#39;tasks&#39;</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task_modules</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+            <span class="n">mod</span><span class="o">.</span><span class="vm">__name__</span> <span class="k">for</span> <span class="n">mod</span> <span class="ow">in</span> <span class="n">autodiscover_tasks</span><span class="p">(</span><span class="n">packages</span> <span class="ow">or</span> <span class="p">(),</span>
+                                                       <span class="n">related_name</span><span class="p">)</span> <span class="k">if</span> <span class="n">mod</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="BaseLoader.default_modules"><a class="viewcode-back" href="../../../reference/celery.loaders.base.html#celery.loaders.base.BaseLoader.default_modules">[docs]</a>    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">default_modules</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">builtin_modules</span><span class="p">)</span> <span class="o">+</span>
+            <span class="nb">tuple</span><span class="p">(</span><span class="n">maybe_list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">imports</span><span class="p">))</span> <span class="o">+</span>
+            <span class="nb">tuple</span><span class="p">(</span><span class="n">maybe_list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">include</span><span class="p">))</span>
+        <span class="p">)</span></div>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">conf</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Loader configuration.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_conf</span> <span class="ow">is</span> <span class="n">unconfigured</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_conf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read_configuration</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_conf</span></div>
+
+
+<span class="k">def</span> <span class="nf">autodiscover_tasks</span><span class="p">(</span><span class="n">packages</span><span class="p">,</span> <span class="n">related_name</span><span class="o">=</span><span class="s1">&#39;tasks&#39;</span><span class="p">):</span>
+    <span class="k">global</span> <span class="n">_RACE_PROTECTION</span>
+
+    <span class="k">if</span> <span class="n">_RACE_PROTECTION</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">()</span>
+    <span class="n">_RACE_PROTECTION</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">find_related_module</span><span class="p">(</span><span class="n">pkg</span><span class="p">,</span> <span class="n">related_name</span><span class="p">)</span> <span class="k">for</span> <span class="n">pkg</span> <span class="ow">in</span> <span class="n">packages</span><span class="p">]</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">_RACE_PROTECTION</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<span class="k">def</span> <span class="nf">find_related_module</span><span class="p">(</span><span class="n">package</span><span class="p">,</span> <span class="n">related_name</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Find module in package.&quot;&quot;&quot;</span>
+    <span class="c1"># Django 1.7 allows for speciying a class name in INSTALLED_APPS.</span>
+    <span class="c1"># (Issue #2248).</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="n">package</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="n">package</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">package</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">package</span><span class="p">:</span>
+            <span class="k">raise</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">.</span><span class="si">{1}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">package</span><span class="p">,</span> <span class="n">related_name</span><span class="p">))</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="k">return</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../loaders.html" >celery.loaders</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

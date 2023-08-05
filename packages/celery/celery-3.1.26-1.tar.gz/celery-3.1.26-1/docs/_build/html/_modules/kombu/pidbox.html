@@ -1,0 +1,496 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kombu.pidbox &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/kombu/pidbox.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for kombu.pidbox</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Generic process mailbox.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">socket</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">defaultdict</span><span class="p">,</span> <span class="n">deque</span>
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="k">import</span> <span class="n">contextmanager</span>
+<span class="kn">from</span> <span class="nn">copy</span> <span class="k">import</span> <span class="n">copy</span>
+<span class="kn">from</span> <span class="nn">itertools</span> <span class="k">import</span> <span class="n">count</span>
+<span class="kn">from</span> <span class="nn">threading</span> <span class="k">import</span> <span class="n">local</span>
+<span class="kn">from</span> <span class="nn">time</span> <span class="k">import</span> <span class="n">time</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="k">import</span> <span class="n">Exchange</span><span class="p">,</span> <span class="n">Queue</span><span class="p">,</span> <span class="n">Consumer</span><span class="p">,</span> <span class="n">Producer</span>
+<span class="kn">from</span> <span class="nn">.clocks</span> <span class="k">import</span> <span class="n">LamportClock</span>
+<span class="kn">from</span> <span class="nn">.common</span> <span class="k">import</span> <span class="n">maybe_declare</span><span class="p">,</span> <span class="n">oid_from</span>
+<span class="kn">from</span> <span class="nn">.exceptions</span> <span class="k">import</span> <span class="n">InconsistencyError</span>
+<span class="kn">from</span> <span class="nn">.five</span> <span class="k">import</span> <span class="nb">range</span>
+<span class="kn">from</span> <span class="nn">.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span> <span class="nn">.utils.functional</span> <span class="k">import</span> <span class="n">maybe_evaluate</span><span class="p">,</span> <span class="n">reprcall</span>
+<span class="kn">from</span> <span class="nn">.utils.objects</span> <span class="k">import</span> <span class="n">cached_property</span>
+<span class="kn">from</span> <span class="nn">.utils.uuid</span> <span class="k">import</span> <span class="n">uuid</span>
+
+<span class="n">W_PIDBOX_IN_USE</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">A node named </span><span class="si">{node.hostname}</span><span class="s2"> is already using this process mailbox!</span>
+
+<span class="s2">Maybe you forgot to shutdown the other node or did not do so properly?</span>
+<span class="s2">Or if you meant to start multiple nodes on the same host please make sure</span>
+<span class="s2">you give each node a unique node name!</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;Node&#39;</span><span class="p">,</span> <span class="s1">&#39;Mailbox&#39;</span><span class="p">]</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="n">debug</span><span class="p">,</span> <span class="n">error</span> <span class="o">=</span> <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">,</span> <span class="n">logger</span><span class="o">.</span><span class="n">error</span>
+
+
+<span class="k">class</span> <span class="nc">Node</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Mailbox node.&quot;&quot;&quot;</span>
+
+    <span class="c1">#: hostname of the node.</span>
+    <span class="n">hostname</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: the :class:`Mailbox` this is a node for.</span>
+    <span class="n">mailbox</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: map of method name/handlers.</span>
+    <span class="n">handlers</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: current context (passed on to handlers)</span>
+    <span class="n">state</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: current channel.</span>
+    <span class="n">channel</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hostname</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">mailbox</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">channel</span> <span class="o">=</span> <span class="n">channel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span> <span class="o">=</span> <span class="n">mailbox</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hostname</span> <span class="o">=</span> <span class="n">hostname</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">state</span> <span class="o">=</span> <span class="n">state</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">adjust_clock</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span><span class="o">.</span><span class="n">clock</span><span class="o">.</span><span class="n">adjust</span>
+        <span class="k">if</span> <span class="n">handlers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">handlers</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">handlers</span> <span class="o">=</span> <span class="n">handlers</span>
+
+    <span class="k">def</span> <span class="nf">Consumer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">accept</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span><span class="o">.</span><span class="n">get_queue</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hostname</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">verify_exclusive</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">messages</span><span class="p">,</span> <span class="n">consumers</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">consumers</span><span class="p">:</span>
+                <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">W_PIDBOX_IN_USE</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">node</span><span class="o">=</span><span class="bp">self</span><span class="p">))</span>
+        <span class="n">queue</span><span class="o">.</span><span class="n">on_declared</span> <span class="o">=</span> <span class="n">verify_exclusive</span>
+
+        <span class="k">return</span> <span class="n">Consumer</span><span class="p">(</span>
+            <span class="n">channel</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">,</span> <span class="p">[</span><span class="n">queue</span><span class="p">],</span> <span class="n">no_ack</span><span class="o">=</span><span class="n">no_ack</span><span class="p">,</span>
+            <span class="n">accept</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span><span class="o">.</span><span class="n">accept</span> <span class="k">if</span> <span class="n">accept</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">accept</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">options</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">handler</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fun</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">handlers</span><span class="p">[</span><span class="n">fun</span><span class="o">.</span><span class="vm">__name__</span><span class="p">]</span> <span class="o">=</span> <span class="n">fun</span>
+        <span class="k">return</span> <span class="n">fun</span>
+
+    <span class="k">def</span> <span class="nf">on_decode_error</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="n">exc</span><span class="p">):</span>
+        <span class="n">error</span><span class="p">(</span><span class="s1">&#39;Cannot decode message: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">listen</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">consumer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">Consumer</span><span class="p">(</span><span class="n">channel</span><span class="o">=</span><span class="n">channel</span><span class="p">,</span>
+                                 <span class="n">callbacks</span><span class="o">=</span><span class="p">[</span><span class="n">callback</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle_message</span><span class="p">],</span>
+                                 <span class="n">on_decode_error</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">on_decode_error</span><span class="p">)</span>
+        <span class="n">consumer</span><span class="o">.</span><span class="n">consume</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">consumer</span>
+
+    <span class="k">def</span> <span class="nf">dispatch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">method</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">reply_to</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ticket</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">arguments</span> <span class="o">=</span> <span class="n">arguments</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">debug</span><span class="p">(</span><span class="s1">&#39;pidbox received method </span><span class="si">%s</span><span class="s1"> [reply_to:</span><span class="si">%s</span><span class="s1"> ticket:</span><span class="si">%s</span><span class="s1">]&#39;</span><span class="p">,</span>
+              <span class="n">reprcall</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="p">(),</span> <span class="n">kwargs</span><span class="o">=</span><span class="n">arguments</span><span class="p">),</span> <span class="n">reply_to</span><span class="p">,</span> <span class="n">ticket</span><span class="p">)</span>
+        <span class="n">handle</span> <span class="o">=</span> <span class="n">reply_to</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle_call</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle_cast</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">reply</span> <span class="o">=</span> <span class="n">handle</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">arguments</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">SystemExit</span><span class="p">:</span>
+            <span class="k">raise</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">error</span><span class="p">(</span><span class="s1">&#39;pidbox command error: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">reply</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="nb">repr</span><span class="p">(</span><span class="n">exc</span><span class="p">)}</span>
+
+        <span class="k">if</span> <span class="n">reply_to</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">reply</span><span class="p">({</span><span class="bp">self</span><span class="o">.</span><span class="n">hostname</span><span class="p">:</span> <span class="n">reply</span><span class="p">},</span>
+                       <span class="n">exchange</span><span class="o">=</span><span class="n">reply_to</span><span class="p">[</span><span class="s1">&#39;exchange&#39;</span><span class="p">],</span>
+                       <span class="n">routing_key</span><span class="o">=</span><span class="n">reply_to</span><span class="p">[</span><span class="s1">&#39;routing_key&#39;</span><span class="p">],</span>
+                       <span class="n">ticket</span><span class="o">=</span><span class="n">ticket</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">reply</span>
+
+    <span class="k">def</span> <span class="nf">handle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">method</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="p">{}):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">handlers</span><span class="p">[</span><span class="n">method</span><span class="p">](</span><span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="p">,</span> <span class="o">**</span><span class="n">arguments</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">handle_call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">method</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">arguments</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">handle_cast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">method</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">arguments</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">handle_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">destination</span> <span class="o">=</span> <span class="n">body</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;destination&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">message</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">adjust_clock</span><span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;clock&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">destination</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">hostname</span> <span class="ow">in</span> <span class="n">destination</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">dispatch</span><span class="p">(</span><span class="o">**</span><span class="n">body</span><span class="p">)</span>
+    <span class="n">dispatch_from_message</span> <span class="o">=</span> <span class="n">handle_message</span>
+
+    <span class="k">def</span> <span class="nf">reply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span><span class="p">,</span> <span class="n">ticket</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span><span class="o">.</span><span class="n">_publish_reply</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span><span class="p">,</span> <span class="n">ticket</span><span class="p">,</span>
+                                    <span class="n">channel</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">channel</span><span class="p">,</span>
+                                    <span class="n">serializer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mailbox</span><span class="o">.</span><span class="n">serializer</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">Mailbox</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Process Mailbox.&quot;&quot;&quot;</span>
+
+    <span class="n">node_cls</span> <span class="o">=</span> <span class="n">Node</span>
+    <span class="n">exchange_fmt</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">.pidbox&#39;</span>
+    <span class="n">reply_exchange_fmt</span> <span class="o">=</span> <span class="s1">&#39;reply.</span><span class="si">%s</span><span class="s1">.pidbox&#39;</span>
+
+    <span class="c1">#: Name of application.</span>
+    <span class="n">namespace</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Connection (if bound).</span>
+    <span class="n">connection</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Exchange type (usually direct, or fanout for broadcast).</span>
+    <span class="nb">type</span> <span class="o">=</span> <span class="s1">&#39;direct&#39;</span>
+
+    <span class="c1">#: mailbox exchange (init by constructor).</span>
+    <span class="n">exchange</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: exchange to send replies to.</span>
+    <span class="n">reply_exchange</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1">#: Only accepts json messages by default.</span>
+    <span class="n">accept</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;json&#39;</span><span class="p">]</span>
+
+    <span class="c1">#: Message serializer</span>
+    <span class="n">serializer</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">namespace</span><span class="p">,</span>
+                 <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;direct&#39;</span><span class="p">,</span> <span class="n">connection</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">clock</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">accept</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">producer_pool</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">queue_ttl</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">queue_expires</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">reply_queue_ttl</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reply_queue_expires</span><span class="o">=</span><span class="mf">10.0</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">namespace</span> <span class="o">=</span> <span class="n">namespace</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">connection</span> <span class="o">=</span> <span class="n">connection</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="nb">type</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">clock</span> <span class="o">=</span> <span class="n">LamportClock</span><span class="p">()</span> <span class="k">if</span> <span class="n">clock</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">clock</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_exchange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">namespace</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reply_exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_reply_exchange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">namespace</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tls</span> <span class="o">=</span> <span class="n">local</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">unclaimed</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="n">deque</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">accept</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">accept</span> <span class="k">if</span> <span class="n">accept</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">accept</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span> <span class="k">if</span> <span class="n">serializer</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">serializer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">queue_ttl</span> <span class="o">=</span> <span class="n">queue_ttl</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">queue_expires</span> <span class="o">=</span> <span class="n">queue_expires</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reply_queue_ttl</span> <span class="o">=</span> <span class="n">reply_queue_ttl</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reply_queue_expires</span> <span class="o">=</span> <span class="n">reply_queue_expires</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_producer_pool</span> <span class="o">=</span> <span class="n">producer_pool</span>
+
+    <span class="k">def</span> <span class="nf">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">connection</span><span class="p">):</span>
+        <span class="n">bound</span> <span class="o">=</span> <span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="n">bound</span><span class="o">.</span><span class="n">connection</span> <span class="o">=</span> <span class="n">connection</span>
+        <span class="k">return</span> <span class="n">bound</span>
+
+    <span class="k">def</span> <span class="nf">Node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hostname</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">hostname</span> <span class="o">=</span> <span class="n">hostname</span> <span class="ow">or</span> <span class="n">socket</span><span class="o">.</span><span class="n">gethostname</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_cls</span><span class="p">(</span><span class="n">hostname</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">channel</span><span class="p">,</span> <span class="n">handlers</span><span class="p">,</span> <span class="n">mailbox</span><span class="o">=</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{},</span>
+             <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_broadcast</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">destination</span><span class="p">,</span>
+                               <span class="n">reply</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span>
+                               <span class="n">callback</span><span class="o">=</span><span class="n">callback</span><span class="p">,</span>
+                               <span class="n">channel</span><span class="o">=</span><span class="n">channel</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">cast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">destination</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{}):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_broadcast</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">destination</span><span class="p">,</span> <span class="n">reply</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">abcast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{}):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_broadcast</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">reply</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">multi_call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{},</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                   <span class="n">limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_broadcast</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">reply</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                               <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="n">limit</span><span class="p">,</span>
+                               <span class="n">callback</span><span class="o">=</span><span class="n">callback</span><span class="p">,</span>
+                               <span class="n">channel</span><span class="o">=</span><span class="n">channel</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_reply_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">oid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">oid</span>
+        <span class="k">return</span> <span class="n">Queue</span><span class="p">(</span>
+            <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">.</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">oid</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">reply_exchange</span><span class="o">.</span><span class="n">name</span><span class="p">),</span>
+            <span class="n">exchange</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">reply_exchange</span><span class="p">,</span>
+            <span class="n">routing_key</span><span class="o">=</span><span class="n">oid</span><span class="p">,</span>
+            <span class="n">durable</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">auto_delete</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">expires</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">reply_queue_expires</span><span class="p">,</span>
+            <span class="n">message_ttl</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">reply_queue_ttl</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">reply_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_reply_queue</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">get_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hostname</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">Queue</span><span class="p">(</span>
+            <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">.</span><span class="si">%s</span><span class="s1">.pidbox&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">hostname</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">namespace</span><span class="p">),</span>
+            <span class="n">exchange</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">exchange</span><span class="p">,</span>
+            <span class="n">durable</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">auto_delete</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">expires</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">queue_expires</span><span class="p">,</span>
+            <span class="n">message_ttl</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">queue_ttl</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="nd">@contextmanager</span>
+    <span class="k">def</span> <span class="nf">producer_or_acquire</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">producer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">producer</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="n">producer</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">producer_pool</span><span class="p">:</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">producer_pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span> <span class="k">as</span> <span class="n">producer</span><span class="p">:</span>
+                <span class="k">yield</span> <span class="n">producer</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="n">Producer</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="n">auto_declare</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_publish_reply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reply</span><span class="p">,</span> <span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span><span class="p">,</span> <span class="n">ticket</span><span class="p">,</span>
+                       <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">producer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">opts</span><span class="p">):</span>
+        <span class="n">chan</span> <span class="o">=</span> <span class="n">channel</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">default_channel</span>
+        <span class="n">exchange</span> <span class="o">=</span> <span class="n">Exchange</span><span class="p">(</span><span class="n">exchange</span><span class="p">,</span> <span class="n">exchange_type</span><span class="o">=</span><span class="s1">&#39;direct&#39;</span><span class="p">,</span>
+                            <span class="n">delivery_mode</span><span class="o">=</span><span class="s1">&#39;transient&#39;</span><span class="p">,</span>
+                            <span class="n">durable</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">producer_or_acquire</span><span class="p">(</span><span class="n">producer</span><span class="p">,</span> <span class="n">chan</span><span class="p">)</span> <span class="k">as</span> <span class="n">producer</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">producer</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span>
+                    <span class="n">reply</span><span class="p">,</span> <span class="n">exchange</span><span class="o">=</span><span class="n">exchange</span><span class="p">,</span> <span class="n">routing_key</span><span class="o">=</span><span class="n">routing_key</span><span class="p">,</span>
+                    <span class="n">declare</span><span class="o">=</span><span class="p">[</span><span class="n">exchange</span><span class="p">],</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span>
+                        <span class="s1">&#39;ticket&#39;</span><span class="p">:</span> <span class="n">ticket</span><span class="p">,</span> <span class="s1">&#39;clock&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">clock</span><span class="o">.</span><span class="n">forward</span><span class="p">(),</span>
+                    <span class="p">},</span>
+                    <span class="o">**</span><span class="n">opts</span>
+                <span class="p">)</span>
+            <span class="k">except</span> <span class="n">InconsistencyError</span><span class="p">:</span>
+                <span class="c1"># queue probably deleted and no one is expecting a reply.</span>
+                <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">_publish</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">type</span><span class="p">,</span> <span class="n">arguments</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">reply_ticket</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">producer</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">message</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="nb">type</span><span class="p">,</span>
+                   <span class="s1">&#39;arguments&#39;</span><span class="p">:</span> <span class="n">arguments</span><span class="p">,</span>
+                   <span class="s1">&#39;destination&#39;</span><span class="p">:</span> <span class="n">destination</span><span class="p">}</span>
+        <span class="n">chan</span> <span class="o">=</span> <span class="n">channel</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">default_channel</span>
+        <span class="n">exchange</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">exchange</span>
+        <span class="k">if</span> <span class="n">reply_ticket</span><span class="p">:</span>
+            <span class="n">maybe_declare</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">reply_queue</span><span class="p">(</span><span class="n">channel</span><span class="p">))</span>
+            <span class="n">message</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">ticket</span><span class="o">=</span><span class="n">reply_ticket</span><span class="p">,</span>
+                           <span class="n">reply_to</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;exchange&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">reply_exchange</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                                     <span class="s1">&#39;routing_key&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">oid</span><span class="p">})</span>
+        <span class="n">serializer</span> <span class="o">=</span> <span class="n">serializer</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">producer_or_acquire</span><span class="p">(</span><span class="n">producer</span><span class="p">,</span> <span class="n">chan</span><span class="p">)</span> <span class="k">as</span> <span class="n">producer</span><span class="p">:</span>
+            <span class="n">producer</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span>
+                <span class="n">message</span><span class="p">,</span> <span class="n">exchange</span><span class="o">=</span><span class="n">exchange</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">declare</span><span class="o">=</span><span class="p">[</span><span class="n">exchange</span><span class="p">],</span>
+                <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;clock&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">clock</span><span class="o">.</span><span class="n">forward</span><span class="p">(),</span>
+                         <span class="s1">&#39;expires&#39;</span><span class="p">:</span> <span class="n">time</span><span class="p">()</span> <span class="o">+</span> <span class="n">timeout</span> <span class="k">if</span> <span class="n">timeout</span> <span class="k">else</span> <span class="mi">0</span><span class="p">},</span>
+                <span class="n">serializer</span><span class="o">=</span><span class="n">serializer</span><span class="p">,</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_broadcast</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">arguments</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">reply</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">serializer</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">destination</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> \
+                <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">destination</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s1">&#39;destination must be a list/tuple not </span><span class="si">{0}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="nb">type</span><span class="p">(</span><span class="n">destination</span><span class="p">)))</span>
+
+        <span class="n">arguments</span> <span class="o">=</span> <span class="n">arguments</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">reply_ticket</span> <span class="o">=</span> <span class="n">reply</span> <span class="ow">and</span> <span class="n">uuid</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+        <span class="n">chan</span> <span class="o">=</span> <span class="n">channel</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">default_channel</span>
+
+        <span class="c1"># Set reply limit to number of destinations (if specified)</span>
+        <span class="k">if</span> <span class="n">limit</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">destination</span><span class="p">:</span>
+            <span class="n">limit</span> <span class="o">=</span> <span class="n">destination</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">destination</span><span class="p">)</span> <span class="ow">or</span> <span class="kc">None</span>
+
+        <span class="n">serializer</span> <span class="o">=</span> <span class="n">serializer</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">serializer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_publish</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">arguments</span><span class="p">,</span> <span class="n">destination</span><span class="o">=</span><span class="n">destination</span><span class="p">,</span>
+                      <span class="n">reply_ticket</span><span class="o">=</span><span class="n">reply_ticket</span><span class="p">,</span>
+                      <span class="n">channel</span><span class="o">=</span><span class="n">chan</span><span class="p">,</span>
+                      <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span>
+                      <span class="n">serializer</span><span class="o">=</span><span class="n">serializer</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">reply_ticket</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collect</span><span class="p">(</span><span class="n">reply_ticket</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="n">limit</span><span class="p">,</span>
+                                 <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span>
+                                 <span class="n">callback</span><span class="o">=</span><span class="n">callback</span><span class="p">,</span>
+                                 <span class="n">channel</span><span class="o">=</span><span class="n">chan</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_collect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ticket</span><span class="p">,</span>
+                 <span class="n">limit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">accept</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">accept</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">accept</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">accept</span>
+        <span class="n">chan</span> <span class="o">=</span> <span class="n">channel</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">default_channel</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">reply_queue</span>
+        <span class="n">consumer</span> <span class="o">=</span> <span class="n">Consumer</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="p">[</span><span class="n">queue</span><span class="p">],</span> <span class="n">accept</span><span class="o">=</span><span class="n">accept</span><span class="p">,</span> <span class="n">no_ack</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">responses</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">unclaimed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">unclaimed</span>
+        <span class="n">adjust_clock</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">clock</span><span class="o">.</span><span class="n">adjust</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">unclaimed</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">ticket</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+        <span class="k">def</span> <span class="nf">on_message</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+            <span class="c1"># ticket header added in kombu 2.5</span>
+            <span class="n">header</span> <span class="o">=</span> <span class="n">message</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span>
+            <span class="n">adjust_clock</span><span class="p">(</span><span class="n">header</span><span class="p">(</span><span class="s1">&#39;clock&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="n">expires</span> <span class="o">=</span> <span class="n">header</span><span class="p">(</span><span class="s1">&#39;expires&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">expires</span> <span class="ow">and</span> <span class="n">time</span><span class="p">()</span> <span class="o">&gt;</span> <span class="n">expires</span><span class="p">:</span>
+                <span class="k">return</span>
+            <span class="n">this_id</span> <span class="o">=</span> <span class="n">header</span><span class="p">(</span><span class="s1">&#39;ticket&#39;</span><span class="p">,</span> <span class="n">ticket</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">this_id</span> <span class="o">==</span> <span class="n">ticket</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">callback</span><span class="p">:</span>
+                    <span class="n">callback</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+                <span class="n">responses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">unclaimed</span><span class="p">[</span><span class="n">this_id</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+
+        <span class="n">consumer</span><span class="o">.</span><span class="n">register_callback</span><span class="p">(</span><span class="n">on_message</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">consumer</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">limit</span> <span class="ow">and</span> <span class="nb">range</span><span class="p">(</span><span class="n">limit</span><span class="p">)</span> <span class="ow">or</span> <span class="n">count</span><span class="p">():</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">drain_events</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">)</span>
+                    <span class="k">except</span> <span class="n">socket</span><span class="o">.</span><span class="n">timeout</span><span class="p">:</span>
+                        <span class="k">break</span>
+                <span class="k">return</span> <span class="n">responses</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">chan</span><span class="o">.</span><span class="n">after_reply_message_received</span><span class="p">(</span><span class="n">queue</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_exchange</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">namespace</span><span class="p">,</span> <span class="nb">type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">Exchange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exchange_fmt</span> <span class="o">%</span> <span class="n">namespace</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">type</span><span class="p">,</span>
+                        <span class="n">durable</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="n">delivery_mode</span><span class="o">=</span><span class="s1">&#39;transient&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_reply_exchange</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">namespace</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">Exchange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">reply_exchange_fmt</span> <span class="o">%</span> <span class="n">namespace</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;direct&#39;</span><span class="p">,</span>
+                        <span class="n">durable</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="n">delivery_mode</span><span class="o">=</span><span class="s1">&#39;transient&#39;</span><span class="p">)</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">oid</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tls</span><span class="o">.</span><span class="n">OID</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="n">oid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tls</span><span class="o">.</span><span class="n">OID</span> <span class="o">=</span> <span class="n">oid_from</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">oid</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span> <span class="nf">producer_pool</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">maybe_evaluate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_producer_pool</span><span class="p">)</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../index.html">
+              <img class="logo" src="../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

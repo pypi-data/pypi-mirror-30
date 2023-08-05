@@ -1,0 +1,415 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>billiard.compat &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/billiard/compat.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for billiard.compat</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span>
+
+<span class="kn">import</span> <span class="nn">errno</span>
+<span class="kn">import</span> <span class="nn">numbers</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+
+<span class="kn">from</span> <span class="nn">.five</span> <span class="k">import</span> <span class="nb">range</span><span class="p">,</span> <span class="n">zip_longest</span>
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="o">==</span> <span class="s1">&#39;win32&#39;</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">_winapi</span>  <span class="c1"># noqa</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>                            <span class="c1"># pragma: no cover</span>
+        <span class="kn">from</span> <span class="nn">_multiprocessing</span> <span class="k">import</span> <span class="n">win32</span> <span class="k">as</span> <span class="n">_winapi</span>  <span class="c1"># noqa</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">_winapi</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># noqa</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">resource</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="n">resource</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">io</span> <span class="k">import</span> <span class="n">UnsupportedOperation</span>
+    <span class="n">FILENO_ERRORS</span> <span class="o">=</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="n">UnsupportedOperation</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="c1"># Py2</span>
+    <span class="n">FILENO_ERRORS</span> <span class="o">=</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">)</span>  <span class="c1"># noqa</span>
+
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">5</span><span class="p">):</span>
+    <span class="n">buf_t</span><span class="p">,</span> <span class="n">is_new_buffer</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">,</span> <span class="kc">True</span>  <span class="c1"># noqa</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">buf_t</span><span class="p">,</span> <span class="n">is_new_buffer</span> <span class="o">=</span> <span class="n">buffer</span><span class="p">,</span> <span class="kc">False</span>  <span class="c1"># noqa</span>
+
+<span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">os</span><span class="p">,</span> <span class="s1">&#39;write&#39;</span><span class="p">):</span>
+    <span class="n">__write__</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">write</span>
+
+    <span class="k">if</span> <span class="n">is_new_buffer</span><span class="p">:</span>
+
+        <span class="k">def</span> <span class="nf">send_offset</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">offset</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">__write__</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">[</span><span class="n">offset</span><span class="p">:])</span>
+
+    <span class="k">else</span><span class="p">:</span>  <span class="c1"># Py&lt;2.7.6</span>
+
+        <span class="k">def</span> <span class="nf">send_offset</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">offset</span><span class="p">):</span>  <span class="c1"># noqa</span>
+            <span class="k">return</span> <span class="n">__write__</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf_t</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">offset</span><span class="p">))</span>
+
+<span class="k">else</span><span class="p">:</span>  <span class="c1"># non-posix platform</span>
+
+    <span class="k">def</span> <span class="nf">send_offset</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">offset</span><span class="p">):</span>  <span class="c1"># noqa</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;send_offset&#39;</span><span class="p">)</span>
+
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">fsencode</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">fsencode</span>
+    <span class="n">fsdecode</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">fsdecode</span>
+<span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">_fscodec</span><span class="p">():</span>
+        <span class="n">encoding</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">getfilesystemencoding</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">encoding</span> <span class="o">==</span> <span class="s1">&#39;mbcs&#39;</span><span class="p">:</span>
+            <span class="n">errors</span> <span class="o">=</span> <span class="s1">&#39;strict&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">errors</span> <span class="o">=</span> <span class="s1">&#39;surrogateescape&#39;</span>
+
+        <span class="k">def</span> <span class="nf">fsencode</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+            <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">            Encode filename to the filesystem encoding with &#39;surrogateescape&#39;</span>
+<span class="sd">            error handler, return bytes unchanged. On Windows, use &#39;strict&#39;</span>
+<span class="sd">            error handler if the file system encoding is &#39;mbcs&#39; (which is the</span>
+<span class="sd">            default encoding).</span>
+<span class="sd">            &quot;&quot;&quot;</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">filename</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">filename</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">encoding</span><span class="p">,</span> <span class="n">errors</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;expect bytes or str, not </span><span class="si">%s</span><span class="s2">&quot;</span>
+                                <span class="o">%</span> <span class="nb">type</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">fsdecode</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+            <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">            Decode filename from the filesystem encoding with &#39;surrogateescape&#39;</span>
+<span class="sd">            error handler, return str unchanged. On Windows, use &#39;strict&#39; error</span>
+<span class="sd">            handler if the file system encoding is &#39;mbcs&#39; (which is the default</span>
+<span class="sd">            encoding).</span>
+<span class="sd">            &quot;&quot;&quot;</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">filename</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">filename</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">encoding</span><span class="p">,</span> <span class="n">errors</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;expect bytes or str, not </span><span class="si">%s</span><span class="s2">&quot;</span>
+                                <span class="o">%</span> <span class="nb">type</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">fsencode</span><span class="p">,</span> <span class="n">fsdecode</span>
+
+    <span class="n">fsencode</span><span class="p">,</span> <span class="n">fsdecode</span> <span class="o">=</span> <span class="n">_fscodec</span><span class="p">()</span>
+    <span class="k">del</span> <span class="n">_fscodec</span>
+
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+    <span class="nb">bytes</span> <span class="o">=</span> <span class="nb">bytes</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">_bytes</span> <span class="o">=</span> <span class="nb">bytes</span>
+
+    <span class="c1"># the &#39;bytes&#39; alias in Python2 does not support an encoding argument.</span>
+
+    <span class="k">class</span> <span class="nc">bytes</span><span class="p">(</span><span class="n">_bytes</span><span class="p">):</span>  <span class="c1"># noqa</span>
+
+        <span class="k">def</span> <span class="nf">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">args</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">_bytes</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+            <span class="k">return</span> <span class="n">_bytes</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">maybe_fileno</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get object fileno, or :const:`None` if not defined.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">numbers</span><span class="o">.</span><span class="n">Integral</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">f</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">f</span><span class="o">.</span><span class="n">fileno</span><span class="p">()</span>
+    <span class="k">except</span> <span class="n">FILENO_ERRORS</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<div class="viewcode-block" id="get_fdmax"><a class="viewcode-back" href="../../internals/reference/celery.platforms.html#celery.platforms.get_fdmax">[docs]</a><span class="k">def</span> <span class="nf">get_fdmax</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return the maximum number of open file descriptors</span>
+<span class="sd">    on this system.</span>
+
+<span class="sd">    :keyword default: Value returned if there&#39;s no file</span>
+<span class="sd">                      descriptor limit.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">sysconf</span><span class="p">(</span><span class="s1">&#39;SC_OPEN_MAX&#39;</span><span class="p">)</span>
+    <span class="k">except</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="k">if</span> <span class="n">resource</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>  <span class="c1"># Windows</span>
+        <span class="k">return</span> <span class="n">default</span>
+    <span class="n">fdmax</span> <span class="o">=</span> <span class="n">resource</span><span class="o">.</span><span class="n">getrlimit</span><span class="p">(</span><span class="n">resource</span><span class="o">.</span><span class="n">RLIMIT_NOFILE</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">fdmax</span> <span class="o">==</span> <span class="n">resource</span><span class="o">.</span><span class="n">RLIM_INFINITY</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">default</span>
+    <span class="k">return</span> <span class="n">fdmax</span></div>
+
+
+<span class="k">def</span> <span class="nf">uniq</span><span class="p">(</span><span class="n">it</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return all unique elements in ``it``, preserving order.&quot;&quot;&quot;</span>
+    <span class="n">seen</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="ow">or</span> <span class="n">obj</span> <span class="k">for</span> <span class="n">obj</span> <span class="ow">in</span> <span class="n">it</span> <span class="k">if</span> <span class="n">obj</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">)</span>
+
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">closerange</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">closerange</span>
+<span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+
+    <span class="k">def</span> <span class="nf">closerange</span><span class="p">(</span><span class="n">fd_low</span><span class="p">,</span> <span class="n">fd_high</span><span class="p">):</span>  <span class="c1"># noqa</span>
+        <span class="k">for</span> <span class="n">fd</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">fd_low</span><span class="p">,</span> <span class="n">fd_high</span><span class="p">)):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">exc</span><span class="o">.</span><span class="n">errno</span> <span class="o">!=</span> <span class="n">errno</span><span class="o">.</span><span class="n">EBADF</span><span class="p">:</span>
+                    <span class="k">raise</span>
+
+    <span class="k">def</span> <span class="nf">close_open_fds</span><span class="p">(</span><span class="n">keep</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="c1"># must make sure this is 0-inclusive (Issue #celery/1882)</span>
+        <span class="n">keep</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">uniq</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span>
+            <span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">map</span><span class="p">(</span><span class="n">maybe_fileno</span><span class="p">,</span> <span class="n">keep</span> <span class="ow">or</span> <span class="p">[])</span> <span class="k">if</span> <span class="n">f</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+        <span class="p">)))</span>
+        <span class="n">maxfd</span> <span class="o">=</span> <span class="n">get_fdmax</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+        <span class="n">kL</span><span class="p">,</span> <span class="n">kH</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">([</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">keep</span><span class="p">),</span> <span class="nb">iter</span><span class="p">(</span><span class="n">keep</span> <span class="o">+</span> <span class="p">[</span><span class="n">maxfd</span><span class="p">])</span>
+        <span class="k">for</span> <span class="n">low</span><span class="p">,</span> <span class="n">high</span> <span class="ow">in</span> <span class="n">zip_longest</span><span class="p">(</span><span class="n">kL</span><span class="p">,</span> <span class="n">kH</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">low</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">!=</span> <span class="n">high</span><span class="p">:</span>
+                <span class="n">closerange</span><span class="p">(</span><span class="n">low</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">high</span><span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+<div class="viewcode-block" id="close_open_fds"><a class="viewcode-back" href="../../internals/reference/celery.platforms.html#celery.platforms.close_open_fds">[docs]</a>    <span class="k">def</span> <span class="nf">close_open_fds</span><span class="p">(</span><span class="n">keep</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>  <span class="c1"># noqa</span>
+        <span class="n">keep</span> <span class="o">=</span> <span class="p">[</span><span class="n">maybe_fileno</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="n">keep</span> <span class="ow">or</span> <span class="p">[])</span> <span class="k">if</span> <span class="n">maybe_fileno</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">fd</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">get_fdmax</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mi">2048</span><span class="p">))):</span>
+            <span class="k">if</span> <span class="n">fd</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">keep</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">os</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">exc</span><span class="o">.</span><span class="n">errno</span> <span class="o">!=</span> <span class="n">errno</span><span class="o">.</span><span class="n">EBADF</span><span class="p">:</span>
+                        <span class="k">raise</span></div>
+
+
+<span class="k">def</span> <span class="nf">get_errno</span><span class="p">(</span><span class="n">exc</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;:exc:`socket.error` and :exc:`IOError` first got</span>
+<span class="sd">    the ``.errno`` attribute in Py2.7&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">exc</span><span class="o">.</span><span class="n">errno</span>
+    <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># e.args = (errno, reason)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="n">args</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="n">args</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">exc</span><span class="o">.</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">pass</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">_posixsubprocess</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">spawnv_passfds</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">passfds</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="o">!=</span> <span class="s1">&#39;win32&#39;</span><span class="p">:</span>
+            <span class="c1"># when not using _posixsubprocess (on earlier python) and not on</span>
+            <span class="c1"># windows, we want to keep stdout/stderr open...</span>
+            <span class="n">passfds</span> <span class="o">=</span> <span class="n">passfds</span> <span class="o">+</span> <span class="p">[</span>
+                <span class="n">maybe_fileno</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">),</span>
+                <span class="n">maybe_fileno</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">),</span>
+            <span class="p">]</span>
+        <span class="n">pid</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">fork</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">pid</span><span class="p">:</span>
+            <span class="n">close_open_fds</span><span class="p">(</span><span class="n">keep</span><span class="o">=</span><span class="nb">sorted</span><span class="p">(</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">passfds</span> <span class="k">if</span> <span class="n">f</span><span class="p">))</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">execv</span><span class="p">(</span><span class="n">fsencode</span><span class="p">(</span><span class="n">path</span><span class="p">),</span> <span class="n">args</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pid</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">spawnv_passfds</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">passfds</span><span class="p">):</span>
+        <span class="n">passfds</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">passfds</span><span class="p">)</span>
+        <span class="n">errpipe_read</span><span class="p">,</span> <span class="n">errpipe_write</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">pipe</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_posixsubprocess</span><span class="o">.</span><span class="n">fork_exec</span><span class="p">(</span>
+                <span class="n">args</span><span class="p">,</span> <span class="p">[</span><span class="n">fsencode</span><span class="p">(</span><span class="n">path</span><span class="p">)],</span> <span class="kc">True</span><span class="p">,</span> <span class="n">passfds</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">errpipe_read</span><span class="p">,</span> <span class="n">errpipe_write</span><span class="p">,</span>
+                <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">errpipe_read</span><span class="p">)</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">errpipe_write</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="o">==</span> <span class="s1">&#39;win32&#39;</span><span class="p">:</span>
+
+    <span class="k">def</span> <span class="nf">setblocking</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span> <span class="n">blocking</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;setblocking not implemented on win32&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">isblocking</span><span class="p">(</span><span class="n">handle</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s1">&#39;isblocking not implemented on win32&#39;</span><span class="p">)</span>
+
+<span class="k">else</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">os</span> <span class="k">import</span> <span class="n">O_NONBLOCK</span>
+    <span class="kn">from</span> <span class="nn">fcntl</span> <span class="k">import</span> <span class="n">fcntl</span><span class="p">,</span> <span class="n">F_GETFL</span><span class="p">,</span> <span class="n">F_SETFL</span>
+
+    <span class="k">def</span> <span class="nf">isblocking</span><span class="p">(</span><span class="n">handle</span><span class="p">):</span>  <span class="c1"># noqa</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="n">fcntl</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span> <span class="n">F_GETFL</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">O_NONBLOCK</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">setblocking</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span> <span class="n">blocking</span><span class="p">):</span>  <span class="c1"># noqa</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="n">fcntl</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span> <span class="n">F_GETFL</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">fcntl</span><span class="p">(</span>
+            <span class="n">handle</span><span class="p">,</span> <span class="n">F_SETFL</span><span class="p">,</span>
+            <span class="n">flags</span> <span class="o">&amp;</span> <span class="p">(</span><span class="o">~</span><span class="n">O_NONBLOCK</span><span class="p">)</span> <span class="k">if</span> <span class="n">blocking</span> <span class="k">else</span> <span class="n">flags</span> <span class="o">|</span> <span class="n">O_NONBLOCK</span><span class="p">,</span>
+        <span class="p">)</span>
+
+
+<span class="n">E_PSUTIL_MISSING</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">On Windows, the ability to inspect memory usage requires the psutil library.</span>
+
+<span class="s2">You can install it using pip:</span>
+
+<span class="s2">    $ pip install psutil</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="n">E_RESOURCE_MISSING</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">Your platform (</span><span class="si">{0}</span><span class="s2">) does not seem to have the `resource.getrusage&#39; function.</span>
+
+<span class="s2">Please open an issue so that we can add support for this platform.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="o">==</span> <span class="s1">&#39;win32&#39;</span><span class="p">:</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">psutil</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+        <span class="n">psutil</span> <span class="o">=</span> <span class="kc">None</span>    <span class="c1"># noqa</span>
+
+    <span class="k">def</span> <span class="nf">mem_rss</span><span class="p">():</span>
+        <span class="c1"># type () -&gt; int</span>
+        <span class="k">if</span> <span class="n">psutil</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="n">E_PSUTIL_MISSING</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">psutil</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">())</span><span class="o">.</span><span class="n">memory_info</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="mf">1024.0</span><span class="p">)</span>
+
+<span class="k">else</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span> <span class="nn">resource</span> <span class="k">import</span> <span class="n">getrusage</span><span class="p">,</span> <span class="n">RUSAGE_SELF</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+        <span class="n">getrusage</span> <span class="o">=</span> <span class="n">RUSAGE_SELF</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># noqa</span>
+
+    <span class="k">if</span> <span class="s1">&#39;bsd&#39;</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="ow">or</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="o">==</span> <span class="s1">&#39;darwin&#39;</span><span class="p">:</span>
+        <span class="c1"># On BSD platforms :man:`getrusage(2)` ru_maxrss field is in bytes.</span>
+
+        <span class="k">def</span> <span class="nf">maxrss_to_kb</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+            <span class="c1"># type: (SupportsInt) -&gt; int</span>
+            <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">/</span> <span class="mf">1024.0</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># On Linux it&#39;s kilobytes.</span>
+
+        <span class="k">def</span> <span class="nf">maxrss_to_kb</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+            <span class="c1"># type: (SupportsInt) -&gt; int</span>
+            <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">mem_rss</span><span class="p">():</span>
+        <span class="c1"># type () -&gt; int</span>
+        <span class="k">if</span> <span class="n">resource</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="n">E_RESOURCE_MISSING</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">platform</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">maxrss_to_kb</span><span class="p">(</span><span class="n">getrusage</span><span class="p">(</span><span class="n">RUSAGE_SELF</span><span class="p">)</span><span class="o">.</span><span class="n">ru_maxrss</span><span class="p">)</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../index.html">
+              <img class="logo" src="../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

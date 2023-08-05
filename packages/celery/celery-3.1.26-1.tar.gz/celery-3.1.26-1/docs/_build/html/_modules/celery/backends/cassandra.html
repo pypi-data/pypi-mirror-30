@@ -1,0 +1,345 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.backends.cassandra &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../backends.html" accesskey="U">celery.backends</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/backends/cassandra.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.backends.cassandra</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -* coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Apache Cassandra result store backend using the DataStax driver.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">sys</span>
+
+<span class="kn">from</span> <span class="nn">celery</span> <span class="k">import</span> <span class="n">states</span>
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="k">import</span> <span class="n">ImproperlyConfigured</span>
+<span class="kn">from</span> <span class="nn">celery.utils.log</span> <span class="k">import</span> <span class="n">get_logger</span>
+
+<span class="kn">from</span> <span class="nn">.base</span> <span class="k">import</span> <span class="n">BaseBackend</span>
+
+<span class="k">try</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="kn">import</span> <span class="nn">cassandra</span>
+    <span class="kn">import</span> <span class="nn">cassandra.auth</span>
+    <span class="kn">import</span> <span class="nn">cassandra.cluster</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="n">cassandra</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># noqa</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;CassandraBackend&#39;</span><span class="p">,)</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="n">E_NO_CASSANDRA</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">You need to install the cassandra-driver library to</span>
+<span class="s2">use the Cassandra backend.  See https://github.com/datastax/python-driver</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">E_NO_SUCH_CASSANDRA_AUTH_PROVIDER</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">CASSANDRA_AUTH_PROVIDER you provided is not a valid auth_provider class.</span>
+<span class="s2">See https://datastax.github.io/python-driver/api/cassandra/auth.html.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">Q_INSERT_RESULT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">INSERT INTO </span><span class="si">{table}</span><span class="s2"> (</span>
+<span class="s2">    task_id, status, result, date_done, traceback, children) VALUES (</span>
+<span class="s2">        </span><span class="si">%s</span><span class="s2">, </span><span class="si">%s</span><span class="s2">, </span><span class="si">%s</span><span class="s2">, </span><span class="si">%s</span><span class="s2">, </span><span class="si">%s</span><span class="s2">, </span><span class="si">%s</span><span class="s2">) </span><span class="si">{expires}</span><span class="s2">;</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">Q_SELECT_RESULT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">SELECT status, result, date_done, traceback, children</span>
+<span class="s2">FROM </span><span class="si">{table}</span><span class="s2"></span>
+<span class="s2">WHERE task_id=</span><span class="si">%s</span><span class="s2"></span>
+<span class="s2">LIMIT 1</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">Q_CREATE_RESULT_TABLE</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">CREATE TABLE </span><span class="si">{table}</span><span class="s2"> (</span>
+<span class="s2">    task_id text,</span>
+<span class="s2">    status text,</span>
+<span class="s2">    result blob,</span>
+<span class="s2">    date_done timestamp,</span>
+<span class="s2">    traceback blob,</span>
+<span class="s2">    children blob,</span>
+<span class="s2">    PRIMARY KEY ((task_id), date_done)</span>
+<span class="s2">) WITH CLUSTERING ORDER BY (date_done DESC);</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">Q_EXPIRES</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    USING TTL </span><span class="si">{0}</span><span class="s2"></span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">buf_t</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="s1">&#39;utf8&#39;</span><span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">buf_t</span> <span class="o">=</span> <span class="n">buffer</span>  <span class="c1"># noqa</span>
+
+
+<div class="viewcode-block" id="CassandraBackend"><a class="viewcode-back" href="../../../internals/reference/celery.backends.cassandra.html#celery.backends.cassandra.CassandraBackend">[docs]</a><span class="k">class</span> <span class="nc">CassandraBackend</span><span class="p">(</span><span class="n">BaseBackend</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Cassandra backend utilizing DataStax driver.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        celery.exceptions.ImproperlyConfigured:</span>
+<span class="sd">            if module :pypi:`cassandra-driver` is not available,</span>
+<span class="sd">            or if the :setting:`cassandra_servers` setting is not set.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1">#: List of Cassandra servers with format: ``hostname``.</span>
+    <span class="n">servers</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">supports_autoexpire</span> <span class="o">=</span> <span class="kc">True</span>      <span class="c1"># autoexpire supported via entry_ttl</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">servers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keyspace</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">table</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">entry_ttl</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">port</span><span class="o">=</span><span class="mi">9042</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">CassandraBackend</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cassandra</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">ImproperlyConfigured</span><span class="p">(</span><span class="n">E_NO_CASSANDRA</span><span class="p">)</span>
+
+        <span class="n">conf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">servers</span> <span class="o">=</span> <span class="n">servers</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_servers&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">port</span> <span class="o">=</span> <span class="n">port</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_port&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">keyspace</span> <span class="o">=</span> <span class="n">keyspace</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_keyspace&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">table</span> <span class="o">=</span> <span class="n">table</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_table&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cassandra_options</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_options&#39;</span><span class="p">,</span> <span class="p">{})</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">servers</span> <span class="ow">or</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">keyspace</span> <span class="ow">or</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">table</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">ImproperlyConfigured</span><span class="p">(</span><span class="s1">&#39;Cassandra backend not configured.&#39;</span><span class="p">)</span>
+
+        <span class="n">expires</span> <span class="o">=</span> <span class="n">entry_ttl</span> <span class="ow">or</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_entry_ttl&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">cqlexpires</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">Q_EXPIRES</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">expires</span><span class="p">)</span> <span class="k">if</span> <span class="n">expires</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+
+        <span class="n">read_cons</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_read_consistency&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;LOCAL_QUORUM&#39;</span>
+        <span class="n">write_cons</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_write_consistency&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;LOCAL_QUORUM&#39;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">read_consistency</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span>
+            <span class="n">cassandra</span><span class="o">.</span><span class="n">ConsistencyLevel</span><span class="p">,</span> <span class="n">read_cons</span><span class="p">,</span>
+            <span class="n">cassandra</span><span class="o">.</span><span class="n">ConsistencyLevel</span><span class="o">.</span><span class="n">LOCAL_QUORUM</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">write_consistency</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span>
+            <span class="n">cassandra</span><span class="o">.</span><span class="n">ConsistencyLevel</span><span class="p">,</span> <span class="n">write_cons</span><span class="p">,</span>
+            <span class="n">cassandra</span><span class="o">.</span><span class="n">ConsistencyLevel</span><span class="o">.</span><span class="n">LOCAL_QUORUM</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">auth_provider</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">auth_provider</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_auth_provider&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">auth_kwargs</span> <span class="o">=</span> <span class="n">conf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cassandra_auth_kwargs&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">auth_provider</span> <span class="ow">and</span> <span class="n">auth_kwargs</span><span class="p">:</span>
+            <span class="n">auth_provider_class</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">cassandra</span><span class="o">.</span><span class="n">auth</span><span class="p">,</span> <span class="n">auth_provider</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">auth_provider_class</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">ImproperlyConfigured</span><span class="p">(</span><span class="n">E_NO_SUCH_CASSANDRA_AUTH_PROVIDER</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">auth_provider</span> <span class="o">=</span> <span class="n">auth_provider_class</span><span class="p">(</span><span class="o">**</span><span class="n">auth_kwargs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_write_stmt</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_read_stmt</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_make_stmt</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="CassandraBackend.process_cleanup"><a class="viewcode-back" href="../../../internals/reference/celery.backends.cassandra.html#celery.backends.cassandra.CassandraBackend.process_cleanup">[docs]</a>    <span class="k">def</span> <span class="nf">process_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>  <span class="c1"># also shuts down _session</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_connection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">write</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Prepare the connection for action.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            write (bool): are we a writer?</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="o">=</span> <span class="n">cassandra</span><span class="o">.</span><span class="n">cluster</span><span class="o">.</span><span class="n">Cluster</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">servers</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="p">,</span>
+                <span class="n">auth_provider</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">auth_provider</span><span class="p">,</span>
+                <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">cassandra_options</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_session</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">keyspace</span><span class="p">)</span>
+
+            <span class="c1"># We&#39;re forced to do concatenation below, as formatting would</span>
+            <span class="c1"># blow up on superficial %s that&#39;ll be processed by Cassandra</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_write_stmt</span> <span class="o">=</span> <span class="n">cassandra</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">SimpleStatement</span><span class="p">(</span>
+                <span class="n">Q_INSERT_RESULT</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">table</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">table</span><span class="p">,</span> <span class="n">expires</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cqlexpires</span><span class="p">),</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_write_stmt</span><span class="o">.</span><span class="n">consistency_level</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">write_consistency</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_read_stmt</span> <span class="o">=</span> <span class="n">cassandra</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">SimpleStatement</span><span class="p">(</span>
+                <span class="n">Q_SELECT_RESULT</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">table</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">table</span><span class="p">),</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_read_stmt</span><span class="o">.</span><span class="n">consistency_level</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read_consistency</span>
+
+            <span class="k">if</span> <span class="n">write</span><span class="p">:</span>
+                <span class="c1"># Only possible writers &quot;workers&quot; are allowed to issue</span>
+                <span class="c1"># CREATE TABLE.  This is to prevent conflicting situations</span>
+                <span class="c1"># where both task-creator and task-executor would issue it</span>
+                <span class="c1"># at the same time.</span>
+
+                <span class="c1"># Anyway; if you&#39;re doing anything critical, you should</span>
+                <span class="c1"># have created this table in advance, in which case</span>
+                <span class="c1"># this query will be a no-op (AlreadyExists)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_make_stmt</span> <span class="o">=</span> <span class="n">cassandra</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">SimpleStatement</span><span class="p">(</span>
+                    <span class="n">Q_CREATE_RESULT_TABLE</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">table</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">table</span><span class="p">),</span>
+                <span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_make_stmt</span><span class="o">.</span><span class="n">consistency_level</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">write_consistency</span>
+
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_make_stmt</span><span class="p">)</span>
+                <span class="k">except</span> <span class="n">cassandra</span><span class="o">.</span><span class="n">AlreadyExists</span><span class="p">:</span>
+                    <span class="k">pass</span>
+
+        <span class="k">except</span> <span class="n">cassandra</span><span class="o">.</span><span class="n">OperationTimedOut</span><span class="p">:</span>
+            <span class="c1"># a heavily loaded or gone Cassandra cluster failed to respond.</span>
+            <span class="c1"># leave this class in a consistent state</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>     <span class="c1"># also shuts down _session</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connection</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_session</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">raise</span>   <span class="c1"># we did fail after all - reraise</span>
+
+    <span class="k">def</span> <span class="nf">_store_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span>
+                      <span class="n">traceback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Store return value and state of an executed task.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_connection</span><span class="p">(</span><span class="n">write</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_write_stmt</span><span class="p">,</span> <span class="p">(</span>
+            <span class="n">task_id</span><span class="p">,</span>
+            <span class="n">state</span><span class="p">,</span>
+            <span class="n">buf_t</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">result</span><span class="p">)),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span>
+            <span class="n">buf_t</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">traceback</span><span class="p">)),</span>
+            <span class="n">buf_t</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">current_task_children</span><span class="p">(</span><span class="n">request</span><span class="p">)))</span>
+        <span class="p">))</span>
+
+<div class="viewcode-block" id="CassandraBackend.as_uri"><a class="viewcode-back" href="../../../internals/reference/celery.backends.cassandra.html#celery.backends.cassandra.CassandraBackend.as_uri">[docs]</a>    <span class="k">def</span> <span class="nf">as_uri</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">include_password</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;cassandra://&#39;</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_task_meta_for</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get task meta-data for a task by id.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_connection</span><span class="p">()</span>
+
+        <span class="n">res</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_read_stmt</span><span class="p">,</span> <span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="p">))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">res</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">states</span><span class="o">.</span><span class="n">PENDING</span><span class="p">,</span> <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span>
+
+        <span class="n">status</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">date_done</span><span class="p">,</span> <span class="n">traceback</span><span class="p">,</span> <span class="n">children</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">meta_from_decoded</span><span class="p">({</span>
+            <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+            <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">status</span><span class="p">,</span>
+            <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">result</span><span class="p">),</span>
+            <span class="s1">&#39;date_done&#39;</span><span class="p">:</span> <span class="n">date_done</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%SZ&#39;</span><span class="p">),</span>
+            <span class="s1">&#39;traceback&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">traceback</span><span class="p">),</span>
+            <span class="s1">&#39;children&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">children</span><span class="p">),</span>
+        <span class="p">})</span>
+
+    <span class="k">def</span> <span class="nf">__reduce__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(),</span> <span class="n">kwargs</span><span class="o">=</span><span class="p">{}):</span>
+        <span class="n">kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+            <span class="p">{</span><span class="s1">&#39;servers&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">servers</span><span class="p">,</span>
+             <span class="s1">&#39;keyspace&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">keyspace</span><span class="p">,</span>
+             <span class="s1">&#39;table&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">table</span><span class="p">})</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">CassandraBackend</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__reduce__</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../backends.html" >celery.backends</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

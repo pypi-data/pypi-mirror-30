@@ -1,0 +1,479 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>celery.app.defaults &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../../../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../../../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="copyright" title="Copyright" href="../../../copyright.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/_modules/celery/app/defaults.html">go here</a>.
+        </p>
+    
+
+</div>
+    <h1>Source code for celery.app.defaults</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Configuration introspection and defaults.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">deque</span><span class="p">,</span> <span class="n">namedtuple</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">timedelta</span>
+
+<span class="kn">from</span> <span class="nn">celery.five</span> <span class="k">import</span> <span class="n">items</span><span class="p">,</span> <span class="n">keys</span><span class="p">,</span> <span class="n">python_2_unicode_compatible</span>
+<span class="kn">from</span> <span class="nn">celery.utils.functional</span> <span class="k">import</span> <span class="n">memoize</span>
+<span class="kn">from</span> <span class="nn">celery.utils.serialization</span> <span class="k">import</span> <span class="n">strtobool</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;Option&#39;</span><span class="p">,</span> <span class="s1">&#39;NAMESPACES&#39;</span><span class="p">,</span> <span class="s1">&#39;flatten&#39;</span><span class="p">,</span> <span class="s1">&#39;find&#39;</span><span class="p">)</span>
+
+<span class="n">is_jython</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;java&#39;</span><span class="p">)</span>
+<span class="n">is_pypy</span> <span class="o">=</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span> <span class="s1">&#39;pypy_version_info&#39;</span><span class="p">)</span>
+
+<span class="n">DEFAULT_POOL</span> <span class="o">=</span> <span class="s1">&#39;prefork&#39;</span>
+<span class="k">if</span> <span class="n">is_jython</span><span class="p">:</span>
+    <span class="n">DEFAULT_POOL</span> <span class="o">=</span> <span class="s1">&#39;solo&#39;</span>
+<span class="k">elif</span> <span class="n">is_pypy</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">pypy_version_info</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="n">DEFAULT_POOL</span> <span class="o">=</span> <span class="s1">&#39;solo&#39;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">DEFAULT_POOL</span> <span class="o">=</span> <span class="s1">&#39;prefork&#39;</span>
+
+<span class="n">DEFAULT_ACCEPT_CONTENT</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;json&#39;</span><span class="p">]</span>
+<span class="n">DEFAULT_PROCESS_LOG_FMT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    [</span><span class="si">%(asctime)s</span><span class="s2">: </span><span class="si">%(levelname)s</span><span class="s2">/</span><span class="si">%(processName)s</span><span class="s2">] </span><span class="si">%(message)s</span><span class="s2"></span>
+<span class="s2">&quot;&quot;&quot;</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+<span class="n">DEFAULT_TASK_LOG_FMT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;[</span><span class="si">%(asctime)s</span><span class="s2">: </span><span class="si">%(levelname)s</span><span class="s2">/</span><span class="si">%(processName)s</span><span class="s2">] </span><span class="se">\</span>
+<span class="si">%(task_name)s</span><span class="s2">[</span><span class="si">%(task_id)s</span><span class="s2">]: </span><span class="si">%(message)s</span><span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">OLD_NS</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celery_</span><span class="si">{0}</span><span class="s1">&#39;</span><span class="p">}</span>
+<span class="n">OLD_NS_BEAT</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celerybeat_</span><span class="si">{0}</span><span class="s1">&#39;</span><span class="p">}</span>
+<span class="n">OLD_NS_WORKER</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;celeryd_</span><span class="si">{0}</span><span class="s1">&#39;</span><span class="p">}</span>
+
+<span class="n">searchresult</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s1">&#39;searchresult&#39;</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;namespace&#39;</span><span class="p">,</span> <span class="s1">&#39;key&#39;</span><span class="p">,</span> <span class="s1">&#39;type&#39;</span><span class="p">))</span>
+
+
+<span class="k">def</span> <span class="nf">Namespace</span><span class="p">(</span><span class="n">__old__</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">__old__</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">options</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">opt</span><span class="o">.</span><span class="n">old</span><span class="p">:</span>
+                <span class="n">opt</span><span class="o">.</span><span class="n">old</span> <span class="o">=</span> <span class="p">{</span><span class="n">o</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">__old__</span><span class="p">}</span>
+    <span class="k">return</span> <span class="n">options</span>
+
+
+<span class="k">def</span> <span class="nf">old_ns</span><span class="p">(</span><span class="n">ns</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;</span><span class="si">{0}</span><span class="s1">_{{0}}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">ns</span><span class="p">)}</span>
+
+
+<div class="viewcode-block" id="Option"><a class="viewcode-back" href="../../../reference/celery.app.defaults.html#celery.app.defaults.Option">[docs]</a><span class="nd">@python_2_unicode_compatible</span>
+<span class="k">class</span> <span class="nc">Option</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Decribes a Celery configuration option.&quot;&quot;&quot;</span>
+
+    <span class="n">alt</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">deprecate_by</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">remove_by</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">old</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">typemap</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;string&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="s1">&#39;int&#39;</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="s1">&#39;float&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="s1">&#39;any&#39;</span><span class="p">:</span> <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">v</span><span class="p">,</span>
+               <span class="s1">&#39;bool&#39;</span><span class="p">:</span> <span class="n">strtobool</span><span class="p">,</span> <span class="s1">&#39;dict&#39;</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="s1">&#39;tuple&#39;</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">default</span> <span class="o">=</span> <span class="n">default</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;string&#39;</span>
+        <span class="k">for</span> <span class="n">attr</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attr</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Option.to_python"><a class="viewcode-back" href="../../../reference/celery.app.defaults.html#celery.app.defaults.Option.to_python">[docs]</a>    <span class="k">def</span> <span class="nf">to_python</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">typemap</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">](</span><span class="n">value</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;&lt;Option: type-&gt;</span><span class="si">{0}</span><span class="s1"> default-&gt;</span><span class="si">{1!r}</span><span class="s1">&gt;&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="p">,</span>
+                                                           <span class="bp">self</span><span class="o">.</span><span class="n">default</span><span class="p">)</span></div>
+
+
+<span class="n">NAMESPACES</span> <span class="o">=</span> <span class="n">Namespace</span><span class="p">(</span>
+    <span class="n">accept_content</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="n">DEFAULT_ACCEPT_CONTENT</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;list&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="n">OLD_NS</span><span class="p">),</span>
+    <span class="n">enable_utc</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+    <span class="n">imports</span><span class="o">=</span><span class="n">Option</span><span class="p">((),</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;tuple&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="n">OLD_NS</span><span class="p">),</span>
+    <span class="n">include</span><span class="o">=</span><span class="n">Option</span><span class="p">((),</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;tuple&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="n">OLD_NS</span><span class="p">),</span>
+    <span class="n">timezone</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="n">OLD_NS</span><span class="p">),</span>
+    <span class="n">beat</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">OLD_NS_BEAT</span><span class="p">,</span>
+
+        <span class="n">max_loop_interval</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+        <span class="n">schedule</span><span class="o">=</span><span class="n">Option</span><span class="p">({},</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+        <span class="n">scheduler</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;celery.beat:PersistentScheduler&#39;</span><span class="p">),</span>
+        <span class="n">schedule_filename</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;celerybeat-schedule&#39;</span><span class="p">),</span>
+        <span class="n">sync_every</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">broker</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">url</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">read_url</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">write_url</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">transport</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">transport_options</span><span class="o">=</span><span class="n">Option</span><span class="p">({},</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+        <span class="n">connection_timeout</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+        <span class="n">connection_retry</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">connection_max_retries</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">failover_strategy</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">heartbeat</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">120</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">heartbeat_checkrate</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">3.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">login_method</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">pool_limit</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">use_ssl</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+
+        <span class="n">host</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">port</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">user</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">password</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">vhost</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">cache</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_cache&#39;</span><span class="p">),</span>
+
+        <span class="n">backend</span><span class="o">=</span><span class="n">Option</span><span class="p">(),</span>
+        <span class="n">backend_options</span><span class="o">=</span><span class="n">Option</span><span class="p">({},</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">cassandra</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">entry_ttl</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+        <span class="n">keyspace</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">port</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">read_consistency</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">servers</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;list&#39;</span><span class="p">),</span>
+        <span class="n">table</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">write_consistency</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">auth_provider</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">auth_kwargs</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">options</span><span class="o">=</span><span class="n">Option</span><span class="p">({},</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">control</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">queue_ttl</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">300.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+        <span class="n">queue_expires</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">10.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">couchbase</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_couchbase&#39;</span><span class="p">),</span>
+
+        <span class="n">backend_settings</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">mongodb</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_mongodb&#39;</span><span class="p">),</span>
+
+        <span class="n">backend_settings</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">event</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_event&#39;</span><span class="p">),</span>
+
+        <span class="n">queue_expires</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">60.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+        <span class="n">queue_ttl</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">5.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+        <span class="n">queue_prefix</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;celeryev&#39;</span><span class="p">),</span>
+        <span class="n">serializer</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;json&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">redis</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_redis&#39;</span><span class="p">),</span>
+
+        <span class="n">backend_use_ssl</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+        <span class="n">db</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">host</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">max_connections</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">password</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">port</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">socket_timeout</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">120.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+        <span class="n">socket_connect_timeout</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">result</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_result&#39;</span><span class="p">),</span>
+
+        <span class="n">backend</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">cache_max</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="o">-</span><span class="mi">1</span><span class="p">,</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_max_cached_results&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">compression</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;str&#39;</span><span class="p">),</span>
+        <span class="n">exchange</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;celeryresults&#39;</span><span class="p">),</span>
+        <span class="n">exchange_type</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;direct&#39;</span><span class="p">),</span>
+        <span class="n">expires</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_task_result_expires&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">persistent</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">serializer</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;json&#39;</span><span class="p">),</span>
+        <span class="n">backend_transport_options</span><span class="o">=</span><span class="n">Option</span><span class="p">({},</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">elasticsearch</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_elasticsearch&#39;</span><span class="p">),</span>
+
+        <span class="n">retry_on_timeout</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">max_retries</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">timeout</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">riak</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_riak&#39;</span><span class="p">),</span>
+
+        <span class="n">backend_settings</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">security</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">old_ns</span><span class="p">(</span><span class="s1">&#39;celery_security&#39;</span><span class="p">),</span>
+
+        <span class="n">certificate</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">cert_store</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">key</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">database</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">url</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_result_dburi&#39;</span><span class="p">}),</span>
+        <span class="n">engine_options</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_result_engine_options&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">short_lived_sessions</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_result_db_short_lived_sessions&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">table_names</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_result_db_tablenames&#39;</span><span class="p">}),</span>
+    <span class="p">),</span>
+    <span class="n">task</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">OLD_NS</span><span class="p">,</span>
+        <span class="n">acks_late</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">always_eager</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">annotations</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;any&#39;</span><span class="p">),</span>
+        <span class="n">compression</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_message_compression&#39;</span><span class="p">}),</span>
+        <span class="n">create_missing_queues</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">default_delivery_mode</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">default_queue</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;celery&#39;</span><span class="p">),</span>
+        <span class="n">default_exchange</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>  <span class="c1"># taken from queue</span>
+        <span class="n">default_exchange_type</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;direct&#39;</span><span class="p">),</span>
+        <span class="n">default_routing_key</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>  <span class="c1"># taken from queue</span>
+        <span class="n">default_rate_limit</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">eager_propagates</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_eager_propagates_exceptions&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">ignore_result</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">protocol</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_task_protocol&#39;</span><span class="p">}),</span>
+        <span class="n">publish_retry</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_task_publish_retry&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">publish_retry_policy</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="p">{</span><span class="s1">&#39;max_retries&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+             <span class="s1">&#39;interval_start&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+             <span class="s1">&#39;interval_max&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+             <span class="s1">&#39;interval_step&#39;</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">},</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_task_publish_retry_policy&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">queues</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;dict&#39;</span><span class="p">),</span>
+        <span class="n">queue_ha_policy</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">queue_max_priority</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">reject_on_worker_lost</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">remote_tracebacks</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">routes</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;any&#39;</span><span class="p">),</span>
+        <span class="n">send_sent_event</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_send_task_sent_event&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">serializer</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;json&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_task_serializer&#39;</span><span class="p">}),</span>
+        <span class="n">soft_time_limit</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celeryd_task_soft_time_limit&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">time_limit</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celeryd_task_time_limit&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">store_errors_even_if_ignored</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">track_started</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">worker</span><span class="o">=</span><span class="n">Namespace</span><span class="p">(</span>
+        <span class="n">__old__</span><span class="o">=</span><span class="n">OLD_NS_WORKER</span><span class="p">,</span>
+        <span class="n">agent</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">autoscaler</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;celery.worker.autoscale:Autoscaler&#39;</span><span class="p">),</span>
+        <span class="n">concurrency</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">consumer</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="s1">&#39;celery.worker.consumer:Consumer&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">direct</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_worker_direct&#39;</span><span class="p">}),</span>
+        <span class="n">disable_rate_limits</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_disable_rate_limits&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">enable_remote_control</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_enable_remote_control&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">hijack_root_logger</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">log_color</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">log_format</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="n">DEFAULT_PROCESS_LOG_FMT</span><span class="p">),</span>
+        <span class="n">lost_wait</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">10.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celeryd_worker_lost_wait&#39;</span><span class="p">}),</span>
+        <span class="n">max_memory_per_child</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">max_tasks_per_child</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">pool</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="n">DEFAULT_POOL</span><span class="p">),</span>
+        <span class="n">pool_putlocks</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">pool_restarts</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">),</span>
+        <span class="n">prefetch_multiplier</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;int&#39;</span><span class="p">),</span>
+        <span class="n">redirect_stdouts</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">True</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_redirect_stdouts&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">redirect_stdouts_level</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="s1">&#39;WARNING&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_redirect_stdouts_level&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">send_task_events</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span>
+            <span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="n">old</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;celery_send_events&#39;</span><span class="p">},</span>
+        <span class="p">),</span>
+        <span class="n">state_db</span><span class="o">=</span><span class="n">Option</span><span class="p">(),</span>
+        <span class="n">task_log_format</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="n">DEFAULT_TASK_LOG_FMT</span><span class="p">),</span>
+        <span class="n">timer</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s1">&#39;string&#39;</span><span class="p">),</span>
+        <span class="n">timer_precision</span><span class="o">=</span><span class="n">Option</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;float&#39;</span><span class="p">),</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_flatten_keys</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">[(</span><span class="n">ns</span> <span class="o">+</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span><span class="p">)]</span>
+
+
+<span class="k">def</span> <span class="nf">_to_compat</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">opt</span><span class="o">.</span><span class="n">old</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">oldkey</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">(),</span> <span class="n">ns</span> <span class="o">+</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">oldkey</span> <span class="ow">in</span> <span class="n">opt</span><span class="o">.</span><span class="n">old</span>
+        <span class="p">]</span>
+    <span class="k">return</span> <span class="p">[((</span><span class="n">ns</span> <span class="o">+</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">(),</span> <span class="n">ns</span> <span class="o">+</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span><span class="p">)]</span>
+
+
+<div class="viewcode-block" id="flatten"><a class="viewcode-back" href="../../../reference/celery.app.defaults.html#celery.app.defaults.flatten">[docs]</a><span class="k">def</span> <span class="nf">flatten</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">keyfilter</span><span class="o">=</span><span class="n">_flatten_keys</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Flatten settings.&quot;&quot;&quot;</span>
+    <span class="n">stack</span> <span class="o">=</span> <span class="n">deque</span><span class="p">([(</span><span class="n">root</span><span class="p">,</span> <span class="n">d</span><span class="p">)])</span>
+    <span class="k">while</span> <span class="n">stack</span><span class="p">:</span>
+        <span class="n">ns</span><span class="p">,</span> <span class="n">options</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">popleft</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">options</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">opt</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                <span class="n">stack</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">ns</span> <span class="o">+</span> <span class="n">key</span> <span class="o">+</span> <span class="s1">&#39;_&#39;</span><span class="p">,</span> <span class="n">opt</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">ret</span> <span class="ow">in</span> <span class="n">keyfilter</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span><span class="p">):</span>
+                    <span class="k">yield</span> <span class="n">ret</span></div>
+
+
+<span class="n">DEFAULTS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">key</span><span class="p">:</span> <span class="n">opt</span><span class="o">.</span><span class="n">default</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">flatten</span><span class="p">(</span><span class="n">NAMESPACES</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="n">__compat</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">flatten</span><span class="p">(</span><span class="n">NAMESPACES</span><span class="p">,</span> <span class="n">keyfilter</span><span class="o">=</span><span class="n">_to_compat</span><span class="p">))</span>
+<span class="n">_OLD_DEFAULTS</span> <span class="o">=</span> <span class="p">{</span><span class="n">old_key</span><span class="p">:</span> <span class="n">opt</span><span class="o">.</span><span class="n">default</span> <span class="k">for</span> <span class="n">old_key</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">__compat</span><span class="p">}</span>
+<span class="n">_TO_OLD_KEY</span> <span class="o">=</span> <span class="p">{</span><span class="n">new_key</span><span class="p">:</span> <span class="n">old_key</span> <span class="k">for</span> <span class="n">old_key</span><span class="p">,</span> <span class="n">new_key</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">__compat</span><span class="p">}</span>
+<span class="n">_TO_NEW_KEY</span> <span class="o">=</span> <span class="p">{</span><span class="n">old_key</span><span class="p">:</span> <span class="n">new_key</span> <span class="k">for</span> <span class="n">old_key</span><span class="p">,</span> <span class="n">new_key</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">__compat</span><span class="p">}</span>
+<span class="n">__compat</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="n">SETTING_KEYS</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">keys</span><span class="p">(</span><span class="n">DEFAULTS</span><span class="p">))</span>
+<span class="n">_OLD_SETTING_KEYS</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">keys</span><span class="p">(</span><span class="n">_TO_NEW_KEY</span><span class="p">))</span>
+
+
+<span class="k">def</span> <span class="nf">find_deprecated_settings</span><span class="p">(</span><span class="n">source</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+    <span class="kn">from</span> <span class="nn">celery.utils</span> <span class="k">import</span> <span class="n">deprecated</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">flatten</span><span class="p">(</span><span class="n">NAMESPACES</span><span class="p">):</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">opt</span><span class="o">.</span><span class="n">deprecate_by</span> <span class="ow">or</span> <span class="n">opt</span><span class="o">.</span><span class="n">remove_by</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span>
+            <span class="n">deprecated</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s1">&#39;The </span><span class="si">{0!r}</span><span class="s1"> setting&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">name</span><span class="p">),</span>
+                            <span class="n">deprecation</span><span class="o">=</span><span class="n">opt</span><span class="o">.</span><span class="n">deprecate_by</span><span class="p">,</span>
+                            <span class="n">removal</span><span class="o">=</span><span class="n">opt</span><span class="o">.</span><span class="n">remove_by</span><span class="p">,</span>
+                            <span class="n">alternative</span><span class="o">=</span><span class="s1">&#39;Use the </span><span class="si">{0.alt}</span><span class="s1"> instead&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">opt</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">source</span>
+
+
+<div class="viewcode-block" id="find"><a class="viewcode-back" href="../../../reference/celery.app.defaults.html#celery.app.defaults.find">[docs]</a><span class="nd">@memoize</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">find</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="s1">&#39;celery&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Find setting by name.&quot;&quot;&quot;</span>
+    <span class="c1"># - Try specified name-space first.</span>
+    <span class="n">namespace</span> <span class="o">=</span> <span class="n">namespace</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">searchresult</span><span class="p">(</span>
+            <span class="n">namespace</span><span class="p">,</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">(),</span> <span class="n">NAMESPACES</span><span class="p">[</span><span class="n">namespace</span><span class="p">][</span><span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()],</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+        <span class="c1"># - Try all the other namespaces.</span>
+        <span class="k">for</span> <span class="n">ns</span><span class="p">,</span> <span class="n">opts</span> <span class="ow">in</span> <span class="n">items</span><span class="p">(</span><span class="n">NAMESPACES</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">ns</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">searchresult</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">ns</span><span class="p">,</span> <span class="n">opts</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">opts</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">searchresult</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">(),</span> <span class="n">opts</span><span class="p">[</span><span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()])</span>
+                <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                    <span class="k">pass</span>
+    <span class="c1"># - See if name is a qualname last.</span>
+    <span class="k">return</span> <span class="n">searchresult</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">(),</span> <span class="n">DEFAULTS</span><span class="p">[</span><span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()])</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../../../index.html">
+              <img class="logo" src="../../../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHTwYJKoZIhvcNAQcEoIIHQDCCBzwCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYA2+c723xlntHKQYQR9yn9BEtUhDoUUlnOqhniqvNMWB4k2R0JpVkrNSu5JCbdjNOqDXKHoRfIWe3HXJJMPZBJKFMD5Izprb6xEZlTGaWnlrGXFfkdBaILQQgWYqV0DnuNmtDXCvfYmyu0p1K04wLjAJ1ufnBSP1UaS6BTcoIOOuTELMAkGBSsOAwIaBQAwgcwGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIFg/2qPwa7UCAgah20QLIllcp0VHazYo2C9h8c6gn8MTcTnpW0WFXhz9ylc/i5dCXabkrrLBBfg8NygAuvYRr4k1zdC0AJIgsV/6rSAhehabRvjRDH2EZ8OieqHfIPfkAcTm+JqbS6Z27lXkebYPnJzhkZxW7+ZC6hU/H40JFXChTag8lhqJfZELiOZLWxxilj2mkwlkdMx1YL6lcPAA7ajpAwjsnJYd/9VxLA6MDmcOu+TKgggOHMIIDgzCCAuygAwIBAgIBADANBgkqhkiG9w0BAQUFADCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wHhcNMDQwMjEzMTAxMzE1WhcNMzUwMjEzMTAxMzE1WjCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMFHTt38RMxLXJyO2SmS+Ndl72T7oKJ4u4uw+6awntALWh03PewmIJuzbALScsTS4sZoS1fKciBGoh11gIfHzylvkdNe/hJl66/RGqrj5rFb08sAABNTzDTiqqNpJeBsYs/c2aiGozptX2RlnBktH+SUNpAajW724Nv2Wvhif6sFAgMBAAGjge4wgeswHQYDVR0OBBYEFJaffLvGbxe9WT9S1wob7BDWZJRrMIG7BgNVHSMEgbMwgbCAFJaffLvGbxe9WT9S1wob7BDWZJRroYGUpIGRMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbYIBADAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBQUAA4GBAIFfOlaagFrl71+jq6OKidbWFSE+Q4FqROvdgIONth+8kSK//Y/4ihuE4Ymvzn5ceE3S/iBSQQMjyvb+s2TWbQYDwcp129OPIbD9epdr4tJOUNiSojw7BHwYRiPh58S1xGlFgHFXwrEBb3dgNbMUa+u4qectsMAXpVHnD9wIyfmHMYIBmjCCAZYCAQEwgZQwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tAgEAMAkGBSsOAwIaBQCgXTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNTEyMTAxOTEzMzBaMCMGCSqGSIb3DQEJBDEWBBTUno4gI/mmaVaGVpgB/CWwQd3DeDANBgkqhkiG9w0BAQEFAASBgFmZ1j1Ss/FNl/JRIOakhBJEdm2KGLH0d2ewwTYIgIkEKSdc5Rg2/2xFS/dglcs5Te3R2GzaqjGlNSKldsk/MgZP/BudpHAASQ09hrfDy5TaBlRRl1Yu0WzGBKcVm/WRh0v2TVV8vBHVGiJD+aY5epgRXXI/XUKD0bp8tVV1T7LS-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../../../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>

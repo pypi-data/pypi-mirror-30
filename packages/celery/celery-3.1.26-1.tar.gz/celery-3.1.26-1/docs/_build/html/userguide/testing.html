@@ -1,0 +1,425 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Testing with Celery &#8212; Celery 4.2.0 documentation</title>
+    <link rel="stylesheet" href="../_static/celery.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="shortcut icon" href="../_static/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="copyright" title="Copyright" href="../copyright.html" />
+    <link rel="next" title="Extensions and Bootsteps" href="extending.html" />
+    <link rel="prev" title="Signals" href="signals.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="extending.html" title="Extensions and Bootsteps"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="signals.html" title="Signals"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">User Guide</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+<div class="deck">
+
+    
+        <p>
+        This document describes the current stable version of Celery (4.2).
+        For development docs,
+        <a href="http://docs.celeryproject.org/en/master/userguide/testing.html">go here</a>.
+        </p>
+    
+
+</div>
+    <div class="section" id="testing-with-celery">
+<span id="testing"></span><h1>Testing with Celery<a class="headerlink" href="#testing-with-celery" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="tasks-and-unit-tests">
+<h2>Tasks and unit tests<a class="headerlink" href="#tasks-and-unit-tests" title="Permalink to this headline">¶</a></h2>
+<p>To test task behavior in unit tests the preferred method is mocking.</p>
+<div class="admonition-eager-mode admonition">
+<p class="first admonition-title">Eager mode</p>
+<p>The eager mode enabled by the <a class="reference internal" href="configuration.html#std:setting-task_always_eager"><code class="xref std std-setting docutils literal notranslate"><span class="pre">task_always_eager</span></code></a> setting
+is by definition not suitable for unit tests.</p>
+<p class="last">When testing with eager mode you are only testing an emulation
+of what happens in a worker, and there are many discrepancies
+between the emulation and what happens in reality.</p>
+</div>
+<p>A Celery task is much like a web view, in that it should only
+define how to perform the action in the context of being called as a task.</p>
+<p>This means optimally tasks only handle things like serialization, message headers,
+retries, and so on, with the actual logic implemented elsewhere.</p>
+<p>Say we had a task like this:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">.models</span> <span class="kn">import</span> <span class="n">Product</span>
+
+
+<span class="nd">@app.task</span><span class="p">(</span><span class="n">bind</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">send_order</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">product_pk</span><span class="p">,</span> <span class="n">quantity</span><span class="p">,</span> <span class="n">price</span><span class="p">):</span>
+    <span class="n">price</span> <span class="o">=</span> <span class="n">Decimal</span><span class="p">(</span><span class="n">price</span><span class="p">)</span>  <span class="c1"># json serializes this to string.</span>
+
+    <span class="c1"># models are passed by id, not serialized.</span>
+    <span class="n">product</span> <span class="o">=</span> <span class="n">Product</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">product_pk</span><span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">product</span><span class="o">.</span><span class="n">order</span><span class="p">(</span><span class="n">quantity</span><span class="p">,</span> <span class="n">price</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">OperationalError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="bp">self</span><span class="o">.</span><span class="n">retry</span><span class="p">(</span><span class="n">exc</span><span class="o">=</span><span class="n">exc</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>You could write unit tests for this task, using mocking like
+in this example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">pytest</span> <span class="kn">import</span> <span class="n">raises</span>
+
+<span class="kn">from</span> <span class="nn">celery.exceptions</span> <span class="kn">import</span> <span class="n">Retry</span>
+
+<span class="c1"># for python 2: use mock.patch from `pip install mock`.</span>
+<span class="kn">from</span> <span class="nn">unittest.mock</span> <span class="kn">import</span> <span class="n">patch</span>
+
+<span class="kn">from</span> <span class="nn">proj.models</span> <span class="kn">import</span> <span class="n">Product</span>
+<span class="kn">from</span> <span class="nn">proj.tasks</span> <span class="kn">import</span> <span class="n">send_order</span>
+
+<span class="k">class</span> <span class="nc">test_send_order</span><span class="p">:</span>
+
+    <span class="nd">@patch</span><span class="p">(</span><span class="s1">&#39;proj.tasks.Product.order&#39;</span><span class="p">)</span>  <span class="c1"># &lt; patching Product in module above</span>
+    <span class="k">def</span> <span class="nf">test_success</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">product_order</span><span class="p">):</span>
+        <span class="n">product</span> <span class="o">=</span> <span class="n">Product</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">name</span><span class="o">=</span><span class="s1">&#39;Foo&#39;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">send_order</span><span class="p">(</span><span class="n">product</span><span class="o">.</span><span class="n">pk</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">Decimal</span><span class="p">(</span><span class="mf">30.3</span><span class="p">))</span>
+        <span class="n">product_order</span><span class="o">.</span><span class="n">assert_called_with</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="n">Decimal</span><span class="p">(</span><span class="mf">30.3</span><span class="p">))</span>
+
+    <span class="nd">@patch</span><span class="p">(</span><span class="s1">&#39;proj.tasks.Product.order&#39;</span><span class="p">)</span>
+    <span class="nd">@patch</span><span class="p">(</span><span class="s1">&#39;proj.tasks.send_order.retry&#39;</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">test_failure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">send_order_retry</span><span class="p">,</span> <span class="n">product_order</span><span class="p">):</span>
+        <span class="n">product</span> <span class="o">=</span> <span class="n">Product</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">name</span><span class="o">=</span><span class="s1">&#39;Foo&#39;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Set a side effect on the patched methods</span>
+        <span class="c1"># so that they raise the errors we want.</span>
+        <span class="n">send_order_retry</span><span class="o">.</span><span class="n">side_effect</span> <span class="o">=</span> <span class="n">Retry</span><span class="p">()</span>
+        <span class="n">product_order</span><span class="o">.</span><span class="n">side_effect</span> <span class="o">=</span> <span class="n">OperationalError</span><span class="p">()</span>
+
+        <span class="k">with</span> <span class="n">raises</span><span class="p">(</span><span class="n">Retry</span><span class="p">):</span>
+            <span class="n">send_order</span><span class="p">(</span><span class="n">product</span><span class="o">.</span><span class="n">pk</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">Decimal</span><span class="p">(</span><span class="mf">30.6</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="py-test">
+<h2>Py.test<a class="headerlink" href="#py-test" title="Permalink to this headline">¶</a></h2>
+<div class="versionadded">
+<p><span class="versionmodified">New in version 4.0.</span></p>
+</div>
+<p>Celery is also a <a class="reference external" href="https://pypi.python.org/pypi/pytest/">pytest</a> plugin that adds fixtures that you can
+use in your integration (or unit) test suites.</p>
+<div class="section" id="marks">
+<h3>Marks<a class="headerlink" href="#marks" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="celery-set-test-app-configuration">
+<h4><code class="docutils literal notranslate"><span class="pre">celery</span></code> - Set test app configuration.<a class="headerlink" href="#celery-set-test-app-configuration" title="Permalink to this headline">¶</a></h4>
+<p>The <code class="docutils literal notranslate"><span class="pre">celery</span></code> mark enables you to override the configuration
+used for a single test case:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.mark.celery</span><span class="p">(</span><span class="n">result_backend</span><span class="o">=</span><span class="s1">&#39;redis://&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">test_something</span><span class="p">():</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p>or for all the test cases in a class:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.mark.celery</span><span class="p">(</span><span class="n">result_backend</span><span class="o">=</span><span class="s1">&#39;redis://&#39;</span><span class="p">)</span>
+<span class="k">class</span> <span class="nc">test_something</span><span class="p">:</span>
+
+    <span class="k">def</span> <span class="nf">test_one</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span> <span class="nf">test_two</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="fixtures">
+<h3>Fixtures<a class="headerlink" href="#fixtures" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="function-scope">
+<h4>Function scope<a class="headerlink" href="#function-scope" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="celery-app-celery-app-used-for-testing">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_app</span></code> - Celery app used for testing.<a class="headerlink" href="#celery-app-celery-app-used-for-testing" title="Permalink to this headline">¶</a></h5>
+<p>This fixture returns a Celery app you can use for testing.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">test_create_task</span><span class="p">(</span><span class="n">celery_app</span><span class="p">,</span> <span class="n">celery_worker</span><span class="p">):</span>
+    <span class="nd">@celery_app.task</span>
+    <span class="k">def</span> <span class="nf">mul</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">*</span> <span class="n">y</span>
+
+    <span class="k">assert</span> <span class="n">mul</span><span class="o">.</span><span class="n">delay</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span> <span class="o">==</span> <span class="mi">16</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="celery-worker-embed-live-worker">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_worker</span></code> - Embed live worker.<a class="headerlink" href="#celery-worker-embed-live-worker" title="Permalink to this headline">¶</a></h5>
+<p>This fixture starts a Celery worker instance that you can use
+for integration tests.  The worker will be started in a <em>separate thread</em>
+and will be shutdown as soon as the test returns.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Put this in your conftest.py</span>
+<span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_config</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;broker_url&#39;</span><span class="p">:</span> <span class="s1">&#39;amqp://&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;result_backend&#39;</span><span class="p">:</span> <span class="s1">&#39;redis://&#39;</span>
+    <span class="p">}</span>
+
+<span class="k">def</span> <span class="nf">test_add</span><span class="p">(</span><span class="n">celery_worker</span><span class="p">):</span>
+    <span class="n">mytask</span><span class="o">.</span><span class="n">delay</span><span class="p">()</span>
+
+
+<span class="c1"># If you wish to override some setting in one test cases</span>
+<span class="c1"># only - you can use the ``celery`` mark:</span>
+<span class="nd">@pytest.mark.celery</span><span class="p">(</span><span class="n">result_backend</span><span class="o">=</span><span class="s1">&#39;rpc&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">test_other</span><span class="p">(</span><span class="n">celery_worker</span><span class="p">):</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="session-scope">
+<h4>Session scope<a class="headerlink" href="#session-scope" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="celery-config-override-to-setup-celery-test-app-configuration">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_config</span></code> - Override to setup Celery test app configuration.<a class="headerlink" href="#celery-config-override-to-setup-celery-test-app-configuration" title="Permalink to this headline">¶</a></h5>
+<p>You can redefine this fixture to configure the test Celery app.</p>
+<p>The config returned by your fixture will then be used
+to configure the <code class="xref py py-func docutils literal notranslate"><span class="pre">celery_app()</span></code>, and <code class="xref py py-func docutils literal notranslate"><span class="pre">celery_session_app()</span></code> fixtures.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_config</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;broker_url&#39;</span><span class="p">:</span> <span class="s1">&#39;amqp://&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;result_backend&#39;</span><span class="p">:</span> <span class="s1">&#39;rpc&#39;</span><span class="p">,</span>
+    <span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="celery-parameters-override-to-setup-celery-test-app-parameters">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_parameters</span></code> - Override to setup Celery test app parameters.<a class="headerlink" href="#celery-parameters-override-to-setup-celery-test-app-parameters" title="Permalink to this headline">¶</a></h5>
+<p>You can redefine this fixture to change the <code class="docutils literal notranslate"><span class="pre">__init__</span></code> parameters of test
+Celery app. In contrast to <code class="xref py py-func docutils literal notranslate"><span class="pre">celery_config()</span></code>, these are directly passed to
+when instantiating <a class="reference internal" href="../reference/celery.html#celery.Celery" title="celery.Celery"><code class="xref py py-class docutils literal notranslate"><span class="pre">Celery</span></code></a>.</p>
+<p>The config returned by your fixture will then be used
+to configure the <code class="xref py py-func docutils literal notranslate"><span class="pre">celery_app()</span></code>, and <code class="xref py py-func docutils literal notranslate"><span class="pre">celery_session_app()</span></code> fixtures.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_parameters</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;task_cls&#39;</span><span class="p">:</span>  <span class="n">my</span><span class="o">.</span><span class="n">package</span><span class="o">.</span><span class="n">MyCustomTaskClass</span><span class="p">,</span>
+        <span class="s1">&#39;strict_typing&#39;</span><span class="p">:</span> <span class="bp">False</span><span class="p">,</span>
+    <span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="celery-worker-parameters-override-to-setup-celery-worker-parameters">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_worker_parameters</span></code> - Override to setup Celery worker parameters.<a class="headerlink" href="#celery-worker-parameters-override-to-setup-celery-worker-parameters" title="Permalink to this headline">¶</a></h5>
+<p>You can redefine this fixture to change the <code class="docutils literal notranslate"><span class="pre">__init__</span></code> parameters of test
+Celery workers. These are directly passed to
+<a class="reference internal" href="../reference/celery.worker.html#celery.worker.WorkController" title="celery.worker.WorkController"><code class="xref py py-class docutils literal notranslate"><span class="pre">WorkController</span></code></a> when it is instantiated.</p>
+<p>The config returned by your fixture will then be used
+to configure the <code class="xref py py-func docutils literal notranslate"><span class="pre">celery_worker()</span></code>, and <code class="xref py py-func docutils literal notranslate"><span class="pre">celery_session_worker()</span></code>
+fixtures.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_worker_parameters</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;queues&#39;</span><span class="p">:</span>  <span class="p">(</span><span class="s1">&#39;high-prio&#39;</span><span class="p">,</span> <span class="s1">&#39;low-prio&#39;</span><span class="p">),</span>
+        <span class="s1">&#39;exclude_queues&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;celery&#39;</span><span class="p">),</span>
+    <span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="celery-enable-logging-override-to-enable-logging-in-embedded-workers">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_enable_logging</span></code> - Override to enable logging in embedded workers.<a class="headerlink" href="#celery-enable-logging-override-to-enable-logging-in-embedded-workers" title="Permalink to this headline">¶</a></h5>
+<p>This is a fixture you can override to enable logging in embedded workers.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_enable_logging</span><span class="p">():</span>
+    <span class="k">return</span> <span class="bp">True</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="celery-includes-add-additional-imports-for-embedded-workers">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_includes</span></code> - Add additional imports for embedded workers.<a class="headerlink" href="#celery-includes-add-additional-imports-for-embedded-workers" title="Permalink to this headline">¶</a></h5>
+<p>You can override fixture to include modules when an embedded worker starts.</p>
+<p>You can have this return a list of module names to import,
+which can be task modules, modules registering signals, and so on.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_includes</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">[</span>
+        <span class="s1">&#39;proj.tests.tasks&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;proj.tests.celery_signal_handlers&#39;</span><span class="p">,</span>
+    <span class="p">]</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="celery-worker-pool-override-the-pool-used-for-embedded-workers">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_worker_pool</span></code> - Override the pool used for embedded workers.<a class="headerlink" href="#celery-worker-pool-override-the-pool-used-for-embedded-workers" title="Permalink to this headline">¶</a></h5>
+<p>You can override fixture to configure the execution pool used for embedded
+workers.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_worker_pool</span><span class="p">():</span>
+    <span class="k">return</span> <span class="s1">&#39;prefork&#39;</span>
+</pre></div>
+</div>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">You cannot use the gevent/eventlet pools, that is unless your whole test
+suite is running with the monkeypatches enabled.</p>
+</div>
+</div>
+<div class="section" id="celery-session-worker-embedded-worker-that-lives-throughout-the-session">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_session_worker</span></code> - Embedded worker that lives throughout the session.<a class="headerlink" href="#celery-session-worker-embedded-worker-that-lives-throughout-the-session" title="Permalink to this headline">¶</a></h5>
+<p>This fixture starts a worker that lives throughout the testing session
+(it won’t be started/stopped for every test).</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Add this to your conftest.py</span>
+<span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">celery_config</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;broker_url&#39;</span><span class="p">:</span> <span class="s1">&#39;amqp://&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;result_backend&#39;</span><span class="p">:</span> <span class="s1">&#39;rpc&#39;</span><span class="p">,</span>
+    <span class="p">}</span>
+
+<span class="c1"># Do this in your tests.</span>
+<span class="k">def</span> <span class="nf">test_add_task</span><span class="p">(</span><span class="n">celery_session_worker</span><span class="p">):</span>
+    <span class="k">assert</span> <span class="n">add</span><span class="o">.</span><span class="n">delay</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">4</span>
+</pre></div>
+</div>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">It’s probably a bad idea to mix session and ephemeral workers…</p>
+</div>
+</div>
+<div class="section" id="celery-session-app-celery-app-used-for-testing-session-scope">
+<h5><code class="docutils literal notranslate"><span class="pre">celery_session_app</span></code> - Celery app used for testing (session scope).<a class="headerlink" href="#celery-session-app-celery-app-used-for-testing-session-scope" title="Permalink to this headline">¶</a></h5>
+<p>This can be used by other session scoped fixtures when they need to refer
+to a Celery app instance.</p>
+</div>
+<div class="section" id="use-celery-app-trap-raise-exception-on-falling-back-to-default-app">
+<h5><code class="docutils literal notranslate"><span class="pre">use_celery_app_trap</span></code> - Raise exception on falling back to default app.<a class="headerlink" href="#use-celery-app-trap-raise-exception-on-falling-back-to-default-app" title="Permalink to this headline">¶</a></h5>
+<p>This is a fixture you can override in your <code class="docutils literal notranslate"><span class="pre">conftest.py</span></code>, to enable the “app trap”:
+if something tries to access the default or current_app, an exception
+is raised.</p>
+<p>Example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s1">&#39;session&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">use_celery_app_trap</span><span class="p">():</span>
+    <span class="k">return</span> <span class="bp">True</span>
+</pre></div>
+</div>
+<p>If a test wants to access the default app, you would have to mark it using
+the <code class="docutils literal notranslate"><span class="pre">depends_on_current_app</span></code> fixture:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest.mark.usefixtures</span><span class="p">(</span><span class="s1">&#39;depends_on_current_app&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">test_something</span><span class="p">():</span>
+    <span class="n">something</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="../index.html">
+              <img class="logo" src="../_static/celery_512.png" alt="Logo"/>
+            </a></p><iframe src="https://ghbtns.com/github-btn.html?user=celery&repo=celery&type=watch&count=true&size=large"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+<div id="donate">
+    <b>Please help support this community project with a donation:</b>
+    <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+    <input type="hidden" name="cmd" value="_s-xclick">
+    <input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----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-----END PKCS7-----
+    ">
+    <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!">
+    <img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+    </form>
+</div>
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="signals.html"
+                        title="previous chapter">Signals</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="extending.html"
+                        title="next chapter">Extensions and Bootsteps</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userguide/testing.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="extending.html" title="Extensions and Bootsteps"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="signals.html" title="Signals"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Celery 4.2.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >User Guide</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; <a href="../copyright.html">Copyright</a> 2009-2017, Ask Solem &amp; contributors.
+    </div>
+  </body>
+</html>
