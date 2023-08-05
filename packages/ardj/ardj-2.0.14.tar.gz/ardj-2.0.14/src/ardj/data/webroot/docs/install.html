@@ -1,0 +1,154 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <title></title>
+  <style type="text/css">code{white-space: pre;}</style>
+</head>
+<body>
+<h1 id="installing-and-configuring-the-station">Installing and configuring the station</h1>
+<p>The intended audience of this document is people with basic knowledge of Linux systems. Not necessarily admins or programmers, but those who know how to install a package or edit a text file.</p>
+<h2 id="tldr-ardj-done-quickly">TL;DR (ardj done quickly)</h2>
+<pre><code>$ sudo apt-get install libmysqlclient-dev python-dev screen icecast2 ezstream mpg123 sox lame vorbis-tools vorbisgain flac mysql-server mysql-client
+$ pip install --user ardj
+$ mysql
+&gt; CREATE DATABASE ardj DEFAULT CHARSET utf8;
+&gt; GRANT ALL PRIVILEGES ON ardj.* TO ardj@localhost IDENTIFIED BY &#39;ardj&#39;;
+&gt; ^D
+$ ardj db-init
+$ ardj run
+... [gnu screen runs] ...</code></pre>
+<p>Different terminal tab:</p>
+<pre><code>$ x-www-browser http://127.0.0.1:8080/ &amp;
+$ mplayer http://127.0.0.1:8000/music.mp3</code></pre>
+<h2 id="system-requirements">System requirements</h2>
+<p>ardj is Python software, so in theory it should work on any system that can run Python. However, it was only tested on Ubuntu. It does not need much memory or CPU, you will mostly need HDD space for MP3 files and a lot of outgoing bandwidth. It uses a MySQL database (SQLite supported for constrained systems).</p>
+<p>You can successfully run a busy radio station on the smallest available Digital Ocean droplet, for example, that's $5/mo.</p>
+<p>This manual does not deal with system wide daemons, init scripts etc. You will only need root access to install some third-party components.</p>
+<h2 id="some-theory-or-how-this-all-works-together">Some theory, or how this all works together</h2>
+<p>If you aren't interested in the internals of a radio station, you can skip to the next section. This section is for the curious, understanding of this is not required.</p>
+<p>The front end of the radio station is the streaming server. It reads an MP3 (or Vorbis) stream from a program called &quot;source&quot; and sends it to all connected listeners. It is very efficient and can deal with thousands of connections, taking almost no resources. It only passes bytes from one program to another. We'll use <a href="http://icecast.org/">icecast</a>.</p>
+<p>The main component is the source. It's a program which reads your music files, decodes them, applies some effects (like <a href="https://en.wikipedia.org/wiki/ReplayGain">ReplayGain</a> or cross-fade), encodes to the desired format (e.g., 64 kbps MP3) and sends it to the streaming server. This is normally <a href="http://icecast.org/ezstream/">ezstream</a>, sometimes <a href="http://icecast.org/ices/">ices</a> -- no big difference. This program typically has two modes of operation: it either picks a random file from a folder, which makes it a very basic music player on shuffle, or it calls a plugin to choose which track to play next. This is how ardj works.</p>
+<p>ardj itself is a plugin for ezstream and ices0. It uses a database and a plain text playlist file to create a playlist, which can be very complicated.</p>
+<p>There are some background tasks from time to time, like ReplayGain calculation. We use a separate worker for that.</p>
+<p>That's it.</p>
+<h2 id="installing-third-party-components">Installing third party components</h2>
+<p>ardj requires few other programs that actually do MP3/Ogg transcoding, streaming and related tasks. They cannot be installed automatically. On Ubuntu you can install them with a single command:</p>
+<pre><code>$ sudo apt-get install libmysqlclient-dev python-dev icecast2 ezstream mpg123 sox lame vorbis-tools vorbisgain flac</code></pre>
+<h2 id="installing-ardj">Installing ardj</h2>
+<p>ardj is a python software. The easiest method to install it is pip. Normally you would install it as a user package:</p>
+<pre><code>$ pip install --user ardj
+...
+$ ardj intro</code></pre>
+<p>Or you can install it in a virtual environment, to avoid messing with your existing packages:</p>
+<pre><code>$ virtualenv env
+$ . env/bin/activate
+$ pip install --user ardj
+...
+$ ardj intro</code></pre>
+<p>Now ardj and all required python components are ready. The command <code>ardj intro</code> will instruct you briefly how to get up running quickly. This document does the same.</p>
+<h2 id="running-the-station">Running the station</h2>
+<p>To start broadcasting, you need to run the following processes simultaneously:</p>
+<pre><code>$ ardj loop icecast
+$ ardj loop ezstream
+$ ardj loop web-server
+$ ardj loop worker</code></pre>
+<p>For a test run, you can run them in separate terminal tabs or windows, to see what's going on. There will be more or less output (e.g., more for ezstream, less for icecast). You don't need to understand it, only if it says &quot;ERROR&quot;. This can happen if you forgot to install a third party component, like <code>mpg123</code> which decodes MP3 files.</p>
+<p>Now, your radio station is running. It plays some built in music with a voice message telling you to upload more music. You can listen to it by adding this line to your music player:</p>
+<pre><code>http://127.0.0.1:8000/music.mp3</code></pre>
+<p>For a public station you need these programs to run automatically. There is a handy script which runs all components in the background:</p>
+<pre><code>$ ardj run</code></pre>
+<p>This wil create a GUN Screen session. You can attach to it anytime using the same command, and see what's going on. You should add this script to your crontab (<code>crontab -e</code>), like this:</p>
+<pre><code>@reboot ardj run</code></pre>
+<p>Now, if your server reboots, the radio will be started automatically. If any component dies (e.g., you upgrade and kill icecast), it will be restarted immediately.</p>
+<p>Test it.</p>
+<h2 id="adding-cross-fade">Adding cross-fade</h2>
+<p>By default ardj uses <code>ezstream</code> to generate the audio stream. It is available in most distros, namely in Ubuntu. However, it does not support cross-fade for some reason.</p>
+<p><a href="http://icecast.org/ices/">Ices</a> does, the old version (<code>ices0</code>). However, it was removed from most distros for some reason. You would need to download and compile it manually. It's small and very easy to compile.</p>
+<p>There is a version with <a href="https://en.wikipedia.org/wiki/ReplayGain">ReplayGain</a> support added by the author of ardj. You can download it from this website:</p>
+<p>http://bitbucket.org/umonkey/ices</p>
+<p>When you install it, instead of this command:</p>
+<pre><code>ardj loop ezstream</code></pre>
+<p>Use this command:</p>
+<pre><code>ardj loop ices</code></pre>
+<p>Perhaps you'll need a modified GNU Screen config. That's it.</p>
+<h2 id="increase-web-server-performance">Increase web server performance</h2>
+<p>The built in web server is not supposed to handle much load. If you plan to open your station to your listeners, so that they could vote on tracks, you need to do more. First, install nginx and uwsgi:</p>
+<pre><code>$ sudo apt-get install nginx uwsgi uwsgi-python</code></pre>
+<p>Example nginx config (<code>/etc/nginx/sites-enabled/ardj</code>):</p>
+<pre><code>server {
+  listen 80;
+  server_name ardj.local;
+
+  root /home/ardj/.local/lib/python2.7/site-packages/ardj/data/webroot;
+  charset utf-8;
+
+  allow 127.0.0.1;
+  deny all;
+
+  location / {
+    try_files $uri @app;
+  }
+
+  location @app {
+    uwsgi_read_timeout 60000;
+    include uwsgi_params;
+    uwsgi_pass unix:/run/uwsgi/app/ardj/socket;
+
+    access_log /var/log/nginx/ardj-access.log;
+    error_log /var/log/nginx/ardj-errors.log;
+  }
+}</code></pre>
+<p>Example uwsgi config (<code>/etc/uwsgi/apps-enabled/ardj.ini</code>):</p>
+<pre><code>[uwsgi]
+master = true
+idle = 60
+vacuum = true
+
+workers = 1
+threads = 5
+max-requests = 100
+no-orphans = true
+
+uid = ardj
+gid = ardj
+chdir = /
+
+logfile-chmod = 644
+chmod-socket = 666
+
+enable-threads = true
+
+home = /home/ardj
+plugins = python
+#pythonpath = /home/ardj
+module = ardj.uwsgi
+env = PYTHON_EGG_CACHE=/home/ardj/.python-eggs
+env = PYTHONIOENCODING=utf8
+env = PYTHONPATH=src</code></pre>
+<p>Change paths according to your setup.</p>
+<h2 id="configuring">Configuring</h2>
+<p>ardj creates default configuration files for you. It just works out of the box, if you manage to install it.</p>
+<p>To manually configure icecast:</p>
+<pre><code>$ ardj icecast-config</code></pre>
+<p>To manually configure ezstream:</p>
+<pre><code>$ ardj ezstream-config</code></pre>
+<p>To manually configure ices0:</p>
+<pre><code>$ ardj ices-config</code></pre>
+<p>To edit playlist (normally you use the web interface for this):</p>
+<pre><code>$ ardj playlist</code></pre>
+<p>To edit the main ardj config:</p>
+<pre><code>$ ardj config</code></pre>
+<p>SQL console:</p>
+<pre><code>$ ardj db</code></pre>
+<p>Follow the log file:</p>
+<pre><code>$ ardj log</code></pre>
+<h2 id="what-to-do-next">What to do next</h2>
+<p>If you have your station running and broadcasting the built in music, it's time to some of your own. Open the web interface and follow instructions.</p>
+<p>If you're planning to allow public access to your radio, it might be a good idea to change some passwords. It's the password used for streaming (see iceast/ezstream configs), and the web interface password, which you need to set up on your own, for example, using http basic auth in nginx.</p>
+<h2 id="comments-and-questions">Comments and questions</h2>
+<p>If you have problems installing ardj, contact me at <a href="mailto:hex@umonkey.net">hex@umonkey.net</a>.</p>
+</body>
+</html>

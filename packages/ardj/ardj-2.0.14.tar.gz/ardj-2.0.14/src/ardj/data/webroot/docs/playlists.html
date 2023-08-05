@@ -1,0 +1,167 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <title></title>
+  <style type="text/css">code{white-space: pre;}</style>
+</head>
+<body>
+<h1 id="automatic-playlist-configuration">Automatic playlist configuration</h1>
+<p>For manual playback control, see <a href="manual.html">manual playlists</a>.</p>
+<p>Playlists for ardj are not actually lists -- it's a set of rules which are uses to pick the song to play next. Each rule has a name and a set of conditions: what to play, when to play it, how long to sleep after playing, etc.</p>
+<p>The key moment with playlists is that they use labels to select tracks. You specify labels for a playlist, and a track with one of those labels is selected for playback. There are exclusions for playlist level, like working hours and days. There are also settings to prevent one track or artist from playing until there were X other tracks or artists played.</p>
+<p>All these rules are stored in a text file (actually a <a href="https://en.wikipedia.org/wiki/YAML" title="YAML on Wikipedia">YAML</a> file). It's a very simple and intuitive file format. See examples.</p>
+<h2 id="how-to-use-labels">How to use labels</h2>
+<p>Labels are the main instrument for filtering tracks. The number of labels is unlimited, each track can have as many labels as you want. It's good idea to use descriptive and meaningful labels, for example:</p>
+<ul>
+<li>music, podcast, jingle -- type of content</li>
+<li>rock, pop, blues, jazz, story, interview -- genre</li>
+<li>voice, instrumental</li>
+<li>loud, quiet -- e.g., for night playlists you might want to exclude loud</li>
+<li>english, russian, german -- lyrics language</li>
+<li>male, female -- main vocals</li>
+<li>long -- added automatically to the 50% of the longest tracks.</li>
+<li>recent -- added automatically to 100 recently uploaded tracks.</li>
+<li>hitlist -- added automatically to 100 best rated tracks.</li>
+<li>tagme -- added automatically to uploaded tracks. Should be removed manually.</li>
+</ul>
+<p>Use your imagination.</p>
+<h2 id="playlist-rules-cheat-sheet">Playlist rules cheat sheet</h2>
+<p>This is a list of all available options. Examples below.</p>
+<ul>
+<li>name: playlist name, for your reference.</li>
+<li>labels: select from tracks with these labels, modifiers &quot;-&quot; and &quot;+&quot; are available (see below).</li>
+<li>sticky_labels: if a track has one of the specified labels, it must stick to the playlist until another playlist is active (see below).</li>
+<li>weight: range of accepted weights, min-max, e.g.: &quot;0.5-100&quot;.</li>
+<li>delay: the number of minutes to halt playlist for after playing.</li>
+<li>track_delay: the number of minutes to halt the track for. If the track was played this or less number of minutes ago -- skip it.</li>
+<li>history: the number of tracks before an artist becomes eligible for playback again. Defaults to 5, which means that after playing a song by Metallica, tracks by 4 other artists play, before Metallica can play again.</li>
+<li>repeat: the number of times a track can play. Tracks that were played more are excluded from the playlist. Can be used to promote new tracks.</li>
+<li>hours: defines on which hours the playlist is active, e.g.: [8, 12-20, 22] = 8:00-8:59, 12:00-20:59, 22:00-22:59 inclusive.</li>
+<li>days: defines on which days of week the playlist is active, e.g.: [1-3, 6] = mon, tue, wed, sat.</li>
+<li>program: the name of the program. This does not affect playback, but helps automation (see below).</li>
+<li>preroll: a list of labels to select preroll by (see below).</li>
+<li>strategy: tune the shuffle strategy (see below).</li>
+</ul>
+<h2 id="how-playlist-rules-are-selected">How playlist rules are selected</h2>
+<p>Rules are checked from top to bottom.</p>
+<p>First, it checks if the rule is active for this day (<code>days</code> property). No? Next rule. No <code>days</code> means all days.</p>
+<p>Then it checks if the rule is active for this hour (<code>hours</code> property). No? Next rule. No <code>hours</code> means all hours.</p>
+<p>Then it checks if the rule isn't delayed, i.e. wasn't played during last <code>delay</code> minutes. Was it? Next rule. No <code>delay</code> means no check.</p>
+<p>Then it slects all tracks which match labels specified in the <code>labels</code> property. No <code>labels</code> -- no tracks, useless rule.</p>
+<p>Then it throws away tracks according to <code>track_delay</code>, <code>artist_delay</code>, <code>weight</code> and <code>repeat</code>.</p>
+<p>Nothing left? Next rule. Something left? Play according to <code>strategy</code>.</p>
+<h2 id="selecting-tracks-by-label">Selecting tracks by label</h2>
+<p>Specify some labels. A random track that has any of those label will be picked.</p>
+<pre><code>- name: regular
+  labels: [music, podcast]</code></pre>
+<p>When scanning through the file, ardj will select all tracks with labels &quot;music&quot; or &quot;podcast&quot;, pick a random one and play it. This playlist has no explicit limitations, so it's normally the last and default one.</p>
+<p>Sometimes it's good to select tracks using multiple labels. You can use &quot;-&quot; to select tracks with no such label and &quot;+&quot; to require additional label. Example:</p>
+<pre><code>- name: heavy
+  labels: [music, +rock, +folk, -german]</code></pre>
+<p>This will play select forl rock music, but not German.</p>
+<h3 id="sticky-labels">Sticky labels</h3>
+<p>Sticky labels let you group tracks within one playlist and one time slot by additional labels. Example:</p>
+<pre><code>- name: jingles
+  labels: [jingle]
+  delay: 15
+- name: music
+  labels: [music]
+  sticky_labels: [rock, jazz, 8bit]</code></pre>
+<p>This means, that tracks with label &quot;music&quot; must be played. If the selected song has label &quot;8bit&quot;, then the rule becomes [music, +8bit] -- only play 8bit music until another playlist is activates (until a jingle plays, in this setup, which is every 15 minues). This way you can define 15-minute slots for rock, jazz or 8bit music with one playlist rule.</p>
+<h2 id="selecting-tracks-by-weight">Selecting tracks by weight</h2>
+<p>Tracks can be rated (voted on). People can say tell ardj that current track rocks or sucks. This function can either be available to admins only, or to the public.</p>
+<p>Weight is a floating point number. Each listener who likes (rocks) the track adds 1 to weight, who doesn't like it (sucks) takes 1 from it. You can only vote once, new vote overrides older ones. Initial weight value is 1; if 5 people say the song rocks, it becomes 6, simple math. You can use this value in your playlist rules to ban tracks that nobody likes.</p>
+<pre><code>- name: good_music
+  labels: [music]
+  weight: 1.0-1000</code></pre>
+<p>There is also operational weight. It is based on the real weight described above, but has no limit on the number of votes. It means that every time you like a track again, the operational weight is increased by 0.25. Like if the track rocks so much that you can't resist the urge to like it when you hear it. However, with each play this value is shifted by 0.1 towards the real weight.</p>
+<p>Example. Track has initial weight of 1. You like it, the weight becomes 2. This is the real weight. You hear this track again and like it again. Weight becomes 2.25. The next time this track is played, weight becomes 2.15, then 2.05, and so on, until it reaches 1 -- and remains there until somebody likes or dislikes the track again. Think of rubber.</p>
+<h2 id="adding-jingles">Adding jingles</h2>
+<p>Jingles are short clips with music or voice playing occasionally between regular music. Usually they contain ads or informational messages. To play a jingle every 15 minutes, you would use the &quot;delay&quot; options. It means that after this rule matches and a track is played, disable this rule for 15 minutes.</p>
+<pre><code>- name: jingles
+  labels: [jingle]
+  delay: 15
+- name: music
+  labels: [music]</code></pre>
+<p>This configuration means that ardj should play a jingle every 15 minutes, otherwise play tracks with label &quot;music&quot;. You can have many levels of jingles, e.g.: one ad every 15 minutes, one joke every 25 minutes, etc.</p>
+<h2 id="adding-prerolls">Adding prerolls</h2>
+<p>Prerolls are played before tracks. Like jingles, but with a context. For example, you can announce that the next track is going to be loud, or have explicit lyrics, or play a specific jingle.</p>
+<pre><code>- name: rock
+  labels: [rock, metal]
+  preroll: [rock_jingle]
+  delay: 30</code></pre>
+<p>This rule means that every 30 minutes a track with label &quot;rock&quot; OR &quot;metal&quot; will be played, with a track with label &quot;rock_jingle&quot; playing before it.</p>
+<p>You can add a preroll to a label. This is for situations when you want a preroll for some, but not necessarily all track from a playlist. You do not define this in playlist rules, just use labels with the &quot;-preroll&quot; suffix.</p>
+<p>For example, when a track is selected for playback, and it has labels &quot;music&quot;, &quot;rock&quot; and &quot;german&quot;, ardj will look for tracks with label &quot;music-preroll&quot; or &quot;rock-preroll&quot; or &quot;german-preroll&quot;, pick one and play it beforehand. Like, there can be a &quot;german-preroll&quot; track with a message from your music director asking listeners to send more good german music to his email.</p>
+<p>You can also have prerolls for artists. For this you just upload a track, set correct artist name, and add label &quot;preroll&quot; (not &quot;music&quot;). When a track by that artist is about to be played, a random preroll by that artist will go first. For example, you can have artists greet your listeners and say that your radio is so cool.</p>
+<h2 id="programs">Programs</h2>
+<p>Some playlists can have the &quot;program&quot; property. It does not affect playback, but helps automation. When program changes, an external script is executed. Example:</p>
+<pre><code>- name: jingles
+  labels: [jingle]
+  delay: 15
+- name: nighttime
+  labels: [music, calm]
+  hours: [22-7]
+- name: daytime
+  labels: [music, loud]
+  program: daytime</code></pre>
+<p>With this setup, you can play calm music from 10 PM to 7 AM, otherwise play loud music. When switching from day to night, a configured script will be executed with the program name as the argument. You can use it, for example, to twit &quot;Calm nightly music is on the air!&quot; Jingles don't affect the program with this setup.</p>
+<h2 id="strategy">Strategy</h2>
+<p>By default ardj uses track weight (see above) and a randomizer to select tracks. There are two strategies that ignore listener votes: &quot;fresh&quot; and &quot;oldets&quot;.</p>
+<pre><code>- name: oldies
+  labels: [music]
+  hours: [7]
+- name: newbies
+  labels: [music]
+  hours: [8]
+  track_delay: 60
+- name: normal
+  labels: [music]</code></pre>
+<p>With this setup, from 7 AM to 8 AM ardj will pick tracks which weren't played longer than others. From 8 AM to 9 AM it will play most recently played tracks. Basically, it's sorting by the last playback time, ascending and descending.</p>
+<p>This is primarily useful to give a second chance to forgotten tracks.</p>
+<h2 id="example-setup">Example setup</h2>
+<pre><code>- name: jingles
+  labels: [jingle]
+
+# Voice message with schedule every 40 minutes
+- name: schedule_announce
+  labels: [schedule_announce]
+  delay: 40
+  hours: [7-21]
+
+# Loud music to wake up to
+- name: alarm
+  labels: [music, +pop, +loud]
+  hours: [7]
+
+# Best music 17 AM to 19 AM
+- name: hitlist
+  labels: [hitlist]
+  hours: [17-18]
+
+# Fresh podcasts 19 AM to 22 AM, occasionally.
+- name: podcasts
+  labels: [podcast]
+  strategy: fresh
+  delay: 15
+  weight: 1.0-1000
+
+# Calm music to sleep to
+- name: lounge
+  labels: [music, +lounge]
+  hours: [22-7]
+
+# Default playlist (heavy rotation)
+- name: default_heavy
+  labels: [music, +promote]
+  delay: 20
+
+# Default playlist
+- name: music
+  labels: [music, -tagme]
+  history: 5</code></pre>
+</body>
+</html>
