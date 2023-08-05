@@ -1,0 +1,94 @@
+Copyright (c) 2018 Jose Diaz-Gonzalez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Description: =============
+        gitlab-backup
+        =============
+        
+        |PyPI| |Python Versions|
+        
+        backup a gitlab user or organization
+        
+        Requirements
+        ============
+        
+        - GIT 1.9+
+        
+        Installation
+        ============
+        
+        Using PIP via PyPI::
+        
+            pip install gitlab-backup
+        
+        Using PIP via Github::
+        
+            pip install git+https://github.com/josegonzalez/python-gitlab-backup.git#egg=gitlab-backup
+        
+        Usage
+        =====
+        
+        CLI Usage is as follows::
+        
+            usage: gitlab-backup [-h] [--host HOST] [--username USERNAME]
+                                 [--password PASSWORD] [--oath-token OATH_TOKEN]
+                                 [--private-token PRIVATE_TOKEN] [--clone-bare]
+                                 [--clone-lfs] [--disable-ssl-verification]
+                                 [--namespace NAMESPACE]
+                                 [--output-directory OUTPUT_DIRECTORY] [--prefer-ssh]
+                                 [--skip-existing]
+        
+            Backup a gitlab account
+        
+            optional arguments:
+              -h, --help            show this help message and exit
+              --host HOST           gitlab host
+              --username USERNAME   username for basic auth
+              --password PASSWORD   password for basic auth. If a username is given but
+                                    not a password, the password will be prompted for.
+              --oath-token OATH_TOKEN
+                                    oath token, or path to token (file://...)
+              --private-token PRIVATE_TOKEN
+                                    private token, or path to token (file://...)
+              --clone-bare          clone bare repositories
+              --clone-lfs           clone LFS repositories (requires Git LFS to be
+                                    installed, https://git-lfs.github.com)
+              --disable-ssl-verification
+                                    disable ssl verification
+              --namespace NAMESPACE
+                                    specify a gitlab namespace to backup
+              --output-directory OUTPUT_DIRECTORY
+                                    directory at which to backup the repositories
+              --prefer-ssh          Clone repositories using SSH instead of HTTPS
+              --skip-existing       skip project if a backup directory exists
+        
+        
+        .. |PyPI| image:: https://img.shields.io/pypi/v/gitlab-backup.svg
+           :target: https://pypi.python.org/pypi/gitlab-backup/
+        .. |Python Versions| image:: https://img.shields.io/pypi/pyversions/gitlab-backup.svg
+           :target: https://github.com/albertyw/gitlab-backup
+        
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Topic :: System :: Archiving :: Backup
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
