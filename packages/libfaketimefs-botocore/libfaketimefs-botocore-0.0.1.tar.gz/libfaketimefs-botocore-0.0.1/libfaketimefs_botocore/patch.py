@@ -1,0 +1,3 @@
+import libfaketimefs_botocore
+
+libfaketimefs_botocore.patch_botocore()
