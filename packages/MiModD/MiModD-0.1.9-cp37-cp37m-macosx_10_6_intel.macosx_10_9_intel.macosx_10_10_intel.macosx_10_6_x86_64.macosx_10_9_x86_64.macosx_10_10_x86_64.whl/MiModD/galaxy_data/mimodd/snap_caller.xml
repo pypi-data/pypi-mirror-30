@@ -1,0 +1,550 @@
+<tool id="mimodd_align" name="MiModD Read Alignment" version="@MIMODD_WRAPPER_VERSION@">
+    <description>maps sequence reads to a reference genome using SNAP</description>
+    <macros>
+        <import>macros.xml</import>
+        <macro name="require_metadata">
+            <param name="header" type="data" format="sam" 
+            label="metadata source for this sample" />
+        </macro>
+        <macro name="sam_bam_selector" token_format="sam">
+            <param name="ifile" type="data" format="@FORMAT@"
+            label="input file"/>
+            <param name="header" type="data" format="sam" optional="true"  
+            label="(optional) metadata source for this sample"
+            help="a SAM format dataset providing information about the sequences in the input data in its header; do NOT provide this dataset if the information is already part of your input dataset unless you want to have the original metadata overwritten. If needed, a metadata source dataset can be generated with the MiModD Run Annotation tool." />
+        </macro>
+    </macros>
+    <expand macro="requirements" />
+    <expand macro="stdio" />
+    <expand macro="version_command" />
+    <command><![CDATA[
+    ## Currently Galaxy does not autoconvert collections of fastq.gz files.
+    ## This tool wrapper fixes that by allowing fastq and fastq.gz as input
+    ## collection formats.
+    ## gz_input is then used as flag to indicate a fastq.gz input file
+    #set gz_input = False
+
+	mimodd snap-batch -s
+	  #if str($reference.source) == "cached":
+        #set ref_genome = $reference.genome.fields.path
+      #else:
+        #set ref_genome = $reference.genome
+      #end if
+	  #for $i in $datasets
+		"snap ${i.mode_choose.mode} '$ref_genome'
+		#if $str($i.mode_choose.mode) == "paired" and $str($i.mode_choose.input.iformat) == "fastq":
+		  #if $str($i.mode_choose.input.pe_source.type) == 'collection':
+            ## PE input provided as a paired collection - if the forward
+            ## dataset is gzipped we assume the reverse dataset is too.
+		    '${i.mode_choose.input.pe_source.input_data.forward}'
+		    '${i.mode_choose.input.pe_source.input_data.reverse}'
+		    #if $i.mode_choose.input.pe_source.input_data.forward.is_of_type('fastq.gz'):
+		      #set gz_input = True
+		    #end if
+		  #else
+		    ## PE input provided as separate fastq datasets
+            '${i.mode_choose.input.pe_source.ifile1}'
+            '${i.mode_choose.input.pe_source.ifile2}'
+          #end if
+		#else:
+		  ## Input is either SE data or not in fastq format =>
+		  ## only one input dataset
+          '${i.mode_choose.input.ifile}'
+		#end if
+		#if $gz_input:
+		  ## a gzipped fastq input dataset was encountered
+		  --iformat gz
+		#else
+		  --iformat ${i.mode_choose.input.iformat}
+		#end if
+        --ofile '$ofile' --oformat ${output_options.oformat}
+        ${output_options.sort} ${output_options.explicit_mmatch_notation}
+        --idx-seedsize $indexing.seedsize
+        --idx-slack $indexing.slack
+        --idx-overflow $indexing.overflow
+		#set $aln_spec = $i.mode_choose.aln_options
+		#if $str($i.mode_choose.mode) == "paired":
+		  #set $aln_global = $alignment.paired
+		  #set $treat_overlaps = $aln_spec.discard_overlapping_mates or $aln_global.discard_overlapping_mates
+          --spacing #if $aln_spec.sp_min then $aln_spec.sp_min else $aln_global.sp_min
+          #if $aln_spec.sp_max then $aln_spec.sp_max else $aln_global.sp_max
+        #else
+          #set $aln_global = $alignment.single
+          #set $treat_overlaps = ""
+		#end if
+        --maxseeds #if $aln_spec.maxseeds then $aln_spec.maxseeds else $aln_global.maxseeds
+        --maxhits #if $aln_spec.maxhits then $aln_spec.maxhits else $aln_global.maxhits 
+        --clipping #if $aln_spec.clipping then $aln_spec.clipping else $aln_global.clipping
+        --maxdist #if $aln_spec.maxdist then $aln_spec.maxdist else $aln_global.maxdist 
+        --confdiff #if $aln_spec.confdiff then $aln_spec.confdiff else $aln_global.confdiff
+        --confadapt #if $aln_spec.confadpt then $aln_spec.confadpt else $aln_global.confadpt
+		#if $i.mode_choose.input.header:
+          --header '${i.mode_choose.input.header}'
+		#end if
+		--selectivity $output_options.selectivity
+		#if $str($output_options.filter_output) != "off":
+          --filter-output $output_options.filter_output
+		#end if
+		#if $treat_overlaps:
+          --discard-overlapping-mates
+	      ## remove ',' (and possibly adjacent whitespace) and replace with ' '
+	      '#echo ("' '".join($treat_overlaps.replace(" ", "").split(',')))#'
+        #end if
+        --verbose"							
+	  #end for
+    ]]></command>
+
+    <inputs>
+        <conditional name="reference">
+            <param name="source" type="select"
+            label="Will you select a reference genome from your history or use a built-in genome?">
+                <option value="cached">Use a built-in genome</option>
+                <option value="history">Use a genome from my history</option>
+            </param>
+            <when value="cached">
+                <param name="genome" type="select"
+                label="reference genome"
+                help="The fasta reference genome that SNAP should align reads against.">
+                    <options from_data_table="all_fasta" />
+                </param>
+            </when>
+            <when value="history">
+                <param name="genome" type="data" format="fasta"
+                label="reference genome"
+                help="The fasta reference genome that SNAP should align reads against."/>
+            </when>
+        </conditional>
+        <section name="indexing" title="Parameters affecting reference genome indexing" expanded="false">
+            <param name="seedsize" type="integer" value="20" 
+    	    label="seed size (default: 20)" 
+    	    help="Length of the seeds used in the reference genome hash table (SNAP index option -s)."/>
+	        <param name="slack" type="float" value="0.3" 
+	        label="hash table slack size (default: 0.3)" 
+	        help="Corresponds to the -h option of SNAP index."/>	
+	        <param name="overflow" type="integer" min="1" max="1000" value="40" 
+	        label="index overflow factor (default: 40)" 
+	        help="Factor (between 1 and 1000) that controls the size of the index build overflow space. For certain genomes you may have to increase this value if you are getting a corresponding error from the tool." />
+        </section>
+        <section name="alignment" title="Alignment parameters" expanded="false"
+        help="The global alignment parameters in this section will be used for samples for which you do not provide their own sample-specific settings.">
+            <section name="single" title="Parameters applied to single-end samples"
+            help="These parameters will affect the alignments for any single-end sample
+            for which you do not provide sample-specific settings.">
+                <param name="maxdist" type="integer" value="8" 
+                label="edit distance (default: 8)" 
+                help="maximum edit distance allowed per read or pair (SNAP option -d); higher values allow more divergent alignments to be found, but increase the rate of misalignments."/>
+                <param name="confdiff" type="integer" value="2" 
+                label="confidence threshold (default: 2)" 
+                help="Confidence threshold (SNAP option -c); the minimum edit distance difference between two alternate alignments required to reject the poorer alignment as suboptimal; higher values increase the rate of ambiguously aligned reads."/>
+                <param name="confadpt" type="integer" value="7" 
+                label="adaptive confdiff behaviour (default: 7)" 
+                help="Specifies how many seeds of a read may be ignored (based on the maximum hits value above) before the confidence threshold above gets increased by one for that read (SNAP option -a); helps fine-tuning alignment accuracy in repetitive regions of the genome."/>  
+	            <param name="maxseeds" type="integer" value="25" 
+	            label="maximum seeds per read (default: 25)" 
+	            help="Number of seeds to use per read (SNAP option -n) when trying to match it to the reference genome; higher numbers will increase the rate of aligned reads and reduce the rate of misalignments, but will reduce performance."/>
+                <param name="maxhits" type="integer" value="250" 
+                label="maximum hits per seed (default: 250)" 
+                help="Maximum hits to consider per seed (SNAP option -h); don't use a seed region in the alignment process if it matches more than maxhits regions in the reference genome. Higher values reduce the rate of misalignments, but reduce performance."/>
+                <param name="clipping" type="select" display="radio"
+                label="read clipping (default: from back and front)" 
+                help="Specifies from which end of a read low-quality bases should be clipped (SNAP option -Cxx)">
+                    <option value="++">from back and front</option>
+                    <option value="x+">from back only</option>
+                    <option value="+x">from front only</option>
+                    <option value="xx">no clipping</option>
+                </param>
+            </section>
+            <section name="paired" title="Parameters applied to paired-end samples"
+            help="These parameters will affect the alignments for any paired-end sample
+            for which you do not provide sample-specific settings.">
+    	        <param name="sp_min" type="integer" value="100" 
+    	        label="minimum spacing to allow between paired ends (default: 100)" 
+    	        help="Corresponds to the first value of the SNAP option -s."/>
+                <param name="sp_max" type="integer" value="10000"
+                label="maximum spacing to allow between paired ends (default: 10000)"   
+                help="Corresponds to the second value of the SNAP option -s."/>
+                <param name="discard_overlapping_mates" type="text" optional="true"
+                label="discard overlapping read pairs of type"
+                help="Consider overlapping mate pairs of the given orientation type(s) anomalous and discard them; allowed values: RF, FR, FF, RR; multiple types may be specified as a comma-separated list and ALL can be used as a shortcut for discarding all overlapping mate pairs; leave blank to retain all overlapping pairs.">
+                    <validator type="expression" message="only RF, FR, FF, RR or ALL are allowed as input">not value or all(token.strip(' ') in ['RF', 'FR', 'FF', 'RR', 'ALL'] for token in value.split(','))</validator>
+                </param>
+                <param name="maxdist" type="integer" value="8" 
+                label="edit distance (default: 8)" 
+                help="maximum edit distance allowed per read or pair (SNAP option -d); higher values allow more divergent alignments to be found, but increase the rate of misalignments."/>
+                <param name="confdiff" type="integer" value="2" 
+                label="confidence threshold (default: 2)" 
+                help="Confidence threshold (SNAP option -c); the minimum edit distance difference between two alternate alignments required to reject the poorer alignment as suboptimal; higher values increase the rate of ambiguously aligned reads."/>
+                <param name="confadpt" type="integer" value="7" 
+                label="adaptive confdiff behaviour (default: 7)" 
+                help="Specifies how many seeds of a read may be ignored (based on the maximum hits value above) before the confidence threshold above gets increased by one for that read (SNAP option -a); helps fine-tuning alignment accuracy in repetitive regions of the genome."/>  
+	            <param name="maxseeds" type="integer" value="25" 
+	            label="maximum seeds per read (default: 25)" 
+	            help="Number of seeds to use per read (SNAP option -n) when trying to match it to the reference genome; higher numbers will increase the rate of aligned reads and reduce the rate of misalignments, but will reduce performance."/>
+                <param name="maxhits" type="integer" value="250" 
+                label="maximum hits per seed (default: 250)" 
+                help="Maximum hits to consider per seed (SNAP option -h); don't use a seed region in the alignment process if it matches more than maxhits regions in the reference genome. Higher values reduce the rate of misalignments, but reduce performance."/>
+                <param name="clipping" type="select" display="radio"
+                label="read clipping (default: from back and front)" 
+                help="Specifies from which end of a read low-quality bases should be clipped (SNAP option -Cxx)">
+                    <option value="++">from back and front</option>
+                    <option value="x+">from back only</option>
+                    <option value="+x">from front only</option>
+                    <option value="xx">no clipping</option>
+                </param>
+            </section>
+	    </section>
+        <conditional name="output_options">
+            <param name="config" type="select"
+            label="Output options"
+            help="No matter how many input datasets you specify below and what there formats are, this tool will produce a single output file with the aligned reads from all samples. In this section you can configure some aspects of what the output should look like. Unless you have a really special usecase, you can (and probably should) just go with the default settings though.">
+                <option value="default">Just go with the defaults</option>
+                <option value="custom">Show detailed output options</option>
+            </param>
+            <when value="default">
+                <param name="oformat" type="hidden" value="bam" />
+	            <param name="sort" type="hidden" value=""/>
+	            <param name="explicit_mmatch_notation" type="hidden" value=""/>
+	            <param name="filter_output" type="hidden" value="off"/>
+	            <param name="selectivity" type="hidden" value="1"/>
+            </when>
+            <when value="custom">
+                <param name="oformat" type="select" display="radio"
+                label="Output format">
+                    <option value="bam">BAM</option>
+                    <option value="sam">SAM</option>
+                </param>
+	            <param name="sort" type="boolean" falsevalue="--no-sort" truevalue="" checked="true"
+	            label="Sort aligned reads in the output by coordinates" 
+	            help="Turn off if you want to retain the read order of the input file(s) (mimodd snap option --no-sort)." />
+	            <param name="explicit_mmatch_notation" type="boolean" truevalue="-X" falsevalue="" checked="false"
+	            label="Use = and X to indicate matches/mismatches in CIGAR strings explicitly instead of using M for both"
+	            help="Warning: Downstream tools may still rely on the classic M notation! Turn this on at your own risk (mimodd snap option -X)." />
+                <param name="selectivity" type="integer" min="1" value="1"
+                label="selectivity (default: 1)" 
+                help="randomly choose 1/selectivity of the reads to score (SNAP option -S). The default of 1 indicates that all reads should be worked with." />
+                <param name="filter_output" type="select" display="radio"
+                label="filter output (default: no filtering)" 
+                help="filter output (SNAP option -F) to retain only specific classes of reads.">
+                    <option value="off">no filtering</option>
+                    <option value="a">aligned only</option>
+                    <option value="s">single-aligned only</option>
+                    <option value="u">unaligned only</option>
+                </param>
+            </when>
+        </conditional>
+        <repeat name="datasets" title="datasets" default="1" min="1">    
+            <conditional name="mode_choose">
+                <param name="mode" type="select" label="choose mode" 
+                help="Reads obtained from single-end sequencing runs should be aligned in 'single' mode, paired-end reads in 'paired' mode. **WARNING**: if the read input file is in SAM/BAM format, the current version of this tool will **not** verify the mode and may produce erroneous alignments with wrong settings!">
+	                <option value="single">single-end</option>
+	                <option value="paired">paired-end</option>
+                </param>
+                <when value="single">
+	                <conditional name="input">
+                        <param name="iformat" type="select" label="input file format">
+                            <option value="bam">BAM</option>
+                            <option value="sam">SAM</option>
+		                    <option value="fastq">fastq</option>
+	                    </param>
+	                    <when value="bam">
+		                    <expand macro="sam_bam_selector" format="bam" />
+	                    </when>
+	                    <when value="sam">
+		                    <expand macro="sam_bam_selector" format="sam" />
+	                    </when>            
+	                    <when value="fastq">
+		                    <param name="ifile" type="data" format="fastq" 
+		                    label="input file"/>
+		                    <expand macro="require_metadata" />
+		                </when>
+                    </conditional>
+                    <section name="aln_options" title="Alignment options for this sample" expanded="false"
+                    help="Any options you specify here will overwrite the global alignment settings defined for all single-end samples above.">
+            	        <param name="maxdist" type="integer" optional="true" value="" 
+            	        label="edit distance" 
+            	        help="maximum edit distance allowed per read or pair (SNAP option -d); higher values allow more divergent alignments to be found, but increase the rate of misalignments."/>
+	                    <param name="confdiff" type="integer" optional="true" value=""
+	                    label="confidence threshold"
+	                    help="Confidence threshold (SNAP option -c); the minimum edit distance difference between two alternate alignments required to reject the poorer alignment as suboptimal; higher values increase the rate of ambiguously aligned reads."/>
+	                    <param name="confadpt" type="integer" optional="true" value=""
+	                    label="adaptive confdiff behaviour"
+	                    help="Specifies how many seeds of a read may be ignored (based on the maximum hits value above) before the confidence threshold above gets increased by one for that read (SNAP option -a); helps fine-tuning alignment accuracy in repetitive regions of the genome."/>  
+            	        <param name="maxseeds" type="integer" optional="true" value=""
+            	        label="maximum seeds per read"
+            	        help="Number of seeds to use per read (SNAP option -n) when trying to match it to the reference genome; higher numbers will increase the rate of aligned reads and reduce the rate of misalignments, but will reduce performance."/>
+	                    <param name="maxhits" type="integer" optional="true" value=""
+	                    label="maximum hits per seed"
+	                    help="Maximum hits to consider per seed (SNAP option -h); don't use a seed region in the alignment process if it matches more than maxhits regions in the reference genome. Higher values reduce the rate of misalignments, but reduce performance."/>
+                        <param name="clipping" type="select" display="radio"
+                        label="read clipping (default: from back and front)" 
+                        help="Specifies from which end of a read low-quality bases should be clipped (SNAP option -Cxx)">
+                            <option value="">use global setting</option>
+                            <option value="++">from back and front</option>
+                            <option value="x+">from back only</option>
+                            <option value="+x">from front only</option>
+                            <option value="xx">no clipping</option>
+                        </param>
+                    </section>
+                </when>
+                <when value="paired">	
+	                <conditional name="input">
+                        <param name="iformat" type="select" label="input file format">
+                            <option value="bam">BAM</option>
+                            <option value="sam">SAM</option>
+                            <option value="fastq">fastq</option>
+	                    </param>
+                        <when value="bam">
+		                    <expand macro="sam_bam_selector" format="bam" />
+		                </when>
+                        <when value="sam">
+		                    <expand macro="sam_bam_selector" format="sam" />
+                        </when>
+ 	                    <when value="fastq">
+ 	                        <conditional name="pe_source">
+ 	                            <param name="type" type="select"
+ 	                            label="the paired-end fastq input is provided as">
+                                    <option value="individual">Individual datasets</option>
+                                    <option value="collection">a Paired collection</option>
+                                </param>
+                                <when value="individual">
+		                            <param name="ifile1" type="data" format="fastq" 
+		                            label="inputfile with the first set of reads of paired-end data"/>
+	                                <param name="ifile2" type="data" format="fastq" 
+	                                label="inputfile with the second set of reads of paired-end data"/>
+	                            </when>
+                                <when value="collection">
+		                            <param name="input_data" type="data_collection"
+		                            collection_type="paired" format="fastq, fastq.gz" 
+		                            label="paired input dataset collection"/>
+	                            </when>
+                            </conditional>	                            
+                            <expand macro="require_metadata" />
+		                </when>
+                    </conditional>
+                    <section name="aln_options" title="Alignment options for this sample" expanded="false"
+                    help="Any options you specify here will overwrite the global alignment settings defined for all paired-end samples above.">
+            	        <param name="sp_min" type="integer" optional="true" value="0"
+            	        label="minimum spacing to allow between paired ends" 
+            	        help="Corresponds to the first value of the SNAP option -s."/>
+	                    <param name="sp_max" type="integer" optional="true" value="0"
+	                    label="maximum spacing to allow between paired ends"   
+	                    help="Corresponds to the second value of the SNAP option -s."/>
+	                    <param name="discard_overlapping_mates" type="text" optional="true" value=""
+	                    label="discard overlapping read pairs of type" 
+	                    help="Consider overlapping mate pairs of the given orientation type(s) anomalous and discard them; allowed values: RF, FR, FF, RR; multiple types may be specified as a comma-separated list and ALL can be used as a shortcut for discarding all overlapping mate pairs; leave blank to retain all overlapping pairs.">
+	                        <validator type="expression" message="only RF, FR, FF, RR or ALL are allowed as input">not value or all(token.strip(' ') in ['RF', 'FR', 'FF', 'RR', 'ALL'] for token in value.split(','))</validator>
+                        </param>
+            	        <param name="maxdist" type="integer" optional="true" value="0"
+            	        label="edit distance"
+            	        help="maximum edit distance allowed per read or pair (SNAP option -d); higher values allow more divergent alignments to be found, but increase the rate of misalignments."/>
+	                    <param name="confdiff" type="integer" optional="true" value=""
+	                    label="confidence threshold"
+	                    help="Confidence threshold (SNAP option -c); the minimum edit distance difference between two alternate alignments required to reject the poorer alignment as suboptimal; higher values increase the rate of ambiguously aligned reads."/>
+	                    <param name="confadpt" type="integer" optional="true" value=""
+	                    label="adaptive confdiff behaviour"
+	                    help="Specifies how many seeds of a read may be ignored (based on the maximum hits value above) before the confidence threshold above gets increased by one for that read (SNAP option -a); helps fine-tuning alignment accuracy in repetitive regions of the genome."/>  
+            	        <param name="maxseeds" type="integer" optional="true" value=""
+            	        label="maximum seeds per read" 
+            	        help="Number of seeds to use per read (SNAP option -n) when trying to match it to the reference genome; higher numbers will increase the rate of aligned reads and reduce the rate of misalignments, but will reduce performance."/>
+	                    <param name="maxhits" type="integer" optional="true" value=""
+	                    label="maximum hits per seed"
+	                    help="Maximum hits to consider per seed (SNAP option -h); don't use a seed region in the alignment process if it matches more than maxhits regions in the reference genome. Higher values reduce the rate of misalignments, but reduce performance."/>
+                        <param name="clipping" type="select" display="radio"
+                        label="read clipping (default: from back and front)" 
+                        help="Specifies from which end of a read low-quality bases should be clipped (SNAP option -Cxx)">
+                            <option value="">use global setting</option>
+                            <option value="++">from back and front</option>
+                            <option value="x+">from back only</option>
+                            <option value="+x">from front only</option>
+                            <option value="xx">no clipping</option>
+                        </param>
+                    </section>
+	            </when>
+            </conditional>
+        </repeat>
+    </inputs>
+
+    <outputs>
+        <data name="ofile" format="bam" 
+        label="Aligned reads from MiModd ${tool.name} on ${on_string}">
+            <change_format>
+	            <when input="output_options.oformat" value="sam" format="sam"/>
+	        </change_format>
+            <actions>
+                <conditional name="reference.source">
+                    <when value="cached">
+                        <action type="metadata" name="dbkey">
+                            <option type="from_data_table" name="all_fasta" column="1" offset="0">
+                                <filter type="param_value" ref="reference.genome" column="0" />
+                            </option>
+                        </action>
+                    </when>
+                </conditional>
+            </actions>
+        </data>
+    </outputs>
+
+    <tests>
+        <test>
+            <conditional name="reference">
+                <param name="source" value="history" />
+                <param name="genome" value="a.fa" />
+            </conditional>
+            <repeat name="datasets">
+                <conditional name="mode_choose">
+                    <param name="mode" value="single" />
+                    <conditional name="input">
+                        <param name="iformat" value="bam" />
+                        <param name="ifile" value="a_part1.bam" />
+                    </conditional>
+                </conditional>
+            </repeat>
+            <assert_command>
+                <has_text text="--idx-slack 0.3" />
+                <has_text text="--iformat bam" />
+                <has_text text="--oformat bam" />
+                <has_text text="--idx-seedsize 20" />
+                <has_text text="--idx-slack 0.3" />
+                <has_text text="--idx-overflow 40" />
+                <has_text text="--maxseeds 25" />
+                <has_text text="--maxhits 250" />
+                <has_text text="--clipping ++" />
+                <has_text text="--maxdist 8" />
+                <has_text text="--confdiff 2" />
+                <has_text text="--confadapt 7" />
+                <has_text text="--selectivity 1" />
+            </assert_command>
+        </test>
+        <test>
+            <conditional name="reference">
+                <param name="source" value="history" />
+                <param name="genome" value="a.fa" />
+            </conditional>
+            <repeat name="datasets">
+                <conditional name="mode_choose">
+                    <param name="mode" value="single" />
+                    <conditional name="input">
+                        <param name="iformat" value="bam" />
+                        <param name="ifile" value="a_part1.bam" />
+                    </conditional>
+                    <section name="aln_options">
+                        <param name="maxdist" value="7" />
+                    </section>
+                </conditional>
+            </repeat>
+            <assert_command>
+                <has_text text="--idx-slack 0.3" />
+                <has_text text="--iformat bam" />
+                <has_text text="--oformat bam" />
+                <has_text text="--idx-seedsize 20" />
+                <has_text text="--idx-slack 0.3" />
+                <has_text text="--idx-overflow 40" />
+                <has_text text="--maxseeds 25" />
+                <has_text text="--maxhits 250" />
+                <has_text text="--clipping ++" />
+                <has_text text="--maxdist 7" />
+                <has_text text="--confdiff 2" />
+                <has_text text="--confadapt 7" />
+                <has_text text="--selectivity 1" />
+            </assert_command>
+        </test>
+    </tests>
+    
+    <help><![CDATA[
+.. class:: infomark
+
+   **What it does**
+
+The tool aligns the sequenced reads in an arbitrary number of input datasets
+against a common reference genome and stores the results in a single, possibly
+multi-sample output dataset.
+
+Internally, the tool uses the ultrafast, hashtable-based aligner SNAP (http://snap.cs.berkeley.edu). 
+
+----------
+
+**Notes:**
+
+*Input formats*
+
+- The tool accepts SAM, BAM, fastq and fastq.gz input datasets of sequenced
+  reads and supports both single-end and paired-end data.
+  
+  The recommended approach with MiModD is to store NGS datasets in SAM/BAM
+  format with *Run Metadata* (see below) stored in the file header. You can use
+  the *MiModD Run Annotation* and *MiModD Convert* tools to convert data from
+  fastq format to SAM/BAM format while attaching run metadata to it.
+  
+  While alignments **directly from fastq format** are supported, this **is less
+  reliable** due to less strict specifications of this format. If you find
+  the tool complaining about malformed fastq input, it is likely that you can
+  fix this problem by converting the data to SAM/BAM format first.
+
+- If you wish to align paired-end data directly from fastq format, the mate
+  sequence data has to be split over two datasets as is mostly standard today.
+  If you have your paired-end data as a single dataset you may look into the
+  *FASTQ splitter* and *FASTQ de-interlacer* tools for Galaxy, which are
+  available from the `Fastq Manipulation category`_ of the Galaxy Tool Shed and
+  may be able to convert your files to the expected format.
+
+*Run Metadata*
+
+- **Every input file requires accompanying Run Metadata!** Most importantly,
+  this includes a *read-group ID* (an identifier of the sequencing run that
+  produced the data) and a *sample name* (identifying the
+  biological sample sequenced in the run).
+
+- If an input dataset does not provide this information directly (fastq
+  datasets never do; SAM/BAM datasets may provide it in their header), you need
+  to specify a separate SAM/BAM dataset with an appropriate header as the
+  source of the Run Metadata.
+  
+  You can use the *MiModD Run Annotation* tool to generate such a file.
+  
+- If a SAM/BAM input dataset already provides Run Metadata, you can still
+  specify a different Run Metadata source, which will then overwrite the
+  information already present in the input. This is useful, for example, to
+  resolve read-group ID conflicts between multiple input datasets.
+
+- Every input dataset can only contain reads from a single read-group. If you
+  would like, for example, to realign the reads in a multi-sample SAM/BAM
+  dataset. You should first use the *MiModD Sort* tool to sort the data by read
+  names (this step is only necessary for paired-end data), then split the reads
+  into new per-read-group datasets using the *MiModD Convert* tool.
+
+- Several input datasets can declare identical read-group IDs and/or sample
+  names.
+  
+  Identical read-group IDs mean that the datasets were produced in the
+  same sequencing run, as is the case, for example, with partial fastq
+  sequencing data. In the output dataset, the corresponding reads will be
+  merged and it will not be possible to trace back their source.
+  
+  Identical sample names (but different read-group IDs) indicate that the same
+  sample has been sequenced multiple times. In the output dataset, the
+  corresponding reads will be tagged appropriately and tools like the
+  *MiModD Variant Calling* tool will let you decide whether you want to treat
+  them together or separately.
+
+----------
+  
+**Tool Options**
+
+The section *Alignment parameters* lets you configure global settings for the
+alignment job that will be applied to all input datasets. For each input
+dataset, however, you can overwrite some or all of these settings by specifying
+new values in the section *Alignment options for this sample*. Some of the
+alignment parameters may have **big** effects on the alignment quality, but
+these effects are very dependent on the type of input sequences. You are
+strongly encouraged to consult the in-depth `tool documentation`_ for detailed
+explanations of the available options.
+
+.. _Fastq Manipulation category: https://toolshed.g2.bx.psu.edu/repository/browse_repositories_in_category?id=310ff67d4caf6531
+.. _recipe for using gzipped fastq files in Galaxy: http://mimodd.readthedocs.org/en/latest/recipes.html#use-gzipped-fastq-files-in-galaxy
+.. _tool documentation: http://mimodd.readthedocs.io/en/@MIMODD_REAL_VERSION@/tool_doc.html#snap
+
+@HELP_FOOTER@
+    ]]></help>
+    <expand macro="citations" />
+</tool>
+
