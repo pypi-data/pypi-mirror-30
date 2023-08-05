@@ -1,0 +1,912 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>mriqc.classifier.helper &mdash; mriqc 0.9 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="author" title="About these documents"
+              href="../../../about.html"/>
+        <link rel="index" title="Index"
+              href="../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../search.html"/>
+    <link rel="top" title="mriqc 0.9 documentation" href="../../../index.html"/>
+        <link rel="up" title="Module code" href="../../index.html"/> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> mriqc
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                0.9
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../about.html">Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../running.html">Running mriqc</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../docker.html">Run mriqc with docker</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../measures.html">Image Quality Metrics (IQMs)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reports.html">Visual reports</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../workflows.html">The MRIQC workflows</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../classifier.html">The MRIQC classifier for T1w images</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">mriqc</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>mriqc.classifier.helper</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for mriqc.classifier.helper</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python</span>
+<span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="c1"># @Author: oesteban</span>
+<span class="c1"># @Date:   2015-11-19 16:44:27</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Cross-validation helper</span>
+<span class="sd">^^^^^^^^^^^^^^^^^^^^^^^</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">division</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="k">import</span> <span class="n">datetime</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">from</span> <span class="nn">pkg_resources</span> <span class="k">import</span> <span class="n">resource_filename</span> <span class="k">as</span> <span class="n">pkgrf</span>
+
+<span class="c1"># sklearn overrides</span>
+<span class="kn">from</span> <span class="nn">.sklearn</span> <span class="k">import</span> <span class="n">preprocessing</span> <span class="k">as</span> <span class="n">mcsp</span>
+<span class="kn">from</span> <span class="nn">.sklearn._split</span> <span class="k">import</span> <span class="p">(</span><span class="n">RobustLeavePGroupsOut</span> <span class="k">as</span> <span class="n">LeavePGroupsOut</span><span class="p">,</span>
+                             <span class="n">RepeatedBalancedKFold</span><span class="p">,</span> <span class="n">RepeatedPartiallyHeldOutKFold</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">.sklearn._validation</span> <span class="k">import</span> <span class="n">cross_val_score</span><span class="p">,</span> <span class="n">permutation_test_score</span>
+
+<span class="c1"># sklearn module</span>
+<span class="kn">from</span> <span class="nn">sklearn</span> <span class="k">import</span> <span class="n">metrics</span> <span class="k">as</span> <span class="n">slm</span>
+<span class="kn">from</span> <span class="nn">sklearn.pipeline</span> <span class="k">import</span> <span class="n">Pipeline</span>
+<span class="kn">from</span> <span class="nn">sklearn.preprocessing</span> <span class="k">import</span> <span class="n">LabelBinarizer</span>
+<span class="kn">from</span> <span class="nn">sklearn.metrics.scorer</span> <span class="k">import</span> <span class="n">check_scoring</span>
+<span class="kn">from</span> <span class="nn">sklearn.model_selection</span> <span class="k">import</span> <span class="p">(</span><span class="n">RepeatedStratifiedKFold</span><span class="p">,</span> <span class="n">GridSearchCV</span><span class="p">,</span> <span class="n">RandomizedSearchCV</span><span class="p">,</span>
+                                     <span class="n">PredefinedSplit</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">sklearn.ensemble</span> <span class="k">import</span> <span class="n">RandomForestClassifier</span> <span class="k">as</span> <span class="n">RFC</span>
+<span class="kn">from</span> <span class="nn">sklearn.svm</span> <span class="k">import</span> <span class="n">SVC</span><span class="p">,</span> <span class="n">LinearSVC</span>
+<span class="kn">from</span> <span class="nn">sklearn.multiclass</span> <span class="k">import</span> <span class="n">OneVsRestClassifier</span>
+<span class="c1"># xgboost</span>
+<span class="kn">from</span> <span class="nn">xgboost</span> <span class="k">import</span> <span class="n">XGBClassifier</span>
+
+<span class="kn">from</span> <span class="nn">..</span> <span class="k">import</span> <span class="n">__version__</span><span class="p">,</span> <span class="n">logging</span>
+<span class="kn">from</span> <span class="nn">.data</span> <span class="k">import</span> <span class="n">read_dataset</span><span class="p">,</span> <span class="n">get_bids_cols</span>
+<span class="kn">from</span> <span class="nn">..viz.misc</span> <span class="k">import</span> <span class="n">plot_roc_curve</span>
+
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">object</span>
+
+<span class="n">LOG</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;mriqc.classifier&#39;</span><span class="p">)</span>
+<span class="n">LOG</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+
+<span class="n">FEATURE_NORM</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s1">&#39;cjv&#39;</span><span class="p">,</span> <span class="s1">&#39;cnr&#39;</span><span class="p">,</span> <span class="s1">&#39;efc&#39;</span><span class="p">,</span> <span class="s1">&#39;fber&#39;</span><span class="p">,</span> <span class="s1">&#39;fwhm_avg&#39;</span><span class="p">,</span> <span class="s1">&#39;fwhm_x&#39;</span><span class="p">,</span> <span class="s1">&#39;fwhm_y&#39;</span><span class="p">,</span> <span class="s1">&#39;fwhm_z&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;snr_csf&#39;</span><span class="p">,</span> <span class="s1">&#39;snr_gm&#39;</span><span class="p">,</span> <span class="s1">&#39;snr_total&#39;</span><span class="p">,</span> <span class="s1">&#39;snr_wm&#39;</span><span class="p">,</span> <span class="s1">&#39;snrd_csf&#39;</span><span class="p">,</span> <span class="s1">&#39;snrd_gm&#39;</span><span class="p">,</span> <span class="s1">&#39;snrd_total&#39;</span><span class="p">,</span> <span class="s1">&#39;snrd_wm&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;summary_csf_mad&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_csf_mean&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_csf_median&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;summary_csf_p05&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_csf_p95&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_csf_stdv&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;summary_gm_k&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_gm_mad&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_gm_mean&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_gm_median&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;summary_gm_p05&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_gm_p95&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_gm_stdv&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;summary_wm_k&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_wm_mad&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_wm_mean&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_wm_median&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;summary_wm_p05&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_wm_p95&#39;</span><span class="p">,</span> <span class="s1">&#39;summary_wm_stdv&#39;</span>
+<span class="p">]</span>
+
+
+<div class="viewcode-block" id="CVHelperBase"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelperBase">[docs]</a><span class="k">class</span> <span class="nc">CVHelperBase</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    A base helper to build cross-validation schemes</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">param_file</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">site_label</span><span class="o">=</span><span class="s1">&#39;site&#39;</span><span class="p">,</span>
+                 <span class="n">rate_label</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">rate_selection</span><span class="o">=</span><span class="s1">&#39;random&#39;</span><span class="p">,</span>
+                 <span class="n">scorer</span><span class="o">=</span><span class="s1">&#39;roc_auc&#39;</span><span class="p">,</span> <span class="n">multiclass</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">verbosity</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="c1"># Initialize some values</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_param_file</span> <span class="o">=</span> <span class="n">param_file</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_jobs</span> <span class="o">=</span> <span class="n">n_jobs</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span> <span class="o">=</span> <span class="n">rate_label</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_site_column</span> <span class="o">=</span> <span class="n">site_label</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span> <span class="o">=</span> <span class="n">multiclass</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span> <span class="o">=</span> <span class="n">debug</span>
+
+        <span class="k">if</span> <span class="n">rate_label</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">rate_label</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;rater_1&#39;</span><span class="p">,</span> <span class="s1">&#39;rater_2&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span> <span class="o">=</span> <span class="n">rate_label</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="o">=</span> <span class="n">read_dataset</span><span class="p">(</span>
+            <span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">rate_label</span><span class="o">=</span><span class="n">rate_label</span><span class="p">,</span> <span class="n">rate_selection</span><span class="o">=</span><span class="n">rate_selection</span><span class="p">,</span>
+            <span class="n">binarize</span><span class="o">=</span><span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sites</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">[</span><span class="n">site_label</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span> <span class="o">=</span> <span class="n">scorer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_balanced_leaveout</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_verbosity</span> <span class="o">=</span> <span class="n">verbosity</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">ftnames</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">rate_column</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span>
+
+<div class="viewcode-block" id="CVHelperBase.fit"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelperBase.fit">[docs]</a>    <span class="k">def</span> <span class="nf">fit</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+<div class="viewcode-block" id="CVHelperBase.predict_dataset"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelperBase.predict_dataset">[docs]</a>    <span class="k">def</span> <span class="nf">predict_dataset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">thres</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">save_pred</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">site</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+<div class="viewcode-block" id="CVHelperBase.predict"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelperBase.predict">[docs]</a>    <span class="k">def</span> <span class="nf">predict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">thres</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">return_proba</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div></div>
+
+
+<div class="viewcode-block" id="CVHelper"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper">[docs]</a><span class="k">class</span> <span class="nc">CVHelper</span><span class="p">(</span><span class="n">CVHelperBase</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">Y</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">load_clf</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">param_file</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+                 <span class="n">site_label</span><span class="o">=</span><span class="s1">&#39;site&#39;</span><span class="p">,</span> <span class="n">rate_label</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scorer</span><span class="o">=</span><span class="s1">&#39;roc_auc&#39;</span><span class="p">,</span>
+                 <span class="n">b_leaveout</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">multiclass</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">verbosity</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="s1">&#39;kfold&#39;</span><span class="p">,</span>
+                 <span class="n">debug</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s1">&#39;rfc&#39;</span><span class="p">,</span> <span class="n">basename</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">nested_cv</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                 <span class="n">nested_cv_kfold</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">permutation_test</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">X</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">Y</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">and</span> <span class="n">load_clf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Either load_clf or X &amp; Y should be supplied&#39;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pickled</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_batch_effect</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_split</span> <span class="o">=</span> <span class="n">split</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_leaveout</span> <span class="o">=</span> <span class="n">b_leaveout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="n">model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_base_name</span> <span class="o">=</span> <span class="n">basename</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nestedcv</span> <span class="o">=</span> <span class="n">nested_cv</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nestedcv_kfold</span> <span class="o">=</span> <span class="n">nested_cv_kfold</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_permutation_test</span> <span class="o">=</span> <span class="n">permutation_test</span>
+
+        <span class="k">if</span> <span class="n">load_clf</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">n_jobs</span> <span class="o">=</span> <span class="n">n_jobs</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">load_clf</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span> <span class="o">=</span> <span class="n">rate_label</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span> <span class="o">=</span> <span class="n">multiclass</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_base_name</span> <span class="o">=</span> <span class="n">basename</span><span class="p">[:</span><span class="mi">24</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">super</span><span class="p">(</span><span class="n">CVHelper</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+                <span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">param_file</span><span class="o">=</span><span class="n">param_file</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=</span><span class="n">n_jobs</span><span class="p">,</span>
+                <span class="n">site_label</span><span class="o">=</span><span class="n">site_label</span><span class="p">,</span> <span class="n">rate_label</span><span class="o">=</span><span class="n">rate_label</span><span class="p">,</span> <span class="n">scorer</span><span class="o">=</span><span class="n">scorer</span><span class="p">,</span>
+                <span class="n">multiclass</span><span class="o">=</span><span class="n">multiclass</span><span class="p">,</span> <span class="n">verbosity</span><span class="o">=</span><span class="n">verbosity</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="n">debug</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">estimator</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">Xtest</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span>
+
+<div class="viewcode-block" id="CVHelper.setXtest"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.setXtest">[docs]</a>    <span class="k">def</span> <span class="nf">setXtest</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">read_dataset</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">rate_label</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">,</span>
+                                      <span class="n">binarize</span><span class="o">=</span><span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;site&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="o">.</span><span class="n">columns</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;TestSite&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_gen_fname</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">suffix</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">ext</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ext</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+        <span class="k">if</span> <span class="n">suffix</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">suffix</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">ext</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">):</span>
+            <span class="n">ext</span> <span class="o">=</span> <span class="s1">&#39;.&#39;</span> <span class="o">+</span> <span class="n">ext</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">suffix</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">):</span>
+            <span class="n">suffix</span> <span class="o">=</span> <span class="s1">&#39;_&#39;</span> <span class="o">+</span> <span class="n">suffix</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_base_name</span> <span class="o">+</span> <span class="n">suffix</span> <span class="o">+</span> <span class="n">ext</span>
+
+    <span class="k">def</span> <span class="nf">_get_model</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">==</span> <span class="s1">&#39;xgb&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">XGBClassifier</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">==</span> <span class="s1">&#39;svc_rbf&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SVC</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">==</span> <span class="s1">&#39;svc_lin&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">LinearSVC</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">RFC</span><span class="p">()</span>
+
+<div class="viewcode-block" id="CVHelper.fit"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.fit">[docs]</a>    <span class="k">def</span> <span class="nf">fit</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Fits the cross-validation helper</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pickled</span><span class="p">:</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Classifier was loaded from file, cancelling fitting.&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_leaveout</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;CV [Setting up pipeline] - scorer: </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">)</span>
+
+        <span class="n">feat_sel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="o">+</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">]</span>
+
+        <span class="n">steps</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s1">&#39;std&#39;</span><span class="p">,</span> <span class="n">mcsp</span><span class="o">.</span><span class="n">BatchRobustScaler</span><span class="p">(</span>
+                <span class="n">by</span><span class="o">=</span><span class="s1">&#39;site&#39;</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="n">ft</span> <span class="k">for</span> <span class="n">ft</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="k">if</span> <span class="n">ft</span> <span class="ow">in</span> <span class="n">FEATURE_NORM</span><span class="p">])),</span>
+            <span class="p">(</span><span class="s1">&#39;sel_cols&#39;</span><span class="p">,</span> <span class="n">mcsp</span><span class="o">.</span><span class="n">PandasAdaptor</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="o">+</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">])),</span>
+            <span class="p">(</span><span class="s1">&#39;ft_sites&#39;</span><span class="p">,</span> <span class="n">mcsp</span><span class="o">.</span><span class="n">SiteCorrelationSelector</span><span class="p">()),</span>
+            <span class="p">(</span><span class="s1">&#39;ft_noise&#39;</span><span class="p">,</span> <span class="n">mcsp</span><span class="o">.</span><span class="n">CustFsNoiseWinnow</span><span class="p">()),</span>
+            <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_model</span><span class="p">())</span>
+        <span class="p">]</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="c1"># If multiclass: binarize labels and wrap classifier</span>
+            <span class="n">steps</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;bin&#39;</span><span class="p">,</span> <span class="n">LabelBinarizer</span><span class="p">()))</span>
+            <span class="n">steps</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">steps</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="n">OneVsRestClassifier</span><span class="p">(</span><span class="n">steps</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]))</span>
+
+        <span class="n">pipe</span> <span class="o">=</span> <span class="n">Pipeline</span><span class="p">(</span><span class="n">steps</span><span class="p">)</span>
+
+        <span class="c1"># Prepare data splits for CV</span>
+        <span class="n">fit_args</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_split</span> <span class="o">==</span> <span class="s1">&#39;kfold&#39;</span><span class="p">:</span>
+            <span class="n">kf_params</span> <span class="o">=</span> <span class="p">{}</span> <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span> <span class="k">else</span> <span class="p">{</span><span class="s1">&#39;n_splits&#39;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s1">&#39;n_repeats&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+            <span class="n">splits</span> <span class="o">=</span> <span class="n">RepeatedStratifiedKFold</span><span class="p">(</span><span class="o">**</span><span class="n">kf_params</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_split</span> <span class="o">==</span> <span class="s1">&#39;loso&#39;</span><span class="p">:</span>
+            <span class="n">splits</span> <span class="o">=</span> <span class="n">LeavePGroupsOut</span><span class="p">(</span><span class="n">n_groups</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_split</span> <span class="o">==</span> <span class="s1">&#39;balanced-kfold&#39;</span><span class="p">:</span>
+            <span class="n">kf_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;n_splits&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="s1">&#39;n_repeats&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">}</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span><span class="p">:</span>
+                <span class="n">kf_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;n_splits&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;n_repeats&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+            <span class="n">splits</span> <span class="o">=</span> <span class="n">RepeatedBalancedKFold</span><span class="p">(</span><span class="o">**</span><span class="n">kf_params</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_split</span> <span class="o">==</span> <span class="s1">&#39;batch&#39;</span><span class="p">:</span>
+            <span class="c1"># Get test label</span>
+            <span class="n">test_site</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="o">.</span><span class="n">site</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()))[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="c1"># Merge test and train</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">test_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="o">.</span><span class="n">site</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span> <span class="o">==</span> <span class="n">test_site</span>
+
+            <span class="n">kf_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;n_splits&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="s1">&#39;n_repeats&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span><span class="p">:</span>
+                <span class="n">kf_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;n_splits&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;n_repeats&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+            <span class="n">kf_params</span><span class="p">[</span><span class="s1">&#39;groups&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">test_mask</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+            <span class="n">splits</span> <span class="o">=</span> <span class="n">RepeatedPartiallyHeldOutKFold</span><span class="p">(</span><span class="o">**</span><span class="n">kf_params</span><span class="p">)</span>
+
+        <span class="n">train_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="n">grid</span> <span class="o">=</span> <span class="n">RandomizedSearchCV</span><span class="p">(</span>
+            <span class="n">pipe</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_params_dist</span><span class="p">(),</span>
+            <span class="n">n_iter</span><span class="o">=</span><span class="mi">1</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span> <span class="k">else</span> <span class="mi">50</span><span class="p">,</span>
+            <span class="n">error_score</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+            <span class="n">refit</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">scoring</span><span class="o">=</span><span class="n">check_scoring</span><span class="p">(</span><span class="n">pipe</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">),</span>
+            <span class="n">n_jobs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">n_jobs</span><span class="p">,</span>
+            <span class="n">cv</span><span class="o">=</span><span class="n">splits</span><span class="p">,</span>
+            <span class="n">verbose</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_verbosity</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nestedcv</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nestedcv_kfold</span><span class="p">:</span>
+            <span class="n">outer_cv</span> <span class="o">=</span> <span class="n">LeavePGroupsOut</span><span class="p">(</span><span class="n">n_groups</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nestedcv_kfold</span><span class="p">:</span>
+                <span class="n">outer_cv</span> <span class="o">=</span> <span class="n">RepeatedStratifiedKFold</span><span class="p">(</span><span class="n">n_repeats</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_splits</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+
+            <span class="n">n_iter</span> <span class="o">=</span> <span class="mi">32</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;svc_lin&#39;</span><span class="p">,</span> <span class="s1">&#39;xgb&#39;</span><span class="p">]</span> <span class="k">else</span> <span class="mi">50</span>
+            <span class="n">grid</span> <span class="o">=</span> <span class="n">RandomizedSearchCV</span><span class="p">(</span>
+                <span class="n">pipe</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_params_dist</span><span class="p">(),</span>
+                <span class="n">n_iter</span><span class="o">=</span><span class="n">n_iter</span> <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span> <span class="k">else</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="n">error_score</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+                <span class="n">refit</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">scoring</span><span class="o">=</span><span class="n">check_scoring</span><span class="p">(</span><span class="n">pipe</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">),</span>
+                <span class="n">n_jobs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">n_jobs</span><span class="p">,</span>
+                <span class="n">cv</span><span class="o">=</span><span class="n">splits</span><span class="p">,</span>
+                <span class="n">verbose</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_verbosity</span><span class="p">)</span>
+
+            <span class="n">nested_score</span><span class="p">,</span> <span class="n">group_order</span> <span class="o">=</span> <span class="n">cross_val_score</span><span class="p">(</span>
+                <span class="n">grid</span><span class="p">,</span>
+                <span class="n">X</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span>
+                <span class="n">y</span><span class="o">=</span><span class="n">train_y</span><span class="p">,</span>
+                <span class="n">cv</span><span class="o">=</span><span class="n">outer_cv</span><span class="p">,</span>
+                <span class="n">scoring</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;roc_auc&#39;</span><span class="p">,</span> <span class="s1">&#39;accuracy&#39;</span><span class="p">],</span>
+            <span class="p">)</span>
+
+            <span class="n">nested_means</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">average</span><span class="p">(</span><span class="n">nested_score</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">nested_std</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">nested_score</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Nested CV [avg] </span><span class="si">%s</span><span class="s1">=</span><span class="si">%.3f</span><span class="s1"> (+/-</span><span class="si">%.3f</span><span class="s1">), accuracy=</span><span class="si">%.3f</span><span class="s1"> (+/-</span><span class="si">%.3f</span><span class="s1">)&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">,</span>
+                     <span class="n">nested_means</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">nested_std</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">nested_means</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">nested_std</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Nested CV </span><span class="si">%s</span><span class="s1">=</span><span class="si">%s</span><span class="s1">.&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">,</span>
+                     <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%.3f</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">nested_score</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">()))</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Nested CV accuracy=</span><span class="si">%s</span><span class="s1">.&#39;</span><span class="p">,</span>
+                     <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%.3f</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">nested_score</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">()))</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Nested CV groups=</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">group_order</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">grid</span> <span class="o">=</span> <span class="n">GridSearchCV</span><span class="p">(</span>
+                <span class="n">pipe</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_params</span><span class="p">(),</span>
+                <span class="n">error_score</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+                <span class="n">refit</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">scoring</span><span class="o">=</span><span class="n">check_scoring</span><span class="p">(</span><span class="n">pipe</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">),</span>
+                <span class="n">n_jobs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">n_jobs</span><span class="p">,</span>
+                <span class="n">cv</span><span class="o">=</span><span class="n">splits</span><span class="p">,</span>
+                <span class="n">verbose</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_verbosity</span><span class="p">)</span>
+
+        <span class="n">grid</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span> <span class="n">train_y</span><span class="p">,</span> <span class="o">**</span><span class="n">fit_args</span><span class="p">)</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">savez</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_gen_fname</span><span class="p">(</span><span class="n">suffix</span><span class="o">=</span><span class="s1">&#39;cvres&#39;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s1">&#39;npz&#39;</span><span class="p">)),</span>
+                 <span class="n">cv_results</span><span class="o">=</span><span class="n">grid</span><span class="o">.</span><span class="n">cv_results_</span><span class="p">)</span>
+
+        <span class="n">best_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">grid</span><span class="o">.</span><span class="n">cv_results_</span><span class="p">[</span><span class="s1">&#39;rank_test_score&#39;</span><span class="p">])</span>
+
+        <span class="c1"># Save estimator and get its parameters</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span> <span class="o">=</span> <span class="n">grid</span><span class="o">.</span><span class="n">best_estimator_</span>
+        <span class="n">cvparams</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">get_params</span><span class="p">()</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;CV [Best model] </span><span class="si">%s</span><span class="s1">=</span><span class="si">%s</span><span class="s1">, mean=</span><span class="si">%.3f</span><span class="s1">, std=</span><span class="si">%.3f</span><span class="s1">.&#39;</span><span class="p">,</span>
+                 <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">,</span> <span class="n">grid</span><span class="o">.</span><span class="n">best_score_</span><span class="p">,</span>
+                 <span class="n">grid</span><span class="o">.</span><span class="n">cv_results_</span><span class="p">[</span><span class="s1">&#39;mean_test_score&#39;</span><span class="p">][</span><span class="n">best_pos</span><span class="p">],</span>
+                 <span class="n">grid</span><span class="o">.</span><span class="n">cv_results_</span><span class="p">[</span><span class="s1">&#39;std_test_score&#39;</span><span class="p">][</span><span class="n">best_pos</span><span class="p">],</span>
+                 <span class="p">)</span>
+        <span class="n">LOG</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">18</span><span class="p">,</span> <span class="s1">&#39;CV [Best model] parameters</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">cvparams</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">cvparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">+</span> <span class="s1">&#39;__oob_score&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;CV [Best model] OOB </span><span class="si">%s</span><span class="s1">=</span><span class="si">%.3f</span><span class="s1">&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">,</span>
+                     <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">named_steps</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="p">]</span><span class="o">.</span><span class="n">oob_score_</span><span class="p">)</span>
+
+        <span class="c1"># Report preprocessing selections</span>
+        <span class="n">prep_msg</span> <span class="o">=</span> <span class="s1">&#39; * Robust scaling (centering): </span><span class="si">%s</span><span class="s1">.</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span>
+            <span class="s1">&#39;enabled&#39;</span> <span class="k">if</span> <span class="n">cvparams</span><span class="p">[</span><span class="s1">&#39;std__with_centering&#39;</span><span class="p">]</span> <span class="k">else</span> <span class="s1">&#39;disabled&#39;</span><span class="p">)</span>
+        <span class="n">prep_msg</span> <span class="o">+=</span> <span class="s1">&#39; * Robust scaling (scaling): </span><span class="si">%s</span><span class="s1">.</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span>
+            <span class="s1">&#39;enabled&#39;</span> <span class="k">if</span> <span class="n">cvparams</span><span class="p">[</span><span class="s1">&#39;std__with_scaling&#39;</span><span class="p">]</span> <span class="k">else</span> <span class="s1">&#39;disabled&#39;</span><span class="p">)</span>
+        <span class="n">prep_msg</span> <span class="o">+=</span> <span class="s1">&#39; * SiteCorrelation feature selection: </span><span class="si">%s</span><span class="s1">.</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span>
+            <span class="s1">&#39;disabled&#39;</span> <span class="k">if</span> <span class="n">cvparams</span><span class="p">[</span><span class="s1">&#39;ft_sites__disable&#39;</span><span class="p">]</span> <span class="k">else</span> <span class="s1">&#39;enabled&#39;</span><span class="p">)</span>
+        <span class="n">prep_msg</span> <span class="o">+=</span> <span class="s1">&#39; * Winnow feature selection: </span><span class="si">%s</span><span class="s1">.</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span>
+            <span class="s1">&#39;disabled&#39;</span> <span class="k">if</span> <span class="n">cvparams</span><span class="p">[</span><span class="s1">&#39;ft_noise__disable&#39;</span><span class="p">]</span> <span class="k">else</span> <span class="s1">&#39;enabled&#39;</span><span class="p">)</span>
+
+        <span class="n">selected</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">feat_sel</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cvparams</span><span class="p">[</span><span class="s1">&#39;ft_sites__disable&#39;</span><span class="p">]:</span>
+            <span class="n">sitesmask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">named_steps</span><span class="p">[</span><span class="s1">&#39;ft_sites&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mask_</span>
+            <span class="n">selected</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">[</span><span class="n">feat_sel</span><span class="p">]</span><span class="o">.</span><span class="n">columns</span><span class="o">.</span><span class="n">ravel</span><span class="p">()[</span><span class="n">sitesmask</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cvparams</span><span class="p">[</span><span class="s1">&#39;ft_noise__disable&#39;</span><span class="p">]:</span>
+            <span class="n">winnowmask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">named_steps</span><span class="p">[</span><span class="s1">&#39;ft_noise&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mask_</span>
+            <span class="n">selected</span> <span class="o">=</span> <span class="n">selected</span><span class="p">[</span><span class="n">winnowmask</span><span class="p">]</span>
+
+        <span class="n">selected</span> <span class="o">=</span> <span class="n">selected</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="k">if</span> <span class="s1">&#39;site&#39;</span> <span class="ow">in</span> <span class="n">selected</span><span class="p">:</span>
+            <span class="n">selected</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="s1">&#39;site&#39;</span><span class="p">)</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;CV [Preprocessing]:</span><span class="se">\n</span><span class="si">%s</span><span class="s1"> * Features selected: </span><span class="si">%s</span><span class="s1">.&#39;</span><span class="p">,</span>
+                 <span class="n">prep_msg</span><span class="p">,</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s1">&#39;&quot;</span><span class="si">%s</span><span class="s1">&quot;&#39;</span> <span class="o">%</span> <span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">selected</span><span class="p">]))</span>
+
+        <span class="c1"># If leaveout, test and refit</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_leaveout</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_fit_leaveout</span><span class="p">(</span><span class="n">leaveout_x</span><span class="p">,</span> <span class="n">leaveout_y</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span></div>
+
+    <span class="k">def</span> <span class="nf">_fit_leaveout</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">leaveout_x</span><span class="p">,</span> <span class="n">leaveout_y</span><span class="p">):</span>
+
+        <span class="n">target_names</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;accept&#39;</span><span class="p">,</span> <span class="s1">&#39;exclude&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="n">target_names</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;exclude&#39;</span><span class="p">,</span> <span class="s1">&#39;doubtful&#39;</span><span class="p">,</span> <span class="s1">&#39;accept&#39;</span><span class="p">]</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Testing on left-out, balanced subset ...&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Predict</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">pred_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">leaveout_x</span><span class="p">)</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Classification report:</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
+                 <span class="n">slm</span><span class="o">.</span><span class="n">classification_report</span><span class="p">(</span><span class="n">leaveout_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">,</span>
+                                           <span class="n">target_names</span><span class="o">=</span><span class="n">target_names</span><span class="p">))</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_score</span><span class="p">(</span><span class="n">leaveout_x</span><span class="p">,</span> <span class="n">leaveout_y</span><span class="p">)</span>
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Performance on balanced left-out (</span><span class="si">%s</span><span class="s1">=</span><span class="si">%f</span><span class="s1">)&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">,</span> <span class="n">score</span><span class="p">)</span>
+
+        <span class="c1"># Rewrite clf</span>
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Fitting full model (train + balanced left-out) ...&#39;</span><span class="p">)</span>
+        <span class="c1"># Features may change the robust normalization</span>
+        <span class="c1"># self._estimator.rfc__warm_start = True</span>
+        <span class="n">test_yall</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="n">test_yall</span> <span class="o">=</span> <span class="n">LabelBinarizer</span><span class="p">()</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">test_yall</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span> <span class="n">test_yall</span><span class="p">)</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Testing on left-out with full model, balanced subset ...&#39;</span><span class="p">)</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">pred_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">leaveout_x</span><span class="p">)</span>
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Classification report:</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
+                 <span class="n">slm</span><span class="o">.</span><span class="n">classification_report</span><span class="p">(</span><span class="n">leaveout_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">,</span>
+                                           <span class="n">target_names</span><span class="o">=</span><span class="n">target_names</span><span class="p">))</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_score</span><span class="p">(</span><span class="n">leaveout_x</span><span class="p">,</span> <span class="n">leaveout_y</span><span class="p">)</span>
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Performance on balanced left-out (</span><span class="si">%s</span><span class="s1">=</span><span class="si">%f</span><span class="s1">)&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">,</span> <span class="n">score</span><span class="p">)</span>
+
+<div class="viewcode-block" id="CVHelper.fit_full"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.fit_full">[docs]</a>    <span class="k">def</span> <span class="nf">fit_full</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Completes the training of the model with the examples</span>
+<span class="sd">        from the left-out dataset</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Model should be fit first&#39;</span><span class="p">)</span>
+        <span class="n">target_names</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;accept&quot;</span><span class="p">,</span> <span class="s2">&quot;exclude&quot;</span><span class="p">]</span>
+
+        <span class="n">X</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">labels_y</span> <span class="o">=</span> <span class="n">X</span><span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="n">labels_y</span> <span class="o">=</span> <span class="n">LabelBinarizer</span><span class="p">()</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">labels_y</span><span class="p">)</span>
+            <span class="n">target_names</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;exclude&quot;</span><span class="p">,</span> <span class="s2">&quot;doubtful&quot;</span><span class="p">,</span> <span class="s2">&quot;accept&quot;</span><span class="p">]</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Fitting full model ...&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">labels_y</span><span class="p">)</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Testing on left-out with full model&#39;</span><span class="p">)</span>
+        <span class="n">pred_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Classification report:</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
+                 <span class="n">slm</span><span class="o">.</span><span class="n">classification_report</span><span class="p">(</span><span class="n">labels_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">,</span>
+                                           <span class="n">target_names</span><span class="o">=</span><span class="n">target_names</span><span class="p">))</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_score</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">labels_y</span><span class="p">)</span>
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Full model performance on left-out (</span><span class="si">%s</span><span class="s1">=</span><span class="si">%f</span><span class="s1">)&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span><span class="p">,</span> <span class="n">score</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CVHelper.evaluate"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.evaluate">[docs]</a>    <span class="k">def</span> <span class="nf">evaluate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">matrix</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">save_roc</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                 <span class="n">save_pred</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Evaluate the internal estimator on the test data</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="n">scoring</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">scoring</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;accuracy&#39;</span><span class="p">]</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Testing on evaluation (left-out) dataset ...&#39;</span><span class="p">)</span>
+        <span class="n">test_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+
+        <span class="n">target_names</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;accept&quot;</span><span class="p">,</span> <span class="s2">&quot;exclude&quot;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="n">target_names</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;exclude&quot;</span><span class="p">,</span> <span class="s2">&quot;doubtful&quot;</span><span class="p">,</span> <span class="s2">&quot;accept&quot;</span><span class="p">]</span>
+            <span class="n">test_y</span> <span class="o">=</span> <span class="n">LabelBinarizer</span><span class="p">()</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">test_y</span><span class="p">)</span>
+
+        <span class="n">prob_y</span><span class="p">,</span> <span class="n">pred_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">)</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_score</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">,</span> <span class="n">test_y</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">scoring</span><span class="p">]</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Performance on evaluation set (</span><span class="si">%s</span><span class="s1">)&#39;</span><span class="p">,</span>
+                 <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s1">&#39;</span><span class="si">%s</span><span class="s1">=</span><span class="si">%.3f</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">s</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">scoring</span><span class="p">,</span> <span class="n">scores</span><span class="p">)]))</span>
+
+        <span class="n">pred_totals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">pred_y</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">prob_y</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">pred_totals</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">pred_y</span><span class="p">)</span> <span class="o">-</span> <span class="n">pred_totals</span><span class="p">,</span> <span class="n">pred_totals</span><span class="p">]</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Predictions: </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39; / &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">((</span>
+            <span class="s1">&#39;</span><span class="si">%d</span><span class="s1"> (</span><span class="si">%s</span><span class="s1">)&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pred_totals</span><span class="p">,</span> <span class="n">target_names</span><span class="p">))))</span>
+
+        <span class="k">if</span> <span class="n">matrix</span><span class="p">:</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="s1">&#39;Confusion matrix:</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">slm</span><span class="o">.</span><span class="n">confusion_matrix</span><span class="p">(</span>
+                    <span class="n">test_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">))</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="s1">&#39;Classification report:</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">slm</span><span class="o">.</span><span class="n">classification_report</span><span class="p">(</span>
+                    <span class="n">test_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">,</span> <span class="n">target_names</span><span class="o">=</span><span class="n">target_names</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">save_pred</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_save_pred_table</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">,</span> <span class="n">prob_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">,</span>
+                                  <span class="n">suffix</span><span class="o">=</span><span class="s1">&#39;data-test_pred&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">save_roc</span><span class="p">:</span>
+            <span class="n">plot_roc_curve</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">prob_y</span><span class="p">,</span>
+                           <span class="bp">self</span><span class="o">.</span><span class="n">_gen_fname</span><span class="p">(</span><span class="n">suffix</span><span class="o">=</span><span class="s1">&#39;data-test_roc&#39;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s1">&#39;png&#39;</span><span class="p">))</span>
+
+        <span class="c1"># Run a permutation test</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_permutation_test</span><span class="p">:</span>
+            <span class="c1"># Merge test and train</span>
+            <span class="n">concatenated_x</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">concatenated_y</span> <span class="o">=</span> <span class="n">concatenated_x</span><span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+            <span class="n">test_fold</span> <span class="o">=</span> <span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtest</span><span class="p">)</span>
+
+            <span class="n">permutation_scores</span> <span class="o">=</span> <span class="n">permutation_test_score</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="p">,</span> <span class="n">concatenated_x</span><span class="p">,</span> <span class="n">concatenated_y</span><span class="p">,</span>
+                <span class="n">scoring</span><span class="o">=</span><span class="s1">&#39;accuracy&#39;</span><span class="p">,</span> <span class="n">cv</span><span class="o">=</span><span class="n">PredefinedSplit</span><span class="p">(</span><span class="n">test_fold</span><span class="p">),</span>
+                <span class="n">n_permutations</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_permutation_test</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+            <span class="n">score</span> <span class="o">=</span> <span class="n">scores</span><span class="p">[</span><span class="n">scoring</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s1">&#39;accuracy&#39;</span><span class="p">)]</span>
+            <span class="n">pvalue</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">permutation_scores</span> <span class="o">&gt;=</span>
+                      <span class="n">score</span><span class="p">)</span> <span class="o">+</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_permutation_test</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Permutation test (N=</span><span class="si">%d</span><span class="s1">) for accuracy score </span><span class="si">%f</span><span class="s1"> (pvalue=</span><span class="si">%f</span><span class="s1">)&#39;</span><span class="p">,</span>
+                     <span class="bp">self</span><span class="o">.</span><span class="n">_permutation_test</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">pvalue</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">scores</span></div>
+
+<div class="viewcode-block" id="CVHelper.predict"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.predict">[docs]</a>    <span class="k">def</span> <span class="nf">predict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">thres</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">return_proba</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">        Predict class for X.</span>
+<span class="sd">        The predicted class of an input sample is a vote by the trees in</span>
+<span class="sd">        the forest, weighted by their probability estimates. That is,</span>
+<span class="sd">        the predicted class is the one with highest mean probability</span>
+<span class="sd">        estimate across the trees.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">==</span> <span class="s1">&#39;svc_lin&#39;</span><span class="p">:</span>
+            <span class="kn">from</span> <span class="nn">sklearn.base</span> <span class="k">import</span> <span class="n">clone</span>
+            <span class="kn">from</span> <span class="nn">sklearn.calibration</span> <span class="k">import</span> <span class="n">CalibratedClassifierCV</span>
+            <span class="n">clf</span> <span class="o">=</span> <span class="n">CalibratedClassifierCV</span><span class="p">(</span><span class="n">clone</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="p">)</span><span class="o">.</span><span class="n">set_param</span><span class="p">(</span>
+                <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">get_param</span><span class="p">()))</span>
+            <span class="n">train_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rate_column</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span> <span class="o">=</span> <span class="n">clf</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_Xtrain</span><span class="p">,</span> <span class="n">train_y</span><span class="p">)</span>
+
+        <span class="n">proba</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="o">.</span><span class="n">predict_proba</span><span class="p">(</span><span class="n">X</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">proba</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">pred</span> <span class="o">=</span> <span class="p">(</span><span class="n">proba</span> <span class="o">&gt;</span> <span class="n">thres</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">pred</span> <span class="o">=</span> <span class="p">(</span><span class="n">proba</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">thres</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">return_proba</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">proba</span><span class="p">,</span> <span class="n">pred</span>
+
+        <span class="k">return</span> <span class="n">pred</span></div>
+
+<div class="viewcode-block" id="CVHelper.predict_dataset"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.predict_dataset">[docs]</a>    <span class="k">def</span> <span class="nf">predict_dataset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">thres</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">save_pred</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">site</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">.data</span> <span class="k">import</span> <span class="n">read_iqms</span>
+        <span class="n">_xeval</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">read_iqms</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">site</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">site</span> <span class="o">=</span> <span class="s1">&#39;unseen&#39;</span>
+
+        <span class="n">columns</span> <span class="o">=</span> <span class="n">_xeval</span><span class="o">.</span><span class="n">columns</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="s1">&#39;site&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">columns</span><span class="p">:</span>
+            <span class="n">_xeval</span><span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">site</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">_xeval</span><span class="p">)</span>
+            <span class="n">columns</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;site&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Classifier is trained with rate_1 as last column</span>
+        <span class="k">if</span> <span class="s1">&#39;rate_1&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">columns</span><span class="p">:</span>
+            <span class="n">_xeval</span><span class="p">[</span><span class="s1">&#39;rate_1&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">_xeval</span><span class="p">)</span>
+            <span class="n">columns</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;rate_1&#39;</span><span class="p">)</span>
+
+        <span class="n">prob_y</span><span class="p">,</span> <span class="n">pred_y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">_xeval</span><span class="p">[</span><span class="n">columns</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">save_pred</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_save_pred_table</span><span class="p">(</span><span class="n">_xeval</span><span class="p">,</span> <span class="n">prob_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">,</span>
+                                  <span class="n">suffix</span><span class="o">=</span><span class="s1">&#39;data-</span><span class="si">%s</span><span class="s1">_pred&#39;</span> <span class="o">%</span> <span class="n">site</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pred_y</span></div>
+
+    <span class="k">def</span> <span class="nf">_save_pred_table</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sample</span><span class="p">,</span> <span class="n">prob_y</span><span class="p">,</span> <span class="n">pred_y</span><span class="p">,</span> <span class="n">suffix</span><span class="p">):</span>
+        <span class="n">bidts</span> <span class="o">=</span> <span class="n">get_bids_cols</span><span class="p">(</span><span class="n">sample</span><span class="p">)</span>
+        <span class="n">predf</span> <span class="o">=</span> <span class="n">sample</span><span class="p">[</span><span class="n">bidts</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="n">probs</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;proba_</span><span class="si">%d</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">i</span>
+                     <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">prob_y</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))]</span>
+            <span class="n">predf</span><span class="p">[</span><span class="s1">&#39;pred_y&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">pred_y</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">probs</span><span class="p">):</span>
+                <span class="n">predf</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">prob_y</span><span class="p">[:,</span> <span class="n">i</span><span class="p">]</span>
+
+            <span class="n">cols</span> <span class="o">=</span> <span class="n">probs</span> <span class="o">+</span> <span class="p">[</span><span class="s1">&#39;pred_y&#39;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;prob_y&#39;</span><span class="p">,</span> <span class="s1">&#39;pred_y&#39;</span><span class="p">]</span>
+            <span class="n">predf</span><span class="p">[</span><span class="s1">&#39;prob_y&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">prob_y</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+            <span class="n">predf</span><span class="p">[</span><span class="s1">&#39;pred_y&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pred_y</span>
+
+        <span class="n">predf</span><span class="p">[</span><span class="n">bidts</span> <span class="o">+</span> <span class="n">cols</span><span class="p">]</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_gen_fname</span><span class="p">(</span><span class="n">suffix</span><span class="o">=</span><span class="n">suffix</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s1">&#39;csv&#39;</span><span class="p">),</span>
+            <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="CVHelper.save"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.save">[docs]</a>    <span class="k">def</span> <span class="nf">save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">suffix</span><span class="o">=</span><span class="s1">&#39;estimator&#39;</span><span class="p">,</span> <span class="n">compress</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Pickle the estimator, adding the feature names</span>
+<span class="sd">        http://scikit-learn.org/stable/modules/model_persistence.html</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">sklearn.externals.joblib</span> <span class="k">import</span> <span class="n">dump</span> <span class="k">as</span> <span class="n">savepkl</span>
+
+        <span class="c1"># Store ftnames</span>
+        <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="p">,</span> <span class="s1">&#39;_ftnames&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span><span class="p">)</span>
+
+        <span class="c1"># Store normalization medians</span>
+        <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="p">,</span> <span class="s1">&#39;_batch_effect&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_batch_effect</span><span class="p">)</span>
+
+        <span class="n">filehandler</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_gen_fname</span><span class="p">(</span><span class="n">suffix</span><span class="o">=</span><span class="n">suffix</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s1">&#39;pklz&#39;</span><span class="p">))</span>
+
+        <span class="n">LOG</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Saving classifier to: </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">filehandler</span><span class="p">)</span>
+        <span class="n">savepkl</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="p">,</span> <span class="n">filehandler</span><span class="p">,</span> <span class="n">compress</span><span class="o">=</span><span class="n">compress</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CVHelper.load"><a class="viewcode-back" href="../../../cv/helper.html#mriqc.classifier.helper.CVHelper.load">[docs]</a>    <span class="k">def</span> <span class="nf">load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filehandler</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        UnPickle the estimator, adding the feature names</span>
+<span class="sd">        http://scikit-learn.org/stable/modules/model_persistence.html</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">sklearn.externals.joblib</span> <span class="k">import</span> <span class="n">load</span> <span class="k">as</span> <span class="n">loadpkl</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span> <span class="o">=</span> <span class="n">loadpkl</span><span class="p">(</span><span class="n">filehandler</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="p">,</span> <span class="s1">&#39;_ftnames&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_batch_effect</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span><span class="p">,</span> <span class="s1">&#39;_batch_effect&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pickled</span> <span class="o">=</span> <span class="kc">True</span></div>
+
+    <span class="k">def</span> <span class="nf">_score</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">clf</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">sklearn.model_selection._validation</span> <span class="k">import</span> <span class="n">_score</span>
+
+        <span class="k">if</span> <span class="n">scoring</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">scoring</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scorer</span>
+
+        <span class="k">if</span> <span class="n">clf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">clf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_estimator</span>
+
+        <span class="k">return</span> <span class="n">_score</span><span class="p">(</span><span class="n">clf</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">check_scoring</span><span class="p">(</span><span class="n">clf</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="n">scoring</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">_get_params</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="c1"># Some baseline parameters</span>
+        <span class="n">baseparam</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;std__by&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;std__columns&#39;</span><span class="p">:</span> <span class="p">[[</span><span class="n">ft</span> <span class="k">for</span> <span class="n">ft</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="k">if</span> <span class="n">ft</span> <span class="ow">in</span> <span class="n">FEATURE_NORM</span><span class="p">]],</span>
+            <span class="s1">&#39;sel_cols__columns&#39;</span><span class="p">:</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="o">+</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">]],</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Load in classifier parameters</span>
+        <span class="n">clfparams</span> <span class="o">=</span> <span class="n">_load_parameters</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">pkgrf</span><span class="p">(</span><span class="s1">&#39;mriqc&#39;</span><span class="p">,</span> <span class="s1">&#39;data/classifier_settings.yml&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_param_file</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_param_file</span><span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Read preprocessing parameters</span>
+        <span class="k">if</span> <span class="s1">&#39;preproc&#39;</span> <span class="ow">in</span> <span class="n">clfparams</span><span class="p">:</span>
+            <span class="n">preparams</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">clfparams</span><span class="p">[</span><span class="s1">&#39;preproc&#39;</span><span class="p">]:</span>
+                <span class="n">pcombination</span> <span class="o">=</span> <span class="p">{}</span>
+                <span class="k">for</span> <span class="n">pref</span><span class="p">,</span> <span class="n">subel</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">el</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+                    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">subel</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+                        <span class="n">pcombination</span><span class="p">[</span><span class="n">pref</span> <span class="o">+</span> <span class="s1">&#39;__&#39;</span> <span class="o">+</span> <span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                <span class="n">preparams</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pcombination</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">preparams</span> <span class="o">=</span> <span class="p">[{</span>
+                <span class="s1">&#39;std__with_centering&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+                <span class="s1">&#39;std__with_scaling&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+                <span class="s1">&#39;ft_sites__disable&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">],</span>
+                <span class="s1">&#39;ft_noise__disable&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">],</span>
+            <span class="p">}]</span>
+
+        <span class="c1"># Set base parameters</span>
+        <span class="n">preparams</span> <span class="o">=</span> <span class="p">[{</span><span class="o">**</span><span class="n">baseparam</span><span class="p">,</span> <span class="o">**</span><span class="n">prep</span><span class="p">}</span> <span class="k">for</span> <span class="n">prep</span> <span class="ow">in</span> <span class="n">preparams</span><span class="p">]</span>
+
+        <span class="c1"># Extract this model parameters</span>
+        <span class="n">prefix</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">+</span> <span class="s1">&#39;__&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="n">prefix</span> <span class="o">+=</span> <span class="s1">&#39;estimator__&#39;</span>
+        <span class="n">modparams</span> <span class="o">=</span> <span class="p">{</span><span class="n">prefix</span> <span class="o">+</span> <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">clfparams</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">())}</span>
+
+        <span class="c1"># Merge model parameters + preprocessing</span>
+        <span class="n">modparams</span> <span class="o">=</span> <span class="p">[{</span><span class="o">**</span><span class="n">prep</span><span class="p">,</span> <span class="o">**</span><span class="n">modparams</span><span class="p">}</span> <span class="k">for</span> <span class="n">prep</span> <span class="ow">in</span> <span class="n">preparams</span><span class="p">]</span>
+
+        <span class="c1"># Evaluate just one model if debug</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span><span class="p">:</span>
+            <span class="n">modparams</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="p">[</span><span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">modparams</span><span class="o">.</span><span class="n">items</span><span class="p">())}</span>
+
+        <span class="k">return</span> <span class="n">modparams</span>
+
+    <span class="k">def</span> <span class="nf">_get_params_dist</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">preparams</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;std__by&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;std__with_centering&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">],</span>
+            <span class="s1">&#39;std__with_scaling&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">],</span>
+            <span class="s1">&#39;std__columns&#39;</span><span class="p">:</span> <span class="p">[[</span><span class="n">ft</span> <span class="k">for</span> <span class="n">ft</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="k">if</span> <span class="n">ft</span> <span class="ow">in</span> <span class="n">FEATURE_NORM</span><span class="p">]],</span>
+            <span class="s1">&#39;sel_cols__columns&#39;</span><span class="p">:</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="o">+</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">]],</span>
+            <span class="s1">&#39;ft_sites__disable&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="kc">True</span><span class="p">],</span>
+            <span class="s1">&#39;ft_noise__disable&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="kc">True</span><span class="p">],</span>
+        <span class="p">}</span>
+
+        <span class="n">prefix</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">+</span> <span class="s1">&#39;__&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_multiclass</span><span class="p">:</span>
+            <span class="n">prefix</span> <span class="o">+=</span> <span class="s1">&#39;estimator__&#39;</span>
+
+        <span class="n">clfparams</span> <span class="o">=</span> <span class="n">_load_parameters</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">pkgrf</span><span class="p">(</span><span class="s1">&#39;mriqc&#39;</span><span class="p">,</span> <span class="s1">&#39;data/model_selection.yml&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_param_file</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_param_file</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">modparams</span> <span class="o">=</span> <span class="p">{</span><span class="n">prefix</span> <span class="o">+</span> <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">clfparams</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">())}</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_debug</span><span class="p">:</span>
+            <span class="n">preparams</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;std__by&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;std__with_centering&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+                <span class="s1">&#39;std__with_scaling&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+                <span class="s1">&#39;std__columns&#39;</span><span class="p">:</span> <span class="p">[[</span><span class="n">ft</span> <span class="k">for</span> <span class="n">ft</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="k">if</span> <span class="n">ft</span> <span class="ow">in</span> <span class="n">FEATURE_NORM</span><span class="p">]],</span>
+                <span class="s1">&#39;sel_cols__columns&#39;</span><span class="p">:</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_ftnames</span> <span class="o">+</span> <span class="p">[</span><span class="s1">&#39;site&#39;</span><span class="p">]],</span>
+                <span class="s1">&#39;ft_sites__disable&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+                <span class="s1">&#39;ft_noise__disable&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+            <span class="p">}</span>
+            <span class="n">modparams</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="p">[</span><span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">modparams</span><span class="o">.</span><span class="n">items</span><span class="p">())}</span>
+
+        <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">preparams</span><span class="p">,</span> <span class="o">**</span><span class="n">modparams</span><span class="p">}</span></div>
+
+
+<span class="k">def</span> <span class="nf">_load_parameters</span><span class="p">(</span><span class="n">param_file</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Load parameters from file&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">yaml</span>
+    <span class="kn">from</span> <span class="nn">io</span> <span class="k">import</span> <span class="nb">open</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">param_file</span><span class="p">)</span> <span class="k">as</span> <span class="n">paramfile</span><span class="p">:</span>
+        <span class="n">parameters</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">paramfile</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">parameters</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, Oscar Esteban.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../',
+            VERSION:'0.9',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../_static/doctools.js"></script>
+      <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>
