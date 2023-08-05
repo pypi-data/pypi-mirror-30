@@ -1,0 +1,118 @@
+#!/usr/bin/env python
+
+import sys, argparse, logging
+from srclient import Manager, Api, VERSION, SCHEMA_URL, FUNCS
+
+def main(args):
+
+    if args.show:
+        print('all functions:')
+        for func in FUNCS: print(func)
+        return
+
+    loglevel = [
+        logging.CRITICAL,
+        logging.ERROR,
+        logging.WARNING,
+        logging.INFO,
+        logging.DEBUG
+    ][args.loglevel]
+    logging.basicConfig(format="%(message)s", level=loglevel)
+    logging.info('Logging level '+str(args.loglevel))
+
+    if args.link:
+        client = Api()
+
+        if args.user and args.password and args.schema:
+            if not client.login(args.user, args.password, args.schema):
+                logging.warning('Wrong username, password or schema url')
+                return
+
+        elif args.user and args.password:
+            if not client.login(args.user, args.password):
+                logging.warning('Wrong username, password or schema url')
+                return
+
+        if client.link_create(args.link):
+            logging.info('Add '+args.link+' to Short-Report.')
+        else:
+            logging.info('Server down or link already in the databases.')
+        return
+
+
+    if args.exclude:
+        funcs = []
+        for func in FUNCS:
+            if func not in args.exclude:
+                funcs.append(func)
+    else:
+        funcs = args.funcs if args.funcs else FUNCS
+
+    ma = Manager(funcs)
+
+    if args.user and args.password and args.schema:
+        if not ma.login(args.user, args.password, args.schema):
+            logging.warning('Wrong username, password or schema url')
+
+    elif args.user and args.password:
+        if not ma.login(args.user, args.password):
+            logging.warning('Wrong username, password or schema url')
+
+    if not ma.check():
+        logging.warning('Exit program - api error. Try to login again or check connection parameters.')
+        return 0
+
+    if args.time:
+        logging.info('Start the periodic task, every '+str(args.time)+' minutes')
+        ma.periodic(args.time*60)
+    else:
+        logging.info('Run the webcrawler')
+        ma.run()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='The Short-Report client')
+
+    parser.add_argument(
+        '-u', '--user', help='The username from Short-Report.de.',
+        type=str)
+
+    parser.add_argument(
+        '-p', '--password', help='The users password.',
+        type=str)
+
+    parser.add_argument(
+        '-l', '--link', help='Push a link to Short-Report.',
+        type=str)
+
+    parser.add_argument(
+        '-t', '--time', help='Time in minutes.',
+        type=int)
+
+    parser.add_argument(
+        '-f', '--funcs', help='The webcrawler functions.',
+        type=str, nargs='+')
+
+    parser.add_argument(
+        '-e', '--exclude', help='Exclude some of the functions.',
+        type=str, nargs='+')
+
+    parser.add_argument(
+        '--show', help='Show all posible functions from the webcrawler.',
+        action='store_true')
+
+    parser.add_argument(
+        '--loglevel', help='The log level. 0 -> nothing, 4 -> everything',
+        type=int, choices=range(0, 5), default=3)
+
+    parser.add_argument(
+        '--schema', help='The url of the schema. If xou chge the schema you have to login.',
+        type=str)
+
+    parser.add_argument(
+        '--version', action='version',
+        version='%(prog)s '+VERSION)
+
+    args = parser.parse_args()
+
+    main(args)
