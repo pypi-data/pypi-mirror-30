@@ -1,0 +1,38 @@
+#!python
+
+import argparse
+import rancher_autobackup
+import sys
+import tempfile
+
+from rancher_autobackup import Git
+from rancher_autobackup import VERSION
+from rancher_autobackup import Api
+
+parser = argparse.ArgumentParser(description='Do backups from rancher stacks into a git repository')
+parser.add_argument('--rancher-url', help='Rancher url', required=True)
+parser.add_argument('--rancher-environment-id', help='Rancher environment id', required=False, default=None)
+parser.add_argument('--rancher-api-key', help='Rancher api key', required=True)
+parser.add_argument('--rancher-api-secret', help='Rancher api secret', required=True)
+parser.add_argument('--repo-ssh-url', help='Git repository ssh url', required=True)
+parser.add_argument('--ssh-private-key-file', help='File with ssh private key', required=True)
+parser.add_argument('--git-user-email', help='Git config user-email', required=True)
+parser.add_argument('--git-user-name', help='Git config user.name', required=False, default='Rancher')
+parser.add_argument('--git-commit-message', help='Git commit message', required=False, default='autobackup')
+parser.add_argument('--git-branch', help='Git branch', required=False, default='master')
+parser.add_argument('--version', action='version', version='%(prog)s ' + VERSION)
+args = parser.parse_args()
+
+credentials = (args.rancher_api_key, args.rancher_api_secret)
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    try:
+        api = Api(args.rancher_url, credentials, args.rancher_environment_id, tmpdir)
+        git = Git(tmpdir, args.git_user_name, args.git_user_email, args.ssh_private_key_file)
+        git.execute('clone', '-b', args.git_branch, args.repo_ssh_url, tmpdir)
+        git.config()
+        api.get_compose_data_and_write_to_files()
+        git.add_commit_and_push(args.git_commit_message, args.git_branch)
+    except Exception as e:
+        rancher_autobackup.stderrprint(e)
+        sys.exit(1)
