@@ -1,0 +1,234 @@
+{% extends "_template_page.html" %}
+{% set active_page = "users" %}
+
+{% block page_title %}User Key Management{% endblock %}
+
+{% block page_css %}
+    {% assets 'tables_css' %}
+        <link rel="stylesheet" type="text/css" href="{{ ASSET_URL }}">
+    {% endassets %}
+    {% assets 'users_css' %}
+        <link rel="stylesheet" type="text/css" href="{{ ASSET_URL }}">
+    {% endassets %}
+{% endblock page_css %}
+
+{% block page_heading %}
+    <h2><i class="fa fa-fw fa-users"></i> User & Key Management</h2>
+{% endblock %}
+
+{% block page_name %}
+    User / Key Management
+{% endblock %}
+
+{% block page_content %}
+        <div class="row">
+            <div class="col-sm-12 col-md-12">
+                <div class="ibox float-e-margins">
+                    <div class="ibox-context">
+                        <table id="userTable" class="table table-striped" cellspacing="0" width="100%">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>id</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Admin</th>
+                                    <th>Last Accessed</th>
+                                </tr>
+                            </thead>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Modal Windows -->
+        <div id="enroll_modal" class="modal inmodal" tabindex="-1" role="dialog" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <!-- Modal content-->
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title"></h4>
+                    </div>
+                    <div class="modal-body">
+                        <div id="enroll_wizard"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% include 'users/_ldap_users.html' %}
+{% endblock %}
+
+{% block page_js %}
+    {{ super() }}
+    <script>
+        this.ldap_enabled = {{ ldap_enabled|tojson }};
+    </script>
+    <!-- DataTables JavaScript -->
+    {% assets 'tables_js' %}
+        <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+    {% endassets %}
+    {% assets 'users_js' %}
+        <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+    {% endassets %}
+    <script>
+    $(document).ready(function(){
+        $("#ldap_modal").on("shown.bs.modal", function(){
+            var new_users = $("#ldap_new_users").DataTable({
+                // Features
+                searching: false,
+                lengthChange: false,
+                ordering: false,
+                info: false,
+                paging: true,
+                scrollX: "100%",
+                scrollY: 150,
+                scrollCollapse: true,
+                scroller: true,
+                // Data
+                ajax: {
+                    url: "/users/ldap_add_users",
+                    type: "GET"
+                },
+                // Column definitions
+                columnDefs: [
+                    {
+                        className: 'text-center',
+                        targets: "_all"
+                    },
+                    {
+                        className: 'select-checkbox',
+                        width: "1%",
+                        targets: 0,
+                        render: function (data, type, full, meta) {
+                            if (type === "display") {
+                                data = '<div class="checkbox"><input type="checkbox" class="dt-checkboxes"><label></label></div>';
+                            }
+
+                            return data;
+                        },
+                        checkboxes: {
+                            selectRow: true,
+                            selectAllRender: '<div class="checkbox"><input type="checkbox" class="dt-checkboxes"><label></label></div>'
+                        }
+                    }
+                ],
+                columns: [
+                    {data: null},
+                    {data: 'uid'},
+                    {data: 'first_name'},
+                    {data: 'last_name'},
+                    {data: 'email'}
+                ],
+                select: {
+                    style: 'multi'
+                }
+            });
+
+            var del_users = $("#ldap_delete_users").DataTable({
+                // Features
+                searching: false,
+                lengthChange: false,
+                ordering: false,
+                info: false,
+                paging: true,
+                scrollX: "100%",
+                scrollY: 150,
+                scrollCollapse: true,
+                scroller: true,
+                // Data
+                ajax: {
+                    url: "/users/ldap_delete_users",
+                    type: "GET"
+                },
+                // Column definitions
+                columnDefs: [
+                    {
+                        className: 'text-center',
+                        targets: "_all"
+                    },
+                    {
+                        className: 'select-checkbox',
+                        width: "1%",
+                        targets: 0,
+                        render: function (data, type, full, meta) {
+                            if (type === "display") {
+                                data = '<div class="checkbox"><input type="checkbox" class="dt-checkboxes"><label></label></div>';
+                            }
+
+                            return data;
+                        },
+                        checkboxes: {
+                            selectRow: true,
+                            selectAllRender: '<div class="checkbox"><input type="checkbox" class="dt-checkboxes"><label></label></div>'
+                        }
+                    }
+                ],
+                columns: [
+                    {data: null},
+                    {data: 'uid'},
+                    {data: 'first_name'},
+                    {data: 'last_name'},
+                    {data: 'email'}
+                ],
+                select: {
+                    style: 'multi'
+                }
+            });
+
+            {#new_users.DataTable().columns.adjust();#}
+            {#del_users.DataTable().columns.adjust();#}
+        }).on("hide.bs.modal", function(){
+            $("#ldap_new_users").DataTable().destroy();
+            $("#ldap_delete_users").DataTable().destroy();
+        });
+
+        // Handle form submission event
+        $('#ldap_import_btn').on('click', function(e){
+            var rows_selected = $("#ldap_new_users").DataTable().column(0).checkboxes.selected();
+            var users = [];
+            // Iterate over all selected checkboxes
+            $.each(rows_selected, function(index, rowId){
+                users.push(rowId);
+            });
+
+            $.ajax({
+                url: "/users/ldap_add_users",
+                type: "POST",
+                data: {data: users},
+                success: function(response){
+                    toastr.success(response.success, 'USERS');
+                    $('#userTable').DataTable().ajax.reload(null, false);
+                    $("#ldap_modal").modal("hide");
+                },
+                error: function(response){
+                    console.log('error');
+                }
+            });
+        });
+
+        // Handle form submission event
+        $('#ldap_delete_btn').on('click', function(e){
+            var rows_selected = $("#ldap_delete_users").DataTable().column(0).checkboxes.selected();
+            var users = [];
+            // Iterate over all selected checkboxes
+            $.each(rows_selected, function(index, rowId){
+                users.push(rowId);
+            });
+
+            $.ajax({
+                url: "/users/ldap_delete_users",
+                type: "POST",
+                data: {data: users},
+                success: function(response){
+                    toastr.success(response.success, 'USERS');
+                    $('#userTable').DataTable().ajax.reload(null, false);
+                    $("#ldap_modal").modal("hide");
+                },
+                error: function(response){
+                    console.log('error');
+                }
+            });
+        });
+    });
+    </script>
+{% endblock page_js %}
