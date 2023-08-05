@@ -1,0 +1,150 @@
+<tool id="mimodd_annotate" name="MiModD Variant Annotation" 
+version="@MIMODD_WRAPPER_VERSION@">
+    <description>
+    with functional effects on genes and transcripts
+    </description>
+    <macros>
+        <import>macros.xml</import>
+    </macros>
+    <expand macro="requirements" />
+    <expand macro="stdio" />
+    <expand macro="version_command" />
+    <command><![CDATA[
+  	mimodd annotate
+	  '$inputfile' '$genome.annotation_source'
+	  #if $snpeff_settings.stats:
+	    --stats '$summary_file'
+	  #end if
+	  #if $codon_tables.genome_codon_table.strip() or len($codon_tables.table_specs) > 0:
+	    --codon-tables
+	    #if $codon_tables.genome_codon_table.strip():
+	      '$codon_tables.genome_codon_table'
+	    #end if
+	    #for $table_spec in $codon_tables.table_specs:
+	      '$table_spec.contig:$table_spec.table'
+	    #end for
+	  #end if
+	  #if $snpeff_settings.ud:
+	    --ud ${snpeff_settings.ud}
+	  #end if
+	  #if $snpeff_settings.filter:
+	    #echo ' '.join(str($snpeff_settings.filter).split(','))
+	  #end if
+	  --ofile '$ofile'
+	  --verbose --quiet
+    ]]></command>
+
+    <inputs>
+        <param name="inputfile" type="data" format="vcf"
+        label="VCF input file to be annotated" />
+        <conditional name="genome">
+            <param name="selection_method" type="select"
+            label="Select SnpEff Genome Database">
+                <option value="select_from_list">from a list of installed databases</option>
+                <option value="select_by_name">by name</option>
+            </param>
+            <when value="select_from_list">
+                <param name="genome_list" type="data" format="tabular" optional="true"
+                label="List of available SnpEff Genomes"
+                help="Select a dataset generated with the MiModD List Installed SnpEff Genomes tool to be able to choose from the genome databases listed in it." />
+                <param name="annotation_source" type="select"
+                label="SnpEff Genome to use"
+                help="Select a genome annotation database for your organism from the ones in the list.">
+                    <options from_dataset="genome_list">
+                        <column name="name" index="0"/>
+                        <column name="value" index="1"/>
+                        <filter type="unique_value" name="unique_names" column="0"/>
+                    </options>
+                </param>
+            </when>
+            <when value="select_by_name">
+                <param name="annotation_source" type="text"
+                label="Name of an installed SnpEff genome"
+                help="Your input needs to exactly match the name of an installed SnpEff database.">
+                    <validator type="expression" message="A SnpEff genome is required to run this tool.">value.strip()</validator>
+                    <expand macro="lex_sam_header" message="Non-ASCII characters are not valid in SnpEff genome names." />
+                </param>
+            </when>
+        </conditional>
+        <section name="codon_tables" title="Codon Table Configuration" expanded="false">
+            <param name="genome_codon_table" type="text"
+            label="Genome codon table"
+            help="If this genome uses a non-standard codon table and this fact is not declared in the SnpEff config file, specify the table here. The name you provide must match exactly the name of a codon table known to SnpEff.">
+                <expand macro="lex_sam_header" message="Non-ASCII characters are not valid in codon table names." />
+            </param>
+            <repeat name="table_specs" default="0" min="0"
+            title="Codon tables to use for specific contigs"
+            help="Use if certain contigs in the reference genome use a distinct codon table. A typical example is a mitochondrial genome contained as a contig in the reference genome. Contig/codon table assignments declared here will take precedence over a genome codon table set above.">
+                <param name="contig" type="text" label="contig or chromosome name">
+                    <validator type="expression" message="This is a required field for a contig/codon table assignment.">value.strip()</validator>
+                    <expand macro="lex_sam_header" message="Non-ASCII characters are not allowed in contig/chromosome names" />
+                </param>
+                <param name="table" type="text" label="uses codon table">
+                    <validator type="expression" message="This is a required field for a contig/codon table assignment.">value.strip()</validator>
+                    <expand macro="lex_sam_header" message="Non-ASCII characters are not valid in codon table names." />
+                </param>
+            </repeat>
+        </section>
+    	<section name="snpeff_settings" title="More SnpEff options" expanded="false">
+            <param name="stats" type="boolean" checked="false"
+            label="Have SnpEff produce a summary file of results" />
+            <param name="ud" type="integer" optional="true" 
+            label="upstream downstream interval length (default = 5000 bases)"
+            help="specify the upstream/downstream interval length. Variants more than INTERVAL nts from the next annotated gene will be considered intergenic"/>
+            <param name="filter" type="select" display="checkboxes" multiple="true"
+            label="Disable select types of annotations"
+            help="The corresponding variants will still be retained (without annotations) in the output">
+                <option value="--no-downstream">Do not annotate DOWNSTREAM changes</option>
+                <option value="--no-upstream">Do not annotate UPSTREAM changes</option>
+                <option value="--no-intergenic">Do not annotate INTERGENIC changes</option>
+                <option value="--no-intron">Do not annotate INTRON changes</option>
+                <option value="--no-utr">Do not annotate 5_PRIME_UTR or 3_PRIME_UTR changes</option>
+            </param>
+        </section>
+    </inputs>
+
+    <outputs>
+        <data name="ofile" format="vcf"
+        label="Variants annotated with MiModd from ${on_string}" />
+        <data name="summary_file" format="html"
+        label="Summary of MiModD variant annotation of ${on_string}">
+            <filter>snpeff_settings['stats']</filter>
+        </data>
+    </outputs>
+
+    <help><![CDATA[
+.. class:: warningmark
+
+This tool requires the variant annotation software SnpEff, which is not part of
+the MiModD package! It also needs the correct SnpEff genome database for your
+organism and reference sequence version installed with SnpEff.
+
+.. class:: infomark
+
+   **What it does**
+
+This tool uses SnpEff to annotate the variants in the VCF input dataset with
+the effects that these variants have on known genomic features, i.e. on genes
+and transcripts.
+
+To do its job, SnpEff requires a database of known genome annotations for your
+organism of interest. If you know the exact name of the genome database that
+you want to use, you can enter it directly. Otherwise, you should use the
+MiModD *List Installed SnpEff Genomes* tool first to generate a new dataset in
+your history that lists all SnpEff genome databases currently available to
+SnpEff on the system, then when you select this dataset as the *List of
+available SnpEff Genomes* above, you will be able to choose the SnpEff Genome
+from a dropdown list.
+
+The tool will create a new dataset in VCF format with the annotations added to
+the corresponding variant records. Do not expect this format to be very
+readable, but use the *MiModD Variant Reports* tool to turn it into a human
+friendly form.
+
+In addition, you can instruct the tool to produce an additional dataset with a
+summary of the variants and their effects in html format.
+
+@HELP_FOOTER@
+    ]]></help>
+    <expand macro="citations" />
+</tool>
