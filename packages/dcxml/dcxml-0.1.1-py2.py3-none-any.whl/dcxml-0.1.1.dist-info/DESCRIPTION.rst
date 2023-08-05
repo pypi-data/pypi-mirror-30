@@ -1,0 +1,42 @@
+..
+    This file is part of dcxml.
+    Copyright (C) 2016-2018 CERN.
+
+    dcxml is free software; you can redistribute it and/or modify it
+    under the terms of the MIT License; see LICENSE file for more details.
+
+=================
+ Dublin Core XML
+=================
+
+.. image:: https://img.shields.io/travis/inveniosoftware/dcxml.svg
+        :target: https://travis-ci.org/inveniosoftware/dcxml
+
+.. image:: https://img.shields.io/coveralls/inveniosoftware/dcxml.svg
+        :target: https://coveralls.io/r/inveniosoftware/dcxml
+
+.. image:: https://img.shields.io/pypi/v/dcxml.svg
+        :target: https://pypi.org/pypi/dcxml
+
+
+Dublin Core XML generation from Python dictionaries.
+
+* Free software: MIT license
+* Documentation: https://dcxml.readthedocs.io/
+
+
+..
+    This file is part of dcxml.
+    Copyright (C) 2016-2018 CERN.
+
+    dcxml is free software; you can redistribute it and/or modify it
+    under the terms of the MIT License; see LICENSE file for more details.
+
+Changes
+=======
+
+Version 0.1.0 (released 2016-03-21)
+
+- Initial public release.
+
+
