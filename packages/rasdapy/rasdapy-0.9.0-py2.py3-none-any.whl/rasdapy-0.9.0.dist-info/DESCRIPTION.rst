@@ -1,0 +1,188 @@
+RasdaPy - Talk RasQL using Python
+=================================
+
+/*
+ * This file is part of rasdaman community.
+ *
+ * Rasdaman community is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Rasdaman community is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU  General Public License for more details.
+ *
+ * You should have received a copy of the GNU  General Public License
+ * along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Copyright 2003 - 2017 Peter Baumann / rasdaman GmbH.
+ *
+ * For more information please see <http://www.rasdaman.org>
+ * or contact Peter Baumann via <baumann@rasdaman.com>.
+*/
+
+RasdaPy is a client side interface for Rasdaman that enables execution of
+RasQL queries using Python.
+
+Requirement
+===================
+
+You need a working rasdaman (http://rasdaman.org/wiki/Download) before using RasdaPy. 
+Then, you need to know the hostname (e.g: localhost), port to rasmgr (e.g: 7001), username (e.g: rasadmin), password (e.g: rasadmin)
+which has permission to connect to rasdaman.
+
+Development Warning
+===================
+
+The Python implementation of Protocol Buffers is not as mature as the
+C++ and Java implementations. It may be more buggy, and it is known to
+be pretty slow at this time. Since this library relies heavily on
+Protocol Buffers and GRPC, it might be prone to occasional hiccups and
+unexpected behaviour.
+
+Installation
+============
+
+1) Make sure you have Python 2.7 or newer if using Python 2 and Python 3.4 or
+newer if using Python 3. If in doubt, run:
+
+::
+
+   $ python --version
+
+2) If you do not have setuptools, numpy, scipy, grpcio, and protobuf
+   installed, note that they will be downloaded.
+
+Usage: 
+========================
+
+Example how to use RasdaPy API (check: http://rasdaman.org/browser/applications/rasdapy/rasql.py - a RasQL client to send query to rasdaman using RasdaPy).
+
+Import RasdaPy core API
+-----------------------
+
+::
+
+    $ from rasdapy.db_connector import DBConnector
+    $ from rasdapy.query_executor import QueryExecutor
+
+Connect to rasmgr with configurations (DBConnector object)
+---------------------------------------------
+
+::
+
+    $ db_connector = DBConnector("localhost", 7001, "rasadmin", "rasadmin")
+
+Create the query executor object from the DBConnector object.
+QueryExcutor is interface to user to run Rasql queries (create, insert, update, delete,...) and return result to user.
+---------------------------------
+
+::
+
+    $ query_executor = QueryExecutor(db_connector)
+
+Open the connection to rasdaman
+---------------------------------
+
+::
+
+    $ db_connector.open()
+
+List of all the collections available (imported into rasdaman by rasql)
+-------------------------------------
+
+::
+    $ collection_list = query_executor.execute_read("select c from RAS_COLLECTIONNAMES as c")
+    $ print(collection_list)
+
+Get result for a simple calculation from rasdaman using RasQL
+NOTE: Depend on the RasQL, result will have different types (e.g: Complex, CompositeType, MInterval,... see more: http://rasdaman.org/browser/applications/rasdapy/rasdapy/models)
+-----------------------------------------------------
+
+::
+    $ result = query_executor.execute_read("select 1 + 1")
+    $ type(result)
+
+
+Get raw array data (object type: ResultArray) from rasdaman using RasQL query which can be converted to Numpy ndarray
+-----------------------------------------------------
+
+::
+    $ result = query_executor.execute_read("select m[0:10 ,0:10] from mr as m")
+    $ numpy_array = result.to_array()
+
+Get encoded array data (object type: ResultArray) from rasdaman using RasQL query which can be exported to file
+-----------------------------------------------------
+
+::
+    $ result = query_executor.execute_read("select encode(m[0:10 ,0:10], "png") from mr as m")
+    $ with open("/tmp/output.png", "wb") as binary_file:
+    $   binary_file.write(result.data)
+
+Create rasdaman collection with write permission (user: rasadmin is default admin user in rasdaman)
+-----------------------------------------------------
+
+::
+    $ query_executor.execute_write("create collection test_rasdapy GreySet")
+
+Import data from file (a PNG image) to the newly created collection with write permission (user: rasadmin is default admin user in rasdaman)
+-----------------------------------------------------
+
+::
+    $ query_executor.execute_write("insert into test_rasdapy values decode($1)", "your_path/rasdaman/systemtest/testcases_services/test_all_wcst_import/test_data/wcps_mr/mr_1.png")
+
+Alternatively, you can import data from a raw binary file (need to specify MDD domain of the file and MDD type of the file)
+to the newly created collection with write permission (user: rasadmin is default admin user in rasdaman)
+-----------------------------------------------------
+
+::
+    $ query_executor.execute_update_from_file("insert into test_rasdapy values $1", "your_path/rasdaman/systemtest/testcases_mandatory/test_select/testdata/101.bin", "[0:100]", "GreyString")
+
+
+Close the connection to rasdaman
+-----------------------------
+
+::
+
+    $ db_connector.close()
+
+
+Best practices: 
+========================
+
+Always follow this template to not have problems with closing transaction to rasdman 
+(i.e: rasservers can not be released and no server is available for next rasql query).
+
+from rasdapy.db_connector import DBConnector
+from rasdapy.query_executor import QueryExecutor
+
+db_connector = DBConnector("localhost", 7001, "rasadmin", "rasadmin")
+query_executor = QueryExecutor(db_connector)
+
+db_connector.open()
+
+try:
+    query_executor.execute_read("...")
+    query_executor.execute_write("...")
+    # ... more Python codes
+finally:
+    db_connector.close()
+
+
+Contributors
+============
+* Siddharth Shukla
+* Bang Pham Huu
+* Dimitar Misev
+
+Thanks also to
+==============
+* Alex Mircea Dumitru
+* Vlad Merticariu
+* George Merticariu
+* Alex Toader
+* Peter Baumann
+
+
