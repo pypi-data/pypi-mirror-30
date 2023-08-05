@@ -1,0 +1,159 @@
+#!python
+# Copyright (C) 2018  Abhinav Saxena <abhinav.saxena@iic.ac.in>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+import gevent.monkey
+gevent.monkey.patch_all()
+
+import logging
+import os
+import argparse
+import sys
+import pwd
+from configparser import ConfigParser, NoSectionError, NoOptionError
+import gevent
+
+import iic4sem
+from iic4sem.echo_server import EchoServer
+from iic4sem.libevent_server import LibeventServer
+from iic4sem.broadcast_server import BroadcastServer
+from iic4sem.http_server import HTTPServer
+from iic4sem.serial_server import SerialServer
+
+logger = logging.getLogger()
+package_directory = os.path.dirname(os.path.abspath(iic4sem.__file__))
+
+def logo():
+    print(r"""
+
+      _____ _____ _____ _  _   _____
+     |_   _|_   _/ ____| || | / ____|
+       | |   | || |    | || || (___   ___ _ __ ___
+       | |   | || |    |__   _\___ \ / _ \ '_ ` _ \
+      _| |_ _| || |____   | | ____) |  __/ | | | | |
+     |_____|_____\_____|  |_||_____/ \___|_| |_| |_|
+
+    Version: {0}
+    Made by Abhinav Saxena
+
+    For Mr. Anil Singh Bafila (c/o Dr. Sanjeev Singh)
+    Institute of Informatics and Communication,
+    University of Delhi, South Campus
+         """.format(iic4sem.__version__))
+
+def on_unhandled_greenlet_exception(dead_greenlet):
+    logger.error('Stopping because %s died: %s', dead_greenlet, dead_greenlet.exception)
+    sys.exit(1)
+
+def setup_logging(log_file, verbose):
+    if verbose:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+
+    log_format = logging.Formatter('[%(levelname)s:%(asctime)-15s]:%(name)s: %(message)s')
+    console_log = logging.StreamHandler()
+    console_log.setLevel(log_level)
+    console_log.setFormatter(log_format)
+
+    logger.setLevel(log_level)
+    file_log = logging.FileHandler(log_file)
+    file_log.setFormatter(log_format)
+    file_log.setLevel(log_level)
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()  # remove duplicate entries
+    root_logger.addHandler(console_log)
+    root_logger.addHandler(file_log)
+
+def main():
+    # main function calling all the classes after creating instances
+    logo()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-m", "--mode",
+                        help="Name of servers to run.",
+                        default=''
+                        )
+    parser.add_argument("-c", "--config",
+                        help="The configuration file to use",
+                        metavar="iic4sem.cfg",
+                        default="iic4sem.cfg"
+                        )
+    parser.add_argument("-l", "--logfile",
+                        help="The logfile to use",
+                        default="iic4sem.log"
+                        )
+    parser.add_argument('-v', '--verbose', action='store_true', default=False, help='Logs debug messages.')
+
+    args = parser.parse_args()
+    # setup logging
+    setup_logging(args.logfile, args.verbose)
+
+    # Check if the configuration file exists..
+    if not os.path.isfile(args.config):
+        logger.error('Config not found: %s', args.config)
+        sys.exit(1)
+    logger.info('Starting IIC4Sem using configuration found in: %s', args.config)
+
+    # get details from the config file
+    config = ConfigParser()
+
+    # Loading default config if config not set.
+    try:
+        directory = package_directory + '/../'
+        args.config = os.path.join(directory, args.config)
+        config.read(args.config)
+    except:
+        logger.exception('\nCould not read config file')
+        sys.exit(1)
+
+    servers = list()
+    protocol_instance_mapping = (
+        ('echo', EchoServer),
+        ('libevent', LibeventServer),
+        ('http', HTTPServer),
+        ('serial', SerialServer),
+        ('broadcast', BroadcastServer)
+    )
+
+    for protocol in protocol_instance_mapping:
+        protocol_name, server_class = protocol
+        if config[protocol_name] and protocol_name != 'serial':
+            host = config[protocol_name]['host']
+            port = int(config[protocol_name]['port'])
+            server = server_class()
+            greenlet = gevent.spawn(server.start, host, port)
+            greenlet.link_exception(on_unhandled_greenlet_exception)
+            servers.append(server)
+            logger.info('Found and enabled %s protocol.', protocol)
+        else:
+            logger.debug('No %s config found. Service will remain unconfigured/stopped.', protocol_name)
+
+    greenlet.link_exception(on_unhandled_greenlet_exception)
+
+    # for key in config['echo']: print(key)
+
+    try:
+        if len(servers) > 0:
+            gevent.wait()
+    except KeyboardInterrupt:
+        logging.info('Stopping IIC4Sem')
+        for server in servers:
+            server.stop()
+
+if __name__ == "__main__":
+    main()
