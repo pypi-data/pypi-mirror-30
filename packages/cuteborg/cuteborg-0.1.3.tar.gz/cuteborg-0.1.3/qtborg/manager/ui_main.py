@@ -1,0 +1,98 @@
+#pylint: skip-file
+# -*- coding: utf-8 -*-
+
+# Form implementation generated from reading ui file 'data/ui/manager/ui_main.ui'
+#
+# Created by: PyQt5 UI code generator 5.7
+#
+# WARNING! All changes made in this file will be lost!
+
+from PyQt5 import QtCore, QtGui, QtWidgets
+
+class Ui_MainWindow(object):
+    def setupUi(self, MainWindow):
+        MainWindow.setObjectName("MainWindow")
+        MainWindow.resize(786, 521)
+        self.centralwidget = QtWidgets.QWidget(MainWindow)
+        self.centralwidget.setObjectName("centralwidget")
+        self.verticalLayout = QtWidgets.QVBoxLayout(self.centralwidget)
+        self.verticalLayout.setObjectName("verticalLayout")
+        self.tabWidget = QtWidgets.QTabWidget(self.centralwidget)
+        self.tabWidget.setObjectName("tabWidget")
+        self.tab = QtWidgets.QWidget()
+        self.tab.setObjectName("tab")
+        self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.tab)
+        self.verticalLayout_2.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_2.setObjectName("verticalLayout_2")
+        self.repositories_view = QtWidgets.QTableView(self.tab)
+        self.repositories_view.setAlternatingRowColors(True)
+        self.repositories_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.repositories_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.repositories_view.setShowGrid(False)
+        self.repositories_view.setSortingEnabled(True)
+        self.repositories_view.setWordWrap(False)
+        self.repositories_view.setCornerButtonEnabled(False)
+        self.repositories_view.setObjectName("repositories_view")
+        self.repositories_view.horizontalHeader().setHighlightSections(False)
+        self.repositories_view.horizontalHeader().setSortIndicatorShown(True)
+        self.repositories_view.horizontalHeader().setStretchLastSection(True)
+        self.repositories_view.verticalHeader().setVisible(False)
+        self.verticalLayout_2.addWidget(self.repositories_view)
+        self.tabWidget.addTab(self.tab, "")
+        self.tab_2 = QtWidgets.QWidget()
+        self.tab_2.setObjectName("tab_2")
+        self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.tab_2)
+        self.verticalLayout_3.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_3.setObjectName("verticalLayout_3")
+        self.jobs_view = QtWidgets.QTableView(self.tab_2)
+        self.jobs_view.setAlternatingRowColors(True)
+        self.jobs_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.jobs_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.jobs_view.setShowGrid(False)
+        self.jobs_view.setSortingEnabled(True)
+        self.jobs_view.setWordWrap(False)
+        self.jobs_view.setObjectName("jobs_view")
+        self.jobs_view.horizontalHeader().setHighlightSections(False)
+        self.jobs_view.horizontalHeader().setSortIndicatorShown(True)
+        self.jobs_view.horizontalHeader().setStretchLastSection(True)
+        self.jobs_view.verticalHeader().setVisible(False)
+        self.verticalLayout_3.addWidget(self.jobs_view)
+        self.tabWidget.addTab(self.tab_2, "")
+        self.verticalLayout.addWidget(self.tabWidget)
+        MainWindow.setCentralWidget(self.centralwidget)
+        self.menubar = QtWidgets.QMenuBar(MainWindow)
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 786, 25))
+        self.menubar.setObjectName("menubar")
+        self.menuRepository = QtWidgets.QMenu(self.menubar)
+        self.menuRepository.setObjectName("menuRepository")
+        self.menuJob = QtWidgets.QMenu(self.menubar)
+        self.menuJob.setObjectName("menuJob")
+        MainWindow.setMenuBar(self.menubar)
+        self.statusbar = QtWidgets.QStatusBar(MainWindow)
+        self.statusbar.setObjectName("statusbar")
+        MainWindow.setStatusBar(self.statusbar)
+        self.action_repository_add = QtWidgets.QAction(MainWindow)
+        self.action_repository_add.setObjectName("action_repository_add")
+        self.action_job_new = QtWidgets.QAction(MainWindow)
+        self.action_job_new.setObjectName("action_job_new")
+        self.menuRepository.addAction(self.action_repository_add)
+        self.menuJob.addAction(self.action_job_new)
+        self.menubar.addAction(self.menuRepository.menuAction())
+        self.menubar.addAction(self.menuJob.menuAction())
+
+        self.retranslateUi(MainWindow)
+        self.tabWidget.setCurrentIndex(1)
+        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+
+    def retranslateUi(self, MainWindow):
+        _translate = QtCore.QCoreApplication.translate
+        MainWindow.setWindowTitle(_translate("MainWindow", "CuteBorg Manager"))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab), _translate("MainWindow", "Repositories"))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), _translate("MainWindow", "Jobs"))
+        self.menuRepository.setTitle(_translate("MainWindow", "Repositor&y"))
+        self.menuJob.setTitle(_translate("MainWindow", "&Job"))
+        self.action_repository_add.setText(_translate("MainWindow", "&Add repository…"))
+        self.action_repository_add.setToolTip(_translate("MainWindow", "Add an existing local or remote repository."))
+        self.action_job_new.setText(_translate("MainWindow", "&New job…"))
+        self.action_job_new.setToolTip(_translate("MainWindow", "Create a new backup job."))
+
