@@ -1,0 +1,422 @@
+<tool-bar>
+<style>
+  #main-toolbar #run-button {
+      background-image: url(icons/run_bw.svg);
+  }
+  #main-toolbar #run-button.colored {
+      background-image: url(icons/run_color.svg);
+  }
+  #main-toolbar #break-button {
+      background-image: url(icons/stopit_bw.svg);
+  }
+  #main-toolbar #break-button.colored {
+      background-image: url(icons/stopit_color.svg);
+  }
+  #main-toolbar #erase-button {
+      background-image: url(icons/eraser_bw.svg);
+  }
+  #main-toolbar #erase-button.colored {
+      background-image: url(icons/eraser_color.svg);
+  }
+  #main-toolbar #example-button {
+      background-image: url(icons/load-example.svg);
+  }
+  #main-toolbar #workspace-button {
+      background-image: url(icons/user-documents.svg);
+  }
+  #main-toolbar #start-button {
+      background-image: url(icons/activity-start.svg);
+  }
+  #main-toolbar #full-button {
+      background-image: url(icons/view-fullscreen.svg);
+  }
+  #main-toolbar #export-button {
+      background-image: url(icons/export-or-publish.svg);
+  }
+  .hidden {
+      display: none !important;
+  }
+</style>
+
+<div id="main-toolbar" class="toolbar">
+  <button class="toolbutton" id="activity-button" title={ _('Jappy Activity') }></button>
+
+  <hr />
+  <button class="toolbutton" id="example-button" title={ _('Load an example') } ref="examplebutton"></button>
+
+  <button show={ location.hash } class="toolbutton" id="workspace-button" title={ _('Workspace') } ref="workspacebutton"></button>
+  <hr />
+
+  <button class="toolbutton { colored: window.state!='run' }" id="run-button" title={ _('Execute') } ref="runbutton"></button>
+
+  <button class="toolbutton { colored: window.state=='run' }" id="break-button" title={ _('Break execution') } ref="breakbutton"></button>
+
+  <button class="toolbutton { colored: window.state!='clean' }" id="erase-button" title={ _('Clear the canvas') } ref="erasebutton"></button>
+
+  <button class="toolbutton { hidden: window.state=='run' }" id="start-button" title={ _('Start fullscreen') } ref="startbutton"></button>
+
+  <button class="toolbutton { hidden: window.state=='stopped' } { hidden: window.state=='clean' }" id="full-button" title={ _('View fullscreen') } ref="fullbutton"></button>
+
+  <button class="toolbutton" id="export-button" title={ _('Export or publish') } ref="exportbutton"></button>
+
+  <button class="toolbutton pull-right" id="stop-button" title={ _('Stop') } ref="stopbutton"></button>
+</div>
+
+<script type="text/Rapyd">
+
+from elementmaker import E
+from gettext import install, gettext as _
+tag = this
+tag._ = _
+tag.lang = (navigator.language or navigator.userLanguage)[:2]
+url_base = location.protocol
+address = url_base + '//' + location.host + '/dav'
+if location.hash:
+    window.fs = new WebDAV.Fs(address)
+
+require(["text!../jappy.json"],
+        def(raw_translation_data):
+            translation_data = JSON.parse(raw_translation_data)
+            if translation_data['language']==tag.lang:
+                install(translation_data)
+                riot.update()
+    )
+
+
+##  These turned out to mess up formatting due to ordering issues.:
+#
+#loadCSSAsync("lib/sugar-web/graphics/css/sugar-96dpi.css",
+#			 "not screen and (device-width: 1200px) and (device-height: 900px)")
+#loadCSSAsync("lib/sugar-web/graphics/css/sugar-200dpi.css",
+#			 "screen and (device-width: 1200px) and (device-height: 900px)")
+#loadCSSAsync( "lib/sugar-web/graphics/css/sugar-72dpi.css",
+#			  "screen and (max-width: 800px)" )
+#loadCSSAsync( "css/small-screens.css",
+#			  "screen and (max-width: 800px)" )
+#loadCSSAsync( "css/tiny-screens.css",
+#			  "screen and (max-width: 420px)" )
+
+
+examples = ['welcome.pyj', 'memorize.pyj', 'mandala.pyj', 'input.pyj', 'repl.pyj', 'unicode.pyj', 'lunita.pyj']
+special = ['template.html']
+window.state = 'clean'
+tag.fetching_files = False
+tag.dir_created = False
+prefetch_files()
+
+def filter_latest(files):
+    ''' This will check files and try to determine by modification time
+    that they were saved together. It's a "clever" and likely broken way
+    to avoid otherwise coding metadata to record session of open files, 
+    etc.
+    '''
+    files.sort(def(a,b): # Latest first
+                   if a.mtime > b.mtime:
+                       return -1
+                   else:
+                       return 1
+                  )
+    return files.reduce(def(result, item):
+            prev = result[0]
+            if item.name[0]=='.':
+                return result
+            elif not item.name.endswith(['.pyj', '.md', '.html', \
+                                            '.css', '.js', '.svg', '.htm']):
+                return result
+            elif item.type is not 'file':
+                return result
+            elif prev is undefined:
+                return result.concat(item)
+            elif Math.abs(item.mtime.getTime() - prev.mtime.getTime()) < 500:
+                # Files written within 0,5 seconds of last are "one session"
+                return result.concat(item)
+            else:
+                ''' We filter out those that don't have the same mtime
+                as the first entry.'''
+                return result
+        , [])
+
+
+def collaboration_triggered():
+    tag.workspace_palette.popDown()
+    channel = prompt(_('Join shared workspace') + ' ' + _('(experimental)'),
+                     location.hash[1:])
+    if channel != None:
+        location.hash = channel
+event_bus.on('collaboration-dialog', collaboration_triggered)
+
+
+def prefetch_files():
+    if tag.fetching_files:
+        return
+    tag.fetching_files = True
+    if location.hash:
+        url_base = location.protocol
+        address = url_base + '//' + location.host + '/dav'
+        if window.fs is undefined:
+            window.fs = new WebDAV.Fs(address)
+
+        path = location.hash.slice(1)
+        def got_files(files):
+            tag.fetching_files = False
+            window.server_files = files
+            event_bus.trigger('file-list-update')
+
+        fs.dir('/' + path).children(got_files)
+
+def restore_last_session():
+    path = location.hash.slice(1)
+    if window.server_files is not undefined:
+        recent_files = filter_latest(window.server_files)
+        path = location.hash.slice(1)
+        if len(recent_files) > 0:
+            makeToast('<b>#' + path + '</b><br><br>' + \
+                _('Restoring saved session from file system.') + '<br><i>' + \
+                        str(len(recent_files)) + _(' files.') + '</i>')
+        else:
+            event_bus.trigger('new-from-data', '')
+            makeToast('<b>#' + path + '</b><br><br><i>' + \
+                _('Welcome') + '</i> ' + _('new project!'))
+
+        for item in reversed(recent_files):
+            load_file('/' + path + '/' + item.name, False)
+    else:
+        event_bus.one('file-list-update', restore_last_session)
+        prefetch_files()
+event_bus.on("restore-last-session", restore_last_session)
+
+def load_file_ev(ev):
+    tag.workspace_palette.popDown()
+    target_file = ev.target.getAttribute('data-uri')
+    path = location.hash.slice(1)
+    load_file('/' + path + '/' + target_file, True)
+
+def load_file(url, overwrite=False):
+    if window.fs is undefined:
+        window.fs = new WebDAV.Fs(address)
+    if tag.workspace_palette:
+        tag.workspace_palette.popDown()
+    path = location.hash.slice(1)
+    target_file = url.split('/')[-1]
+    fs.file(url).read(def(data, status):
+        if status is 200: # success
+            event_bus.trigger('new-from-data', data, target_file, overwrite)
+        else:
+            pass
+            # TODO: Notify user
+    )
+
+def update_workspace_menu():
+    if window.fs is undefined:
+        return
+    path = location.hash.slice(1)
+    def list_files(found_files):
+        window.server_files = found_files
+        found_files.sort(def(a,b): # Latest first
+                       if a.mtime > b.mtime:
+                           return -1
+                       else:
+                           return 1
+                      )
+        items = []
+        if tag.workspace_palette:
+            palette = tag.workspace_palette.getPalette()
+            container = palette.getElementsByClassName('container')[0]
+            container.innerHTML = ''
+        for file in found_files:
+            if file.name[0]=='.':
+                continue
+            row = document.createElement('div')
+            row.classList.add('menu')
+            item = document.createElement('button')
+            item.classList.add('icon')
+            span = document.createElement('span')
+            editor_load = True
+            if file.type=='dir':
+                span.classList.add('folder')
+                editor_load = False
+                item.onclick = def(ev):
+                    target_file = ev.target.getAttribute('data-uri')
+                    location.href =  'dav://' + location.host \
+                                      + '/dav/' + path + '/' + target_file
+            elif file.name.endswith('.pyj'):
+                span.classList.add('pyj')
+            elif file.name.endswith('.html'):
+                span.classList.add('html')
+            elif file.name.endswith(['.png', '.jpg', '.gif']):
+                span.classList.add('image')
+                editor_load = False
+                item.onclick = def(ev):
+                    target_file = ev.target.getAttribute('data-uri')
+                    url = location.protocol + '//' + location.host + '/' \
+                                + 'workspace/' + path + '/' + target_file
+                    event_bus.trigger('url-open', url)
+            else:
+                span.classList.add('document')
+            span.onclick = def():
+                item.click()
+            item.setAttribute('data-uri', file.name)
+            text = document.createTextNode(str(file.name))
+            item.appendChild(span)
+            item.appendChild(text)
+            if editor_load:
+                item.addEventListener('click', load_file_ev)
+            row.appendChild(item)
+            items.append(row)
+        items.append(E.hr(class_='header-separator'))
+        browse_button = E.button(class_='icon', E.span(class_='folder'), _('Browse...'))
+        browse_button.onclick = def():
+            tag.workspace_palette.popDown()
+            location.href = 'dav://' + location.host + '/dav/' + path
+        lastrow = E.div(class_='menu', browse_button)
+        items.append(lastrow)
+        if tag.workspace_palette:
+            tag.workspace_palette.setContent(items)
+    def try_make_dir(body, existed_previously):
+        fs.dir('/' + path).children(list_files)
+    if window.server_files is undefined:
+        prefetch_files()
+    if tag.dir_created is not path:
+        tag.dir_created = path
+        fs.dir('/' + path).mkdir(try_make_dir)
+    else:
+        fs.dir('/' + path).children(list_files)
+tag.update_workspace_menu = update_workspace_menu
+event_bus.on("file-list-update", update_workspace_menu)
+event_bus.on("update-workspace-menu", update_workspace_menu)
+event_bus.on("file-create", update_workspace_menu) # TODO: Optimize these later
+event_bus.on("file-delete", update_workspace_menu)
+event_bus.on("file-rename", update_workspace_menu)
+
+def init():
+    this.refs.runbutton.onclick = def():
+        window.state = 'run'
+        tag.update()
+        event_bus.trigger("run-code")
+    this.refs.startbutton.onclick = def():
+        window.state = 'run'
+        tag.update()
+        event_bus.trigger("run-fullscreen")
+    this.refs.fullbutton.onclick = def():
+        window.state = 'run'
+        tag.update()
+        event_bus.trigger("run-fullscreen", False)
+    this.refs.breakbutton.onclick = def():
+        window.state = 'stopped'
+        tag.update()
+        event_bus.trigger("break-code")
+    this.refs.erasebutton.onclick = def():
+        window.state = 'clean'
+        event_bus.trigger("traybutton-close", False)
+        tag.update()
+        event_bus.trigger("clear-output")
+
+    def activity_ready(activity):
+        tag.refs.stopbutton.onclick = def():
+            event_bus.trigger("activity-save", activity)
+    event_bus.on("activity-ready", activity_ready)
+
+    def enable_standalone():
+        tag.refs.stopbutton.onclick = def():
+            event_bus.trigger("activity-save", activity)
+            base_url = location.protocol + '//' + location.host + '/'
+            fetch (base_url + "shutdown")
+    event_bus.on("enable-standalone", enable_standalone)
+
+    if window.RapydScript is not undefined:
+        enable_run()
+
+    require(["sugar-web/graphics/palette", "text!../jappy.json"],
+        def(palette):
+            tag.example_palette = new palette.Palette(tag.refs.examplebutton, _('Load an example'))
+            items = []
+            for i in examples:
+                row = document.createElement('div')
+                row.classList.add('menu')
+                item = document.createElement('button')
+                item.classList.add('icon')
+                span = document.createElement('span')
+                span.classList.add('pyj')
+                text = document.createTextNode(i)
+                item.appendChild(span)
+                item.appendChild(text)
+                def trigger_load(el):
+                    return def():
+                        tag.example_palette.popDown()
+                        event_bus.trigger('example-load', el)
+                item.onclick = trigger_load(i)
+                row.appendChild(item)
+                items.append(row)
+
+            items.append(E.hr(class_='header-separator'))
+
+            for i in special:
+                row = document.createElement('div')
+                row.classList.add('menu')
+                item = document.createElement('button')
+                item.classList.add('icon')
+                item.classList.add('special_file')
+                span = document.createElement('span')
+                if i.endswith('.pyj'):
+                    span.classList.add('pyj')
+                elif i.endswith('.html'):
+                    span.classList.add('html')
+                text = document.createTextNode(i)
+                item.appendChild(span)
+                item.appendChild(text)
+                item.setAttribute('data-uri', i)
+                def trigger_load(el):
+                    return def(ev):
+                        target_file = el
+                        path = location.hash.slice(1)
+                        url = location.protocol + '//' + location.host + '/' \
+                                    + '/' + target_file
+                        tag.example_palette.popDown()
+                        load_file(url, True)
+                item.onclick = trigger_load(i)
+                row.appendChild(item)
+                items.append(row)
+
+            tag.example_palette.setContent(items)
+
+            tag.workspace_palette = new palette.Palette(tag.refs.workspacebutton, _('Workspace'))
+            update_workspace_menu()
+
+            tag.export_palette = new palette.Palette(tag.refs.exportbutton, _('Export'))
+            class as_zip:
+                label = _('Export as zipped HTML')
+                icon = 'html'
+                trigger = 'save-as-zip'
+            class import_file:
+                label = _('Import')
+                icon = 'zip'
+                trigger = 'import-file'
+            class shared_folder:
+                label = _('Shared workspace')
+                icon = 'folder'
+                trigger = 'collaboration-dialog'
+            items = []
+            for i in [as_zip(), import_file(), shared_folder()]:
+                if i:
+                    row = document.createElement('div')
+                    row.classList.add('menu')
+                    item = document.createElement('button')
+                    item.classList.add('icon')
+                    span = document.createElement('span')
+                    span.classList.add(i.icon)
+                    text = document.createTextNode(i.label)
+                    item.appendChild(span)
+                    item.appendChild(text)
+                    def trigger_export(event):
+                        return def():
+                            tag.export_palette.popDown()
+                            event_bus.trigger(event)
+                    item.onclick = trigger_export(i.trigger)
+                    row.appendChild(item)
+                    items.append(row)
+            tag.export_palette.setContent(items)
+        )
+this.on('mount', init)
+
+</script>
+</tool-bar>
