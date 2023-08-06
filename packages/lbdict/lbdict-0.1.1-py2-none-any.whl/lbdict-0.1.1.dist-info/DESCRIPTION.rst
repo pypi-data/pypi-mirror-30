@@ -1,0 +1,3 @@
+# Letter Bitmap Dictionary
+
+
