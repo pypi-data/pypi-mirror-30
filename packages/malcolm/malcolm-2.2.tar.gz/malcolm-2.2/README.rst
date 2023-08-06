@@ -1,0 +1,73 @@
+Malcolm
+=======
+
+|build_status| |coverage| |health| |pypi_version| |readthedocs|
+
+Malcolm is a middlelayer framework that implements high level configure/run
+behaviour of control system components like those used in continuous scans. 
+This repository contains a Python implementation allowing the creation of 
+Malcolm servers and clients. 
+
+Documentation
+-------------
+
+Full documentation is available at http://pymalcolm.readthedocs.org
+
+Source Code
+-----------
+
+Available from https://github.com/dls-controls/pymalcolm
+
+Installation
+------------
+To install the latest release, type::
+
+    pip install malcolm
+
+To install the latest code directly from source, type::
+
+    pip install git+git://github.com/dls-controls/pymalcolm.git
+
+Changelog
+---------
+
+See `CHANGELOG`_
+
+Contributing
+------------
+
+See `CONTRIBUTING`_
+
+License
+-------
+APACHE License. (see `LICENSE`_)
+
+
+.. |build_status| image:: https://travis-ci.org/dls-controls/pymalcolm.svg?branch=master
+    :target: https://travis-ci.org/dls-controls/pymalcolm
+    :alt: Build Status
+
+.. |coverage| image:: https://coveralls.io/repos/dls-controls/pymalcolm/badge.svg?branch=master&service=github
+    :target: https://coveralls.io/github/dls-controls/pymalcolm?branch=master
+    :alt: Test coverage
+
+.. |pypi_version| image:: https://img.shields.io/pypi/v/malcolm.svg
+    :target: https://pypi.python.org/pypi/malcolm/
+    :alt: Latest PyPI version
+
+.. |readthedocs| image:: https://readthedocs.org/projects/pymalcolm/badge/?version=latest
+    :target: http://pymalcolm.readthedocs.org
+    :alt: Documentation
+
+.. |health| image:: https://landscape.io/github/dls-controls/pymalcolm/master/landscape.svg?style=flat
+   :target: https://landscape.io/github/dls-controls/pymalcolm/master
+   :alt: Code Health
+
+.. _CHANGELOG:
+    https://github.com/dls-controls/pymalcolm/blob/master/CHANGELOG.rst
+
+.. _CONTRIBUTING:
+    https://github.com/dls-controls/pymalcolm/blob/master/CONTRIBUTING.rst
+
+.. _LICENSE:
+    https://github.com/dls-controls/pymalcolm/blob/master/LICENSE
