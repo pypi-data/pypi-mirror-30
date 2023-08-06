@@ -1,0 +1,11 @@
+transition_date_v11 = "20170508"
+transition_timestamp_v11_AA = "12"
+transition_timestamp_v11_SR = "11"
+transition_timestamp_v11_MR = "12"
+transition_timestamp_v11_LR = "00"
+
+transition_date_v12 = "20180306"
+transition_timestamp_v12_AA = "16"
+transition_timestamp_v12_SR = "15"
+transition_timestamp_v12_MR = "12"
+transition_timestamp_v12_LR = "00"
