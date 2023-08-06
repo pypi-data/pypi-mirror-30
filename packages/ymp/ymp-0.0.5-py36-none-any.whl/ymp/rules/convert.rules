@@ -1,0 +1,123 @@
+"Generic file conversion rules"
+
+from ymp import blast, gff
+
+# FIXME: this doesn't work due to gff/blast hit conversion missing
+rule blast7_to_gff:
+    input:
+        "{path}.blast7"
+    output:
+        "{path}.gff"
+    run:
+        with open(input[0], "r") as inf, open(output[0], "w") as outf:
+            gfff = gff.writer(outf)
+            for hit in blast.reader(inf):
+                gfff.write(gff.Feature(hit))
+
+
+# FIXME: how can I make these localrules?
+for fasta in "fa fna fasta".split():
+    for fastp in "faa fastp".split():
+        rule:
+            message:
+                "FASTA->FASTP {output}"
+            input:
+                "{path}."+fasta
+            output:
+                "{path}."+fastp
+            priority:
+                -50
+            run:
+                from ymp.nuc2aa import fasta_dna2aa
+                with open(input[0], "r") as inf, open(output[0], "w") as outf:
+                    fasta_dna2aa(inf, outf)
+
+rule faa_fastp:
+    message: "LN_S {output} -> {input}"
+    input:
+        "{path}.faa"
+    output:
+        "{path}.fastp"
+    run:
+        import os
+        os.symlink(
+            os.path.join(
+                os.path.relpath(
+                    os.path.dirname(input[0]),
+                    os.path.dirname(output[0])
+                ),
+                os.path.basename(input[0])
+            ),
+            output[0]
+        )
+
+rule fasta_to_fastp_gz:
+    message:
+        "FASTA->FASTP {input}"
+    input:
+        "{path}.fasta.gz"
+    output:
+        "{path}.fastp.gz_disabled"
+    run:
+        from ymp.nuc2aa import fasta_dna2aa
+        import gzip as gz
+        with gz.open(input[0], "r") as inf, gz.open(output[0], "w") as outf:
+            fasta_dna2aa(inf, outf)
+
+
+rule gunzip:
+    """
+    Generic temporary gunzip
+
+    Use `ruleorder: gunzip > myrule` to prefer gunzipping
+    over re-running a rule. E.g.
+
+    >>> ruleorder: gunzip > myrule
+    >>> rule myrule:
+    >>>   output: temp("some.txt"), "some.txt.gzip"
+    """
+    message: "Uncompressing {input}"
+    wildcard_constraints:
+        path = ".*(?<!\.gz)"
+    input: "{path}.gz"
+    output: temp("{path}_disabled")
+    params:
+        mem = icfg.mem("1G")
+    threads: 1
+    conda: "pigz.yml"
+    shell: """
+    unpigz \
+      --keep \
+      --force \
+      --processes {threads} \
+      {input}
+    """
+
+
+localrules: mkdir
+rule mkdir:
+    """
+    Auto-create directories listed in ymp config.
+
+    Use these as input:
+    >>> input: tmpdir = ancient(icfg.dir.tmp)
+    """
+    message: "Creating directory '{output}'"
+    output: "{{x,({})}}".format("|".join(list(icfg.dir)))
+    shell: "mkdir -p {output}"
+
+
+rule fq2fa:
+    """Unzip and convert fastq to fasta"""
+    message:
+        "Converting {input} to fasta"
+    input:
+        seqs = "{path}.fq"
+    output:
+        seqs = "{path}.fa.gz"
+    conda:
+        "fa2fq.yml"
+    shell: """
+    sed -n '1~4 s/^@/>/p; 2~4p' {input.seqs} | gzip > {output.seqs}
+    """
+ruleorder: fq2fa > gunzip
