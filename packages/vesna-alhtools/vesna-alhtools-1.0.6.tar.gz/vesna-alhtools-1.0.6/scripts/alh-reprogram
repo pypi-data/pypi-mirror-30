@@ -1,0 +1,182 @@
+#!/usr/bin/python
+from vesna import alh
+from vesna.alh import common
+import binascii
+import re
+import serial
+import struct
+import time
+from optparse import OptionParser, OptionGroup
+from urlparse import urlparse
+import socket
+
+def sanity_check_passed(options, firmware):
+	if options.node and "node" not in options.input:
+		print "You are reprogramming a node, but file name doesn't contain 'node'."
+		return False
+
+	if options.coordinator:
+		if "coordinator" not in options.input:
+			print "You are reprogramming the coordinator, but file name doesn't contain " \
+				"'coordinator'."
+			return False
+
+		if options.url:
+			host = urlparse(options.url).hostname
+			ip = socket.gethostbyname(host)
+			if ip not in firmware:
+				print "Your selected communicator IP doesn't appear in the firmare. " \
+					"Are you using an image for a different clusrer?"
+				return False
+
+		if options.cluster_id and str(options.cluster_id) not in firmware:
+			print "Your selected cluster ID doesn't appear in the firmware. " \
+				"Are you using an image for a different cluster?"
+			return False
+
+	if firmware.startswith("\x7fELF"):
+		print "Input file is in ELF format. You have to use a plain binary file."
+		return False
+
+	return True
+
+def upload_firmware(target, firmware, slot_id, start_chunk):
+	start_time = time.time()
+
+	target.post("prog/nextFirmwareSlotId", "%d" % (slot_id,), "admin")
+
+	if start_chunk > 0:
+		resp = target.get("prog/nextFirmwareSize")
+		size = int(resp.split()[1])
+		if len(firmware) != size:
+			raise Exception("Firmware size and slot size doesn't match. "
+				"Are you restarting upload with --start-chunk from a different file?")
+	else:
+		target.post("prog/nextFirmwareSize", "%d" % (len(firmware),))
+		target.post("prog/nextEraseSlotId", "%d" % (slot_id,))
+
+	chunk_size = 512
+	total_size = len(firmware)
+	chunk_num = 0
+	p = 0
+	while p < total_size:
+		chunk_data = struct.pack(">i", chunk_num) + firmware[p:p+chunk_size]
+		if len(chunk_data) != 516:
+			chunk_data += "\xff" * (516 - len(chunk_data))
+			
+		chunk_data_crc = binascii.crc32(chunk_data)
+
+		chunk = chunk_data + struct.pack(">i", chunk_data_crc)
+
+		if chunk_num < start_chunk:
+			print "Skipping chunk", chunk_num
+		else:
+			target.post("firmware", chunk)
+
+		p += chunk_size
+		chunk_num += 1
+
+	target.post("prog/nextFirmwareCrc", "%d" % (binascii.crc32(firmware),))
+
+	elapsed = time.time() - start_time
+	print "Transferred %d bytes in %d seconds: %.2f B/s\n" % (
+			total_size,
+			elapsed,
+			float(total_size)/elapsed)
+
+def reboot_firmware(target, slot_id):
+	target.post("prog/setupBootloaderForReprogram", "%d" % (slot_id,))
+	target.post("prog/doRestart", "1")
+
+def check_running_firmware(target, input):
+	g = re.search("node_([a-z]+)_version_([0-9a-z_]+)", input.lower())
+	if g:
+		hello = target.get("hello").lower().split()
+
+		nodetype = 'node' + g.group(1)
+		version = g.group(2).replace("_", ".")
+
+		if nodetype != hello[0]:
+			print "WARNING: node reports node type '%s' but firmware was '%s'" % (
+					hello[0], nodetype)
+		if version != hello[2]:
+			print "WARNING: node reports version '%s' but firmware was '%s'" % (
+					hello[2], version)
+
+def confirm(target):
+	target.post("prog/firstcall", "1")
+	target.post("prog/runningFirmwareIsValid", "1")
+
+def main():
+	parser = OptionParser(usage="%prog [options]")
+
+	common.add_communication_options(parser)
+
+	parser.add_option("-n", "--node", dest="node", metavar="ADDR", type="int",
+			help="Reprogram node with ZigBit address ADDR")
+	parser.add_option("-c", "--coordinator", dest="coordinator", action="store_true",
+			help="Reprogram coordinator")
+
+	parser.add_option("-i", "--input", dest="input", metavar="PATH",
+			help="PATH to firmware to upload")
+	parser.add_option("-r", "--reboot", dest="reboot", action="store_true",
+			help="Reboot the node with the uploaded firmware")
+	parser.add_option("-C", "--confirm", dest="confirm", action="store_true",
+			help="Don't reprogram, just confirm currently running firmware as valid")
+
+	parser.add_option("-s", "--slot", dest="slot_id", metavar="ID", type="int", default=1,
+			help="Use SD card slot ID for upload")
+	parser.add_option("--force", dest="force", action="store_true",
+			help="Force reprogramming even when sanity checks fail")
+	parser.add_option("--start-chunk", dest="start_chunk", metavar="NUM", type="int", default=0,
+			help="Skip uploading firmware until chunk NUM")
+
+	(options, args) = parser.parse_args()
+
+	coordinator = common.get_coordinator(options)	
+	coordinator.post("prog/firstcall", "1")
+
+	if options.coordinator and not options.node:
+		target = coordinator
+	elif options.node and not options.coordinator:
+		node = alh.ALHProxy(coordinator, options.node)
+		node.post("prog/firstcall", "1")
+		target = node
+	else:
+		print "Please give either -n or -c option"
+		return -1
+
+	target.get("hello")
+
+	if not options.reboot and not options.confirm and not options.input:
+		print "Please give either -i, -r and/or -C option"
+		return -1
+
+	if options.input:
+		firmware = open(options.input).read()
+
+		if (not sanity_check_passed(options, firmware)) and (not options.force):
+			print "Use --force to program anyway."
+			return -1
+
+		upload_firmware(target, firmware, options.slot_id, options.start_chunk)
+		print "Reprogramming done."
+
+	if options.reboot:
+		print "Rebooting node."
+		reboot_firmware(target, options.slot_id)
+
+		if options.coordinator:
+			print "Waiting for coordinator to boot"
+			time.sleep(180)
+		else:
+			print "Waiting for node to boot."
+			time.sleep(60)
+
+		if options.input:
+			check_running_firmware(target, options.input)
+
+
+	confirm(target)
+
+main()
