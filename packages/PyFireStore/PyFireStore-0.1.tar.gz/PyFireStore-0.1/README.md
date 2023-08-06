@@ -1,0 +1,48 @@
+### Maintainer ###
+
+Brice PARENT (bparent@gingalab.com) - GingaLab - 2018
+
+### What is this repository for? ###
+
+This lib simplifies the management of Google's Firestore data
+
+It is shared to help, nothing more. Use it at your own risk!
+
+### How do I set it up? ###
+
+* First, you need an account at https://console.firebase.google.com
+* You also need a service account with a json key file
+* Once it's done, pip-insta/home/brice/Dev/pyfirestore/pyfirestore/pyfirestorell this lib into your [virtual] environment
+* Place the json key where you want on your server
+* Have an environment variable called "GOOGLE_APPLICATION_CREDENTIALS" pointing at this file OR call pyfirestore.get_client() with the path to this file as first (and only) argument
+* You're ready to go ! Check demo/usage.py and the unit tests, and read the code to know more about the usage.
+
+### Contribution guidelines ###
+
+* Add unit tests
+* Send me a PR
+
+### Issues ###
+
+#### Know issues ####
+
+* When using Document.push(), there is an ResourceWarning for unclosed ssl.SSLSocket, which I'm not sure
+where it comes from. It gets caught by the unittest framework. I haven't tried yet if it happens without
+this package.
+
+#### Found another issue? ####
+
+Please report it! Open an issue here, and tell me what you're willing to do, how you tried, and what 
+happened. No guarantee, but I'll try to help whenever I have time.
+
+### What's missing? ###
+
+* Management of Google's response when the rights aren't sufficient
+* Probably many corner cases
+* advanced usage (that I haven't had to use by now), like when we search for documents inside subcollections, 
+the construction of the ancestors.
+* Tell me if there's something strange or an important feature that's not there, I'll se what I can do!
+
+### Usage ###
+
+Check demo/usage.py and the unit tests, and read the code to know how to use it.
