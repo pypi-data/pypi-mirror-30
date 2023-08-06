@@ -1,0 +1,1 @@
+from shankar_pswd.password import gen
