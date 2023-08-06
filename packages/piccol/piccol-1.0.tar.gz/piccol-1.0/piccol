@@ -1,0 +1,612 @@
+#!/usr/bin/env python3
+#
+# -*- coding: utf-8 -*-
+#
+# piccol - PICk COLors
+#
+# Copyright 2017 Michael Buesch <m@bues.ch>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+
+PICCOL_VERSION		= "1.0"
+PICCOL_HOME_URL		= "https://bues.ch/"
+
+import sys
+if sys.version_info[0] < 3:
+	raise Exception("Python 3.x is required.")
+
+import colorsys
+
+try:
+	import PyQt5.QtCore as havePyQt5
+except ImportError as e:
+	havePyQt5 = False
+
+if len(sys.argv) >= 2 and sys.argv[1].lower().strip() == "--pyside":
+	havePyQt5 = False
+if havePyQt5:
+	from PyQt5.QtCore import *
+	from PyQt5.QtGui import *
+	from PyQt5.QtWidgets import *
+	Signal = pyqtSignal
+else:
+	from PySide.QtCore import *
+	from PySide.QtGui import *
+
+
+class ColorString(object):
+	@staticmethod
+	def rgb_to_hls(r, g, b):
+		h, l, s = colorsys.rgb_to_hls(r / 255.0,
+					      g / 255.0,
+					      b / 255.0)
+		return h * 360, l, s
+
+	@staticmethod
+	def hls_to_rgb(h, l, s):
+		r, g, b = colorsys.hls_to_rgb(h / 360.0,
+					      l,
+					      s)
+		return round(r * 255), round(g * 255), round(b * 255)
+
+	@classmethod
+	def fromRGB(cls, r, g, b):
+		return cls(*cls.rgb_to_hls(r, g, b))
+
+	def __init__(self, h, l, s):
+		self.h = h
+		self.l = l
+		self.s = s
+
+	en2en_hue = {
+		"red"		: "red",
+		"rose"		: "rose",
+		"magenta"	: "magenta",
+		"purple"	: "purple",
+		"violet"	: "violet",
+		"indigo"	: "indigo",
+		"blue"		: "blue",
+		"cyan"		: "cyan",
+		"green"		: "green",
+		"lime"		: "lime",
+		"yellow"	: "yellow",
+		"orange"	: "orange",
+		"reddish"	: "reddish",
+		"red"		: "red",
+	}
+
+	en2en_lightness = {
+		"white"		: "white",
+		"almost white"	: "almost white",
+		"very light"	: "very light",
+		"light"		: "light",
+		""		: "",
+		"dark"		: "dark",
+		"very dark"	: "very dark",
+		"almost black"	: "almost black",
+		"black"		: "black",
+	}
+
+	en2en_saturation = {
+		"very saturated"	: "very saturated",
+		"rather saturated"	: "rather saturated",
+		""			: "",
+		"rather unsaturated"	: "rather unsaturated",
+		"unsaturated"		: "unsaturated",
+		"very unsaturated"	: "very unsaturated",
+		"almost grey"		: "almost grey",
+		"grey"			: "grey",
+	}
+
+	@property
+	def hue(self):
+		trans = self.en2en_hue
+		if self.h > 344.0:
+			return trans["red"]
+		if self.h > 327.0:
+			return trans["rose"]
+		if self.h > 291.0:
+			return trans["magenta"]
+		if self.h > 270.0:
+			return trans["purple"]
+		if self.h > 260.0:
+			return trans["violet"]
+		if self.h > 240.0:
+			return trans["indigo"]
+		if self.h > 193.0:
+			return trans["blue"]
+		if self.h > 163.0:
+			return trans["cyan"]
+		if self.h > 79.0:
+			return trans["green"]
+		if self.h > 70.0:
+			return trans["lime"]
+		if self.h > 45.0:
+			return trans["yellow"]
+		if self.h > 15.0:
+			return trans["orange"]
+		if self.h > 14.0:
+			return trans["reddish"]
+		return trans["red"]
+
+	@property
+	def lightness(self):
+		trans = self.en2en_lightness
+		if self.l >= 1.0:
+			return trans["white"]
+		if self.l > 0.94:
+			return trans["almost white"]
+		if self.l > 0.8:
+			return trans["very light"]
+		if self.l > 0.6:
+			return trans["light"]
+		if self.l > 0.3:
+			return trans[""]
+		if self.l > 0.22:
+			return trans["dark"]
+		if self.l > 0.09:
+			return trans["very dark"]
+		if self.l > 0.0:
+			return trans["almost black"]
+		return trans["black"]
+
+	@property
+	def saturation(self):
+		trans = self.en2en_saturation
+		if self.s > 0.9:
+			return trans["very saturated"]
+		if self.s > 0.8:
+			return trans["rather saturated"]
+		if self.s > 0.6:
+			return trans[""]
+		if self.s > 0.46:
+			return trans["rather unsaturated"]
+		if self.s > 0.3:
+			return trans["unsaturated"]
+		if self.s > 0.1:
+			return trans["very unsaturated"]
+		if self.s > 0.03:
+			return trans["almost grey"]
+		return trans["grey"]
+
+	@property
+	def string(self):
+		strings = ()
+		if self.l <= 0.0 or self.l >= 1.0:
+			strings = (self.lightness, )
+		elif self.s <= 0.03:
+			strings = (self.lightness, self.saturation)
+		elif self.l <= 0.09 or self.l > 0.94:
+			strings = (self.lightness, self.hue)
+		else:
+			strings = (self.saturation, self.lightness, self.hue)
+		return " ".join(s.strip() for s in strings if s.strip())
+
+class PixmapDisplay(QLabel):
+	pointerEvent = Signal(int, int)
+
+	def __init__(self, parent=None):
+		QLabel.__init__(self, parent)
+
+		self.setFrameStyle(QFrame.Box | QFrame.Raised)
+		self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+		self.setMouseTracking(True)
+
+		self.__buttonPressed = False
+
+	def mousePressEvent(self, event):
+		self.__handlePointerEvent(event.x(), event.y())
+		self.__buttonPressed = True
+		QLabel.mousePressEvent(self, event)
+
+	def mouseReleaseEvent(self, event):
+		self.__handlePointerEvent(event.x(), event.y())
+		QLabel.mouseReleaseEvent(self, event)
+		self.__buttonPressed = False
+
+	def mouseMoveEvent(self, event):
+		if self.__buttonPressed:
+			self.__handlePointerEvent(event.x(), event.y())
+		QLabel.mouseMoveEvent(self, event)
+
+	def __handlePointerEvent(self, x, y):
+		pixmap = self.pixmap()
+		if pixmap and\
+		   x >= 0 and y >= 0 and\
+		   x < pixmap.width() and y < pixmap.height():
+			self.pointerEvent.emit(x, y)
+
+class MainWidget(QWidget):
+	def __init__(self, mainWindow):
+		QWidget.__init__(self, mainWindow)
+		self.mainWindow = mainWindow
+		self.setLayout(QGridLayout())
+		self.setMouseTracking(True)
+
+		hbox = QHBoxLayout()
+		self.pickButton = QPushButton("Pick color...", self)
+		hbox.addWidget(self.pickButton)
+		hbox.addStretch()
+		self.onTopButton = QPushButton("S", self)
+		self.onTopButton.setToolTip("Keep window always on top (sticky)")
+		self.onTopButton.setCheckable(True)
+		self.onTopButton.setMaximumWidth(20)
+		hbox.addWidget(self.onTopButton)
+		self.layout().addLayout(hbox, 0, 0)
+
+		grid = QGridLayout()
+		self.captureDisplay = PixmapDisplay(self)
+		self.captureDisplay.setToolTip("Click here to select pixel.")
+		grid.addWidget(self.captureDisplay, 0, 0, 2, 1)
+		self.colorDisplay = PixmapDisplay(self)
+		grid.addWidget(self.colorDisplay, 0, 1, 1, 1)
+		grid.setRowStretch(1, 1)
+		grid.setColumnStretch(2, 1)
+		self.layout().addLayout(grid, 1, 0)
+
+		colorGrid = QGridLayout()
+
+		label = QLabel("RGB:", self)
+		colorGrid.addWidget(label, 0, 0)
+		self.colorR = QLineEdit(self)
+		self.colorR.setValidator(QIntValidator(0, 255))
+		colorGrid.addWidget(self.colorR, 0, 1)
+		self.colorG = QLineEdit(self)
+		self.colorG.setValidator(QIntValidator(0, 255))
+		colorGrid.addWidget(self.colorG, 0, 2)
+		self.colorB = QLineEdit(self)
+		self.colorB.setValidator(QIntValidator(0, 255))
+		colorGrid.addWidget(self.colorB, 0, 3)
+
+		self.sliderR = QSlider(Qt.Horizontal, self)
+		self.sliderR.setRange(0, 255)
+		colorGrid.addWidget(self.sliderR, 1, 1)
+		self.sliderG = QSlider(Qt.Horizontal, self)
+		self.sliderG.setRange(0, 255)
+		colorGrid.addWidget(self.sliderG, 1, 2)
+		self.sliderB = QSlider(Qt.Horizontal, self)
+		self.sliderB.setRange(0, 255)
+		colorGrid.addWidget(self.sliderB, 1, 3)
+
+		label = QLabel("HLS:", self)
+		colorGrid.addWidget(label, 2, 0)
+		self.colorH = QLineEdit(self)
+		self.colorH.setValidator(QDoubleValidator(0.0, 359.9, 1))
+		colorGrid.addWidget(self.colorH, 2, 1)
+		self.colorL = QLineEdit(self)
+		self.colorL.setValidator(QDoubleValidator(0.0, 1.0, 3))
+		colorGrid.addWidget(self.colorL, 2, 2)
+		self.colorS = QLineEdit(self)
+		self.colorS.setValidator(QDoubleValidator(0.0, 1.0, 3))
+		colorGrid.addWidget(self.colorS, 2, 3)
+
+		self.sliderH = QSlider(Qt.Horizontal, self)
+		self.sliderH.setRange(0, round(359.9 * 10))
+		colorGrid.addWidget(self.sliderH, 3, 1)
+		self.sliderL = QSlider(Qt.Horizontal, self)
+		self.sliderL.setRange(0, 100)
+		colorGrid.addWidget(self.sliderL, 3, 2)
+		self.sliderS = QSlider(Qt.Horizontal, self)
+		self.sliderS.setRange(0, 100)
+		colorGrid.addWidget(self.sliderS, 3, 3)
+
+		label = QLabel("RGB-hex:", self)
+		colorGrid.addWidget(label, 4, 0)
+		self.hex = QLineEdit(self)
+		self.hex.setReadOnly(True)#TODO
+		colorGrid.addWidget(self.hex, 4, 1)
+
+		label = QLabel("Color:", self)
+		colorGrid.addWidget(label, 5, 0)
+		self.colorStr = QLineEdit(self)
+		self.colorStr.setReadOnly(True)
+		colorGrid.addWidget(self.colorStr, 5, 1, 1, 3)
+
+		self.layout().addLayout(colorGrid, 2, 0)
+
+		self.layout().setRowStretch(99, 1)
+
+		self.rgb = (0, 0, 0)
+
+		self.__blockChangeSignals = 0
+		self.__pickActive = False
+		self.__origCapturePixmap = QPixmap()
+		self.__selectedPixel = (0, 0)
+
+		self.pickButton.released.connect(self.__handlePick)
+		self.onTopButton.toggled.connect(self.__stickyToggled)
+		self.captureDisplay.pointerEvent.connect(self.__handleCaptureClick)
+		self.colorR.textEdited.connect(self.__handleRGBEdit)
+		self.colorG.textEdited.connect(self.__handleRGBEdit)
+		self.colorB.textEdited.connect(self.__handleRGBEdit)
+		self.sliderR.valueChanged.connect(self.__handleRGBSlide)
+		self.sliderG.valueChanged.connect(self.__handleRGBSlide)
+		self.sliderB.valueChanged.connect(self.__handleRGBSlide)
+		self.colorH.textEdited.connect(self.__handleHLSEdit)
+		self.sliderH.valueChanged.connect(self.__handleHLSSlide)
+		self.colorL.textEdited.connect(self.__handleHLSEdit)
+		self.sliderL.valueChanged.connect(self.__handleHLSSlide)
+		self.colorS.textEdited.connect(self.__handleHLSEdit)
+		self.sliderS.valueChanged.connect(self.__handleHLSSlide)
+
+	def __stickyToggled(self, en):
+		flags = self.mainWindow.windowFlags()
+		self.mainWindow.hide()
+		if en:
+			flags |= (Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint)
+		else:
+			flags &= ~(Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint)
+		self.mainWindow.setWindowFlags(flags)
+		self.mainWindow.show()
+
+	def __handlePick(self):
+		self.mainWindow.statusBar().showMessage(
+			"Use mouse to capture screen area. "
+			"Press Ctrl, Shift or Alt to capture.")
+		self.__pickActive = True
+		self.grabMouse(Qt.CrossCursor)
+		try:
+			while self.__pickActive:
+				QApplication.processEvents(QEventLoop.AllEvents, 300)
+				m = QApplication.keyboardModifiers()
+				if m & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier):
+					self.__endPick()
+				else:
+					self.mainWindow.pick()
+		finally:
+			self.releaseMouse()
+			self.mainWindow.statusBar().showMessage("")
+			self.mainWindow.show()
+
+	def __endPick(self):
+		self.__pickActive = False
+		pixmap = MainWindow.makeCapturePixmap()
+		self.setCapturePixmap(pixmap)
+
+	def mousePressEvent(self, event):
+		if self.__pickActive:
+			self.__endPick()
+		QWidget.mousePressEvent(self, event)
+
+	def setCapturePixmap(self, pixmap):
+		self.__origCapturePixmap = pixmap
+		self.__selectCapturePixel(pixmap.width() // 2,
+					  pixmap.height() // 2)
+
+	def __selectCapturePixel(self, x, y):
+		self.__selectedPixel = (x, y)
+		image = self.__origCapturePixmap.toImage()
+		pix = image.pixel(x, y)
+		self.rgb = qRed(pix), qGreen(pix), qBlue(pix)
+		self.__update()
+
+	def __handleCaptureClick(self, x, y):
+		if self.__blockChangeSignals:
+			return
+		self.__selectCapturePixel(x, y)
+
+	def __convRGB(self, text):
+		value = int(text)
+		if value < 0 or value > 255:
+			raise ValueError
+		return value
+
+	def __handleRGBEdit(self):
+		if self.__blockChangeSignals:
+			return
+		try:
+			r = self.__convRGB(self.colorR.text())
+			g = self.__convRGB(self.colorG.text())
+			b = self.__convRGB(self.colorB.text())
+		except ValueError as e:
+			return
+		self.rgb = (r, g, b)
+		self.__update(updateRGBText=False)
+
+	def __handleRGBSlide(self):
+		if self.__blockChangeSignals:
+			return
+		self.rgb = (self.sliderR.value(),
+			    self.sliderG.value(),
+			    self.sliderB.value())
+		self.__update(updateRGBSlider=False)
+
+	def __convHLS(self, text, maxVal):
+		value = float(text)
+		if value < 0.0 or value > maxVal:
+			raise ValueError
+		return value
+
+	def __handleHLSEdit(self):
+		if self.__blockChangeSignals:
+			return
+		try:
+			h = self.__convHLS(self.colorH.text(), 360.0)
+			l = self.__convHLS(self.colorL.text(), 1.0)
+			s = self.__convHLS(self.colorS.text(), 1.0)
+		except ValueError as e:
+			return
+		self.rgb = ColorString.hls_to_rgb(h, l, s)
+		self.__update(updateHLSText=False)
+
+	def __handleHLSSlide(self):
+		if self.__blockChangeSignals:
+			return
+		h = float(self.sliderH.value()) / 10.0
+		l = float(self.sliderL.value()) / 100.0
+		s = float(self.sliderS.value()) / 100.0
+		self.rgb = ColorString.hls_to_rgb(h, l, s)
+		self.__update(updateHLSSlider=False)
+
+	def __update(self, updateRGBText=True, updateRGBSlider=True,
+			   updateHLSText=True, updateHLSSlider=True,
+			   updateHex=True,
+			   updateStr=True):
+
+		# Draw the capture display.
+		image = self.__origCapturePixmap.toImage()
+		pen = QPen(QColor("red"))
+		pen.setWidth(1)
+		painter = QPainter(image)
+		painter.setPen(pen)
+		painter.drawLine(self.__selectedPixel[0], 0,
+				 self.__selectedPixel[0], self.__selectedPixel[1] - 2)
+		painter.drawLine(self.__selectedPixel[0], self.__selectedPixel[1] + 2,
+				 self.__selectedPixel[0], image.height() - 1)
+		painter.drawLine(0, self.__selectedPixel[1],
+				 self.__selectedPixel[0] - 2, self.__selectedPixel[1])
+		painter.drawLine(self.__selectedPixel[0] + 2, self.__selectedPixel[1],
+				 image.width() - 1, self.__selectedPixel[1])
+		painter.drawRect(self.__selectedPixel[0] - 2, self.__selectedPixel[1] - 2,
+				 4, 4)
+		painter.end()
+		self.captureDisplay.setPixmap(QPixmap.fromImage(image))
+
+		# Draw the color display.
+		image = QImage(64, 64, QImage.Format_RGB32)
+		image.fill(QColor(*self.rgb))
+		self.colorDisplay.setPixmap(QPixmap.fromImage(image))
+
+		self.__blockChangeSignals += 1
+		try:
+			colorString = ColorString.fromRGB(*self.rgb)
+			if updateRGBText:
+				self.colorR.setText(str(self.rgb[0]))
+				self.colorG.setText(str(self.rgb[1]))
+				self.colorB.setText(str(self.rgb[2]))
+			if updateRGBSlider:
+				self.sliderR.setValue(self.rgb[0])
+				self.sliderG.setValue(self.rgb[1])
+				self.sliderB.setValue(self.rgb[2])
+			if updateHLSText:
+				self.colorH.setText("%.1f" % colorString.h)
+				self.colorL.setText("%.3f" % colorString.l)
+				self.colorS.setText("%.3f" % colorString.s)
+			if updateHLSSlider:
+				self.sliderH.setValue(round(colorString.h * 10))
+				self.sliderL.setValue(round(colorString.l * 100))
+				self.sliderS.setValue(round(colorString.s * 100))
+			if updateHex:
+				self.hex.setText("#%02X%02X%02X" % (
+						 self.rgb[0], self.rgb[1], self.rgb[2]))
+			if updateStr:
+				colorName = colorString.string
+				self.colorStr.setText(colorName)
+				self.colorDisplay.setToolTip(colorName)
+		finally:
+			self.__blockChangeSignals -= 1
+
+class MainWindow(QMainWindow):
+	def __init__(self):
+		QMainWindow.__init__(self)
+		self.setCentralWidget(MainWidget(self))
+		self.setWindowTitle("piccol - PICk COLors")
+
+		self.setMenuBar(QMenuBar(self))
+		self.setStatusBar(QStatusBar(self))
+
+		menu = QMenu("&File", self)
+		menu.addAction("&Open picture file...", self.openFile)
+		menu.addSeparator()
+		menu.addAction("&Exit...", self.close)
+		self.menuBar().addMenu(menu)
+
+		menu = QMenu("&Help", self)
+		menu.addAction("Piccol &homepage...", self.homepage)
+		menu.addSeparator()
+		menu.addAction("&About...", self.about)
+		self.menuBar().addMenu(menu)
+
+	def homepage(self):
+		QDesktopServices.openUrl(QUrl(PICCOL_HOME_URL, QUrl.StrictMode))
+
+	def about(self):
+		QMessageBox.about(self, "About piccol",
+			"piccol - Color picker and translator - version %s\n"
+			"\n"
+			"%s\n"
+			"\n"
+			"Copyright 2017 Michael Büsch <m@bues.ch>\n"
+			"\n"
+			"\n"
+			"This program is free software; you can redistribute it and/or modify "
+			"it under the terms of the GNU General Public License as published by "
+			"the Free Software Foundation; either version 2 of the License, or "
+			"(at your option) any later version.\n"
+			"\n"
+			"This program is distributed in the hope that it will be useful, "
+			"but WITHOUT ANY WARRANTY; without even the implied warranty of "
+			"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the "
+			"GNU General Public License for more details.\n"
+			"\n"
+			"You should have received a copy of the GNU General Public License along "
+			"with this program; if not, write to the Free Software Foundation, Inc., "
+			"51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA." % (
+			PICCOL_VERSION, PICCOL_HOME_URL))
+
+	@staticmethod
+	def makeCapturePixmap():
+		if hasattr(QApplication, "primaryScreen"):
+			screen = QApplication.primaryScreen()
+			cursorPos = QCursor.pos()
+			pixmap = screen.grabWindow(0)
+			x, y = cursorPos.x(), cursorPos.y()
+		else:
+			desktop = QApplication.desktop()
+			cursorPos = QCursor.pos()
+			winId = desktop.winId()
+			pixmap = QPixmap.grabWindow(winId)
+			cursorPos = desktop.mapFromGlobal(cursorPos)
+			x, y = cursorPos.x(), cursorPos.y()
+
+		xPad = yPad = 100
+		pixmap = pixmap.copy(x - xPad,
+				     y - yPad,
+				     xPad * 2 + 1,
+				     yPad * 2 + 1)
+		return pixmap
+
+	def loadFile(self, filename):
+		pixmap = QPixmap(str(filename))
+		if not pixmap or pixmap.isNull():
+			QMessageBox.critical(self,
+				"Failed to load file",
+				"Failed to load file:\n%s" % filename)
+			return
+		self.centralWidget().setCapturePixmap(pixmap)
+
+	def openFile(self):
+		fn, fil = QFileDialog.getOpenFileName(self,
+			"Open picture", "",
+			"All files (*)")
+		if not fn:
+			return
+		self.loadFile(fn)
+
+	def pick(self):
+		pixmap = self.makeCapturePixmap()
+		self.centralWidget().setCapturePixmap(pixmap)
+
+		self.show()
+
+def main():
+	qapp = QApplication(sys.argv)
+	mainwnd = MainWindow()
+	mainwnd.pick()
+	return qapp.exec_()
+
+if __name__ == "__main__":
+	sys.exit(main())
