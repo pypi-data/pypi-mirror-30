@@ -1,0 +1,52 @@
+.. image:: https://img.shields.io/badge/language-Python-blue.svg
+    :target: none
+.. image:: https://img.shields.io/pypi/pyversions/only.svg
+    :target: https://pypi.org/pypi/only/
+.. image:: https://img.shields.io/pypi/v/only.svg
+    :target: https://pypi.org/pypi/only
+
+|
+
+.. image:: https://api.codacy.com/project/badge/Grade/fe6a6f03f9354ae391a907cdff85e47b
+    :target: https://www.codacy.com/app/looking-for-a-job/only.py
+.. image:: https://codeclimate.com/github/looking-for-a-job/only.py/badges/gpa.svg
+    :target: https://codeclimate.com/github/looking-for-a-job/only.py
+.. image:: https://img.shields.io/scrutinizer/g/looking-for-a-job/only.py.svg
+    :target: https://scrutinizer-ci.com/g/looking-for-a-job/only.py/
+.. image:: https://sonarcloud.io/api/project_badges/measure?project=only.py&metric=code_smells
+    :target: https://sonarcloud.io/dashboard?id=only.py
+.. image:: https://sonarcloud.io/api/project_badges/measure?project=only.py&metric=reliability_rating
+    :target: https://sonarcloud.io/dashboard?id=only.py
+
+Install
+```````
+
+
+.. code:: bash
+
+    `[sudo] pip install only`
+
+Usage
+`````
+
+
+.. code:: python
+
+    >>> import only
+    
+    >>> @only.linux
+    >>> @only.osx
+    >>> @only.unix
+    >>> @only.windows
+
+
+Examples
+````````
+
+
+.. code:: python
+
+    >>> @only.osx
+    >>> def osascript(): pass
+    
+    >>> osascript() # raise OSError if not OS X
