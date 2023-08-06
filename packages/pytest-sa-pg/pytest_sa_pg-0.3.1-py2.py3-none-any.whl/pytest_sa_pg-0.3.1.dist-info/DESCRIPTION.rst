@@ -1,0 +1,19 @@
+pytest_sa_pg provides basic support to create, start/stop
+postgres clusters for unit tests using pytest and sqlalchemy
+
+Home-page: https://bitbucket.org/pythonian/pytest_sa_pg
+Author: Aurélien Campéas
+Author-email: aurelien.campeas@pythonian.fr
+License: UNKNOWN
+Description-Content-Type: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Database
+Classifier: Topic :: Software Development :: Testing
+Classifier: Framework :: Pytest
