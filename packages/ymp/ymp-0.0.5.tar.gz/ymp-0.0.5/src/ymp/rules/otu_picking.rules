@@ -1,0 +1,131 @@
+from os import path
+
+rule pick_open_otus:
+    """Pick open reference OTUs"""
+    message:
+        "Pick open reference {params.similarity}% OTUs on forward reads"
+    input:
+        seqs = "{dir}/{:fwd_fq_names:}.fq.gz",
+        gg   = "{:dir.references:}/greengenes/"
+    wildcard_constraints:
+        similarity = "([0-9][0-9])?"
+    output:
+        otu_table = "{dir}.o{similarity}/otu_table.biom",
+        tree = "{dir}.o{similarity}/rep_set.tre",
+        rep_set = "{dir}.o{similarity}/rep_set.fa.gz"
+    conda:
+        "qiime.yml"
+    params:
+        ref_fasta = lambda wc, input: path.join(input.gg, "rep_set/{similarity}_otus.fasta".format(**wc)),
+        seqs = lambda wc, input: ','.join(input.seqs),
+        seq_ids = lambda wc, input: ','.join(['.'.join(i.split('/')[-1].split('.')[:-3]) for i in input.seqs]),
+        similarity = lambda wc: wc.similarity if wc.similarity else 97
+    log:
+        "{dir}.o{similarity}/log.txt"
+    threads:
+        8
+    shadow: "shallow"
+    shell: """
+    if [ ! -e "{params.ref_fasta}" ]; then
+      echo Failed to find GreenGenes reference file {params.ref_fasta}.
+      exit 1
+    fi
+    split_libraries_fastq.py \
+    -i {params.seqs} \
+    -o slout \
+    --barcode_type 'not-barcoded' \
+    --sample_ids {params.seq_ids} \
+    -n 0 -q 3 -r 3 -p .75 --phred_offset 33 
+    echo "pick_otus:similarity\t.{params.similarity}" > qiime_params.txt
+    pick_open_reference_otus.py \
+    -i slout/seqs.fna \
+    -o qiime_otus \
+    -r {params.ref_fasta} \
+    -a -O {threads} \
+    -p qiime_params.txt
+    mv qiime_otus/otu_table_mc2_w_tax_no_pynast_failures.biom {output.otu_table}
+    mv qiime_otus/rep_set.tre {output.tree}
+    cat qiime_otus/rep_set.fna | gzip > {output.rep_set}
+    cat slout/split_library_log.txt qiime_otus/log_*.txt > {log}
+    """
+
+
+rule pick_closed_otus:
+    """Pick closed reference OTUs"""
+    message:
+        "Pick closed reference {params.similarity}% OTUs on forward reads"
+    input:
+        seqs = "{dir}/{:fwd_fq_names:}.fq.gz",
+        gg   = "{:dir.references:}/greengenes/"
+    wildcard_constraints:
+        similarity = "([0-9][0-9])?"
+    output:
+        otu_table = "{dir}.c{similarity}/otu_table.biom",
+    conda:
+        "qiime.yml"
+    params:
+        seqs = lambda wc, input: ','.join(input.seqs),
+        seq_ids = lambda wc, input: ','.join([i.split('/')[-1].split('.')[0] for i in input.seqs]),
+        similarity = lambda wc: wc.similarity if wc.similarity else 97,
+        ref_fasta = lambda wc, input: input.gg + "/rep_set/{similarity}_otus.fasta".format(**wc)
+    log:
+        "{dir}.o{similarity}/log.txt"
+    threads:
+        8
+    shadow: "shallow"
+    shell: """
+    if [ ! -e "{params.ref_fasta}" ]; then
+      echo Failed to find GreenGenes reference file {params.ref_fasta}.
+      exit 1
+    fi
+    split_libraries_fastq.py \
+    -i {params.seqs} \
+    -o slout \
+    --barcode_type 'not-barcoded' \
+    --sample_ids {params.seq_ids} \
+    -n 0 -q 3 -r 3 -p .75 --phred_offset 33 
+    echo "pick_otus:similarity\t.{params.similarity}" > qiime_params.txt
+    pick_closed_reference_otus.py \
+    -i slout/seqs.fna \
+    -o qiime_otus \
+    -r {params.ref_fasta} \
+    -a -O {threads} \
+    -p qiime_params.txt
+    mv qiime_otus/otu_table.biom {output.otu_table}
+    cat slout/split_library_log.txt qiime_otus/log_*.txt > {log}
+    """
+
+rule rarefy_table:
+    """"""
+    input:
+        biom = "{dir}/{otu_table}.biom"
+    output:
+        biom = "{dir}/{otu_table}.d{rar_level}.biom"
+    wildcard_constraints:
+        rar_level = "\d+"
+    conda:
+        srcdir("qiime.yml")
+    params:
+        rar_level = "{rar_level}"
+    shell: """
+    single_rarefaction.py -i {input.biom} -d {params.rar_level} -o {output.biom}
+    """
+
+rule convert_to_closed_ref:
+    """Convert open reference otu table to closed reference"""
+    message:
+        "Convert open reference otu picked table {input.biom} to closed reference"
+    input:
+        biom = "{dir}/{table}.biom",
+        gg   = "{:dir.references:}/greengenes/"
+    output:
+        biom = "{dir}/{table}.closed.biom"
+    conda:
+        "qiime.yml"
+    params:
+        ref_fasta = lambda wc, input: input.gg+"rep_set/99_otus.fasta"
+    shell: """
+    filter_otus_from_otu_table.py \
+    -i {input.biom} -o {output.biom} \
+    --negate_ids_to_exclude -e {params.ref_fasta}
+    """
