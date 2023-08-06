@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+print('\033[1;41m!!! Experimental/alpha quality suitable for testing at your own risk only !!!\033[0m')
+
+# Conditional imports in this file
+# import sendclient.download
+# import sendclient.upload
+# import sendclient.delete
+# import sendclient.params
+
+import argparse
+import sys
+import os
+import getpass
+import tempfile
+
+parser = argparse.ArgumentParser(
+    description='Unofficial (Firefox) Send client',
+    fromfile_prefix_chars='@',
+    )
+
+service = parser.add_argument_group('Set the Send service to used').add_mutually_exclusive_group()
+service.add_argument('--service-local', dest='altservice', action='store_const', const='http://localhost:8080/', help='Use a Send service at http://localhost:8080')
+service.add_argument('--service-dev', dest='altservice', action='store_const', const='https://send.dev.mozaws.net/', help='Use the Send development server for upload')
+service.add_argument('--service-stage', dest='altservice', action='store_const', const='https://send.stage.mozaws.net/', help='Use the Send staging server for upload')
+service.add_argument('--service-live', dest='altservice', action='store_const', const='https://send.firefox.com/', help='Use the Send production server for upload (Default)')
+service.add_argument('--service', type=str, default=os.environ.get('SEND_SERVICE', 'https://send.firefox.com/'), help='Specify the url of a Send service to use for upload, can also be set with the environment variable SEND_SERVICE')
+
+action = parser.add_argument_group('Action').add_mutually_exclusive_group()
+action.add_argument('--file', type=argparse.FileType('rb'), help='Upload the specified file to Firefox Send')
+action.add_argument('--stdin', type=str, metavar='FILENAME', help='Upload data read from standard input with this filename')
+action.add_argument('--delete', nargs=2, type=str, metavar=('URL','TOKEN') , help='Delete a file hosted on a Send server')
+action.add_argument('--change-download-limit', nargs=3, type=str, metavar=('URL','TOKEN', 'LIMIT') , help='Change the download limit for a file hosted on a Send server, LIMIT must be <=20')
+action.add_argument('--change-password', nargs=2, type=str, metavar=('URL','TOKEN') , help='change the password for a file hosted on a Send server')
+action.add_argument('--url', type=str, help='Download a file with a Send link')
+
+parser.add_argument('input', nargs='?', help='Uploads or downloads a file specified by path or url, no other options required')
+
+parser.add_argument('--ignore-version', help='Disable server version checks (MAY CAUSE LOSS OF DATA)', action='store_true')
+parser.add_argument('--download-limit', nargs=1, type=int, metavar='LIMIT', help='Download limit for the uploaded file. Should be <=20' )
+
+passwordInput = parser.add_argument_group('Password').add_mutually_exclusive_group()
+passwordInput.add_argument('--password', help='Protect the uploaded file with a password', action='store_true')
+passwordInput.add_argument('--password-unsafe', type=str, help='Provide a password on the command-line (UNSAFE as password visible in process list or shell history!)')
+
+args = parser.parse_args()
+
+# Set the service url to local/dev/stage/pro or other, there should be a cleaner way of doing this
+service = args.altservice or args.service
+
+def case_url(url):
+    import sendclient.download
+
+    file, suggested_name = sendclient.download.send_urlToFile(url, ignoreVersion=args.ignore_version)
+
+    filename = input('Press enter to save to "' + suggested_name + '", or specify a new name now: ') or suggested_name
+    os.rename(file.name, filename)
+    print("Done.")
+
+def case_file(file, fileName=None):
+    import sendclient.upload
+
+    if args.password_unsafe:
+        password = args.password_unsafe
+    elif args.password:
+        print("Would you like to set a download password? if so enter it now (push enter for no password)")
+        password = getpass.getpass()
+    else:
+        password = ''
+    if password != '':
+        secretUrl, fileId, owner_token = sendclient.upload.send_file(service, file, password=password, ignoreVersion=args.ignore_version, fileName=fileName)
+    else:
+        secretUrl, fileId, owner_token = sendclient.upload.send_file(service, file, ignoreVersion=args.ignore_version, fileName=fileName)
+
+    if args.download_limit:
+        case_params(secretUrl, owner_token, args.download_limit[0])
+
+    print('File Uploaded, use the following link to retrieve it')
+    print(secretUrl)
+    print('To delete the file or change the password use this token: %s' % owner_token)
+
+def case_delete(url, delete_token):
+    import sendclient.download
+    import sendclient.delete
+    service, file_id, key = sendclient.download.splitkeyurl(url)
+    if sendclient.delete.api_delete(service, file_id, delete_token):
+        print('File successfully deleted')
+    else:
+        print('\033[1;41mError\033[0m File was not deleted')
+
+def case_params(url, owner_token, download_limit):
+    import sendclient.download
+    import sendclient.params
+    service, file_id, key = sendclient.download.splitkeyurl(url)
+    if sendclient.params.api_params(service, file_id, owner_token, download_limit):
+        print('Download limit changed successfully to ' + str(download_limit))
+    else:
+        print('\033[1;41mError\033[0m Download limit was not changed')
+
+def case_password(url, owner_token):
+    import sendclient.password
+
+    password = getpass.getpass()
+    if password == '':
+        print('\033[1;41mError\033[0m Passwords cannot be unset, only changed.')
+        return
+
+    if sendclient.password.set_password(url, owner_token, password):
+        print('password was set successfully')
+    else:
+        print('\033[1;41mError\033[0m Password may not have been set/changed')
+
+# determine if the positional input is a file or a url and hack it into the appropriate option
+if args.input:
+    if os.path.exists(args.input):
+        # upload
+        args.file = open(args.input, 'rb')
+    elif args.input.startswith('http'):
+        # download
+        args.url = args.input
+    else:
+        parser.error('input does not appear to be a file or a send url')
+
+if args.url:
+    case_url(args.url)
+
+elif args.file:
+    case_file(args.file)
+
+elif args.stdin:
+    # Write stdin to a temp file
+    hack = tempfile.TemporaryFile()
+    hack.write(sys.stdin.buffer.read())
+    hack.seek(0)
+    case_file(hack, fileName=args.stdin)
+
+elif args.delete:
+    case_delete(args.delete[0], args.delete[1])
+
+elif args.change_download_limit:
+    case_params(args.download_limit[0], args.download_limit[1], args.download_limit[2])
+
+elif args.change_password:
+    case_password(args.change_password[0], args.change_password[1])
+
+else:
+    parser.print_usage()
+    sys.exit(1)
+
+sys.exit(0)
