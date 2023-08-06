@@ -1,0 +1,100 @@
+{% extends "device.html" %}
+{% block submenu%}
+<a class="item" href="/device">Devices</a>
+<div class="item">
+    <a class="ui green button" href="/device/{{device.name}}"><i class="edit outline icon"></i>Afficher la configuration</a>
+</div>
+{% end %}
+{% block body %}
+<div class="ui three column relaxed grid">
+    <div class="column center">
+    </div>
+    <div class="column center">
+
+        <table id="table" class="ui inverted blue selectable celled right aligned table">
+            <thead>
+                <tr><th class="left aligned">Capteur</th>
+                    <th>Valeur</th>
+                    <th>Type</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in device.ports['input'] %}
+                {% if p.enabled %}
+                <tr>
+                    <td class="left aligned">{{p.name}}</td>
+                    <td id="{{p.number}}" class="value">Connexion à la carte</td>
+                    <td>{{p._type}}</td>
+                </tr>
+                {% end %}
+                {% end %}
+                {% for p in device.ports['output'] %}
+                {% if p.enabled  %}
+                <tr>
+                    <td class="left aligned">{{p.name}}</td>
+                    <td>
+                        <button class="ui button basculate" id="basculate[{{p.number}}]">
+                            Changer
+                        </button>
+                    </td>
+                    <td>{{p._type}}</td>
+                </tr>
+                {% end %}
+                {% end %}
+            </tbody>
+        </table>
+    </div>
+</div>
+<div id="log" style="overflow:scroll;width:500px; height:200px;background-color:#ffeeaa; margin:auto; text-align:left">Messages go here</div>
+
+<script>
+$(function(){
+    var ws;
+    var logger = function(msg){
+        var now = new Date();
+        var sec = now.getSeconds();
+        var min = now.getMinutes();
+        var hr = now.getHours();
+        $("#log").html($("#log").html() + "<br/>" + hr + ":" + min + ":" + sec + " ___ " +  msg);
+        //$("#log").animate({ scrollTop: $('#log')[0].scrollHeight}, 100);
+        $('#log').scrollTop($('#log')[0].scrollHeight);
+    }
+
+    ws = new WebSocket("wss://{{host}}:{{port}}/ws/{{slug}}");
+    ws.onmessage = function(evt) {
+
+        logger(evt.data);
+        var obj = JSON.parse(evt.data);
+        console.log(obj)
+        for(var propertyName in obj) {
+            $("#"+propertyName).html('<h4 class="ui blue inverted header">'+obj[propertyName]+'</h4>');
+        }
+        if(obj.type=='Undefined')
+        $(".value").html();
+    };
+    ws.onclose = function(evt) {
+        $("#log").text("Connection was closed...");
+        $("#thebutton #msg").prop('disabled', true);
+    };
+    ws.onopen = function(evt) {
+        $("#log").text("Opening socket...");
+        $("#thebutton #msg").prop('disabled', false);
+    };
+    $("#name").prop('disabled', true);
+
+    var sender = function(msg) {
+        if (msg.length > 0)
+        ws.send(msg);
+    }
+
+    $("#capteur").on('change', function() {
+        sender(this.value);
+    })
+
+    $(".basculate").on('click', function(){
+        let port = this.id.split("[")[1].split("]")[0];
+        sender(port)
+    })
+});
+</script>
+{% end %}
