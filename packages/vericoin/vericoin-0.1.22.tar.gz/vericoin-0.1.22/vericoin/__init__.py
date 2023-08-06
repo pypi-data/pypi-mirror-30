@@ -1,0 +1,1 @@
+from vericoin.crypto.client import Crypto
