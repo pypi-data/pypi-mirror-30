@@ -1,0 +1,5 @@
+APP_FILENAME = "yellowant_app.json"
+APP_CONFIG_FILENAME = "yellowant_app.config"
+API_ENDPOINT = "/api/"
+DEVELOPER_API_ENDPOINT = API_ENDPOINT + "developers/"
+DEVELOPER_APPLICATION_ENDPOINT = DEVELOPER_API_ENDPOINT + "devapplications/"
