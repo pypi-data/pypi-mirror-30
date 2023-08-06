@@ -1,0 +1,204 @@
+# ImdbPie
+
+[![PyPI](https://img.shields.io/pypi/v/imdbpie.svg)](https://pypi.python.org/pypi/imdb-pie)
+[![Python Versions](https://img.shields.io/pypi/pyversions/imdbpie.svg)](https://pypi.python.org/pypi/imdb-pie)
+[![Build Status](https://travis-ci.org/richardasaurus/imdb-pie.png?branch=master)](https://travis-ci.org/richardasaurus/imdb-pie)
+
+Python IMDB client using the IMDB json web service made available for their iOS app.
+
+## API Terminology
+
+- `Title` this can be a movie, tv show, video, documentary etc.
+- `Name` this can be a credit, cast member, any person generally.
+
+## Installation
+
+To install imdbpie, simply:
+```bash
+pip install imdbpie
+```
+
+## How To Use
+
+### Initialise the client
+```python
+from imdbpie import Imdb
+imdb = Imdb()
+```
+
+### Available methods
+
+NOTE: For each client method, if the resource cannot be found they will raise `LookupError`, if there is an API error then `ImdbAPIError` will raise.
+
+Example | Description
+--------- | ---------
+`get_title('tt0111161')` | Returns a dict containing title information
+`search_for_title("The Dark Knight")` | Returns a dict of results
+`search_for_name("Christian Bale)` | Returns a dict of results
+`title_exits('tt0111161')` | Returns True if exists otherwise False
+`get_title_genres('tt0303461')` | Returns a dict containing title genres information
+`get_title_credits('tt0303461')` | Returns a dict containing title credits information
+`get_title_quotes('tt0303461')` | Returns a dict containing title quotes information
+`get_title_ratings('tt0303461')` | Returns a dict containing title ratings information
+`get_title_connections('tt0303461')` | Returns a dict containing title connections information
+`get_title_similarities('tt0303461')` | Returns a dict containing title similarities information
+`get_title_videos('tt0303461')` | Returns a dict containing title videos information
+`get_title_news('tt0303461')` | Returns a dict containing news
+`get_title_trivia('tt0303461')` | Returns a dict containing trivia
+`get_title_soundtracks('tt0303461')` | Returns a dict containing soundtracks information
+`get_title_goofs('tt0303461')` | Returns a dict containing "goofs" and teaser information
+`get_title_technical('tt0303461')` | Returns a dict containing technical information
+`get_title_companies('tt0303461')` | Returns a dict containing information about companies related to title
+`get_title_episodes('tt0303461')` | Returns a dict containing season and episodes information
+`get_title_episodes_detailed(imdb_id='tt0303461', season=1)` | Returns a dict containing detailed season episodes information
+`get_title_top_crew('tt0303461')` | Returns a dict containing detailed information about title's top crew (ie: directors, writters, etc.)
+`get_title_plot('tt0111161')` | Returns a dict containing title plot information
+`get_title_plot_synopsis('tt0111161')` | Returns a dict containing title plot synopsis information
+`get_title_awards('tt0111161')` |Returns a dict containing title plot information
+`get_title_releases('tt0111161')` | Returns a dict containing releases information
+`get_title_versions('tt0111161')` | Returns a dict containing versions information (meaning different versions of this title for different regions, or different versions for DVD vs Cinema)
+`get_title_user_reviews('tt0111161')` | Returns a dict containing user review information
+`get_title_metacritic_reviews('tt0111161')` | Returns a dict containing metacritic review information
+`get_title_images('tt0111161')` | Returns a dict containing title images information
+`get_name('nm0000151')` | Returns a dict containing person/name information
+`get_name_filmography('nm0000151')` | Returns a dict containing person/name filmography information
+`get_name_images('nm0000032')` | Returns a dict containing person/name images information
+`get_name_videos('nm0000032')` | Returns a dict containing person/name videos information
+`validate_imdb_id('tt0111161')` | Raises `ValueError` if not valid 
+`get_popular_titles()` | Returns a dict containing popular titles information
+`get_popular_shows()` | Returns a dict containing popular tv shows
+`get_popular_movies()` | Returns a dict containing popular movies 
+
+
+## Requirements
+
+    1. Python 2 or 3
+    2. See requirements.txt
+
+## Running the tests
+
+```bash
+pip install -r test_requirements.txt
+py.test src/tests
+```
+
+
+
+
+# Release History
+
+5.4.2 (2018-04-05)
+------------------
+
+- Fixes missing setuptools dependency for pypi display of markdown formatted files.
+
+
+5.4.1 (2018-04-05)
+------------------
+
+-   Packaging documentation fixes.
+
+5.4.0 (2018-03-18)
+------------------
+
+-   Bugfix for incorrect AttributeError message showing when undefined
+    attrs called on client class.
+-   Adds `get_title_top_crew` method.
+
+5.3.0 (2018-02-27)
+------------------
+
+-   Adds `get_title_plot_taglines` method.
+-   Adds `get_title_news` method.
+-   Adds `get_title_trivia` method.
+-   Adds `get_title_soundtracks` method.
+-   Adds `get_title_goofs` method.
+-   Adds `get_title_technical` method.
+-   Adds `get_title_companies` method.
+-   Adds `get_title_episodes_detailed` method.
+
+5.2.0 (2018-01-11)
+------------------
+
+-   Updates `get_title` to call "/auxiliary" as "/fulldetails" endpoint
+    now returns an error.
+-   Adds `get_title_quotes` method.
+-   Adds `get_title_ratings` method.
+-   Adds `get_title_connections` method.
+-   Adds `get_title_awards` method.
+-   Adds `get_title_plot_synopsis` method.
+-   Adds `get_title_versions` method.
+-   Adds `get_title_releases` method.
+-   Adds `get_title_similarities` method.
+-   Adds `get_title_videos` method.
+-   Adds `get_name_videos` method.
+-   Adds `get_name_filmography` method.
+-   Adds response status code to `ImdbAPIError` exception message.
+
+5.1.0 (2018-01-10)
+------------------
+
+-   Adds `get_title_genres` method.
+
+5.0.0 (2018-01-10)
+------------------
+
+-   Fixes client to work with new API.
+-   Renames most of methods on `Imdb` class.
+-   Changes all methods on `Imdb` to return raw JSON resource dictionary
+    rather than Python objects.
+-   Removes params from `Imdb` `__init__` method (user\_agent,
+    proxy\_uri, verify\_ssl, api\_key, cache, anonymize).
+-   Adds `clear_cached_credentials` method to `Imdb` class.
+
+4.4.2 (2018-01-03)
+------------------
+
+-   Fixes bug when searching with non alphanumeric characters, second
+    attempt.
+
+4.4.1 (2017-12-27)
+------------------
+
+-   Fixes bug when searching with non alphanumeric characters.
+
+4.4.0 (2017-12-24)
+------------------
+
+-   Fixes `search_for_person` and `search_for_title` methods, which were
+    broken because XML api used by the client was removed, migrated to
+    using search suggestions api used by the website itself.
+-   Adds optional `session` param to client init method, used to specify
+    `requests.Session`.
+-   All client methods will raise `ValueError` if invalid `imdb_id`
+    param given.
+
+4.3.0 (2017-08-10)
+------------------
+
+**Added**
+
+-   Added `Imdb.popular_movies` to retrieve current popular movies.
+
+4.2.0 (2016-09-29)
+------------------
+
+**Added**
+
+-   `Person.photo_url` has been added. It returns a string (url) or
+    None.
+
+4.1.0 (2016-07-26)
+------------------
+
+-   Changed `Title` and other objects to use less memory.
+-   Added notice of deprecation of caching in version 5.0.0.
+-   Added `Imdb.get_episodes` to retrieve Title Episode information.
+
+4.0.2 (2015-08-08)
+------------------
+
+**Added** - Added `cache_expiry` parameter to `Imdb` class, to specify
+cache expiry in seconds.
+
+
