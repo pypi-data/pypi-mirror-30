@@ -1,0 +1,1 @@
+This package contains Nearist's Client API for interacting with Nearist servers remotely. For information about Nearist, visit [nearist.ai](http://nearist.ai). For documentation and example applications, visit [github.com/nearist/nearist](http://github.com/nearist/nearist).
