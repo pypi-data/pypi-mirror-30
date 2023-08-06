@@ -1,0 +1,38 @@
+MCRcon
+======
+
+This library provides a straightforward implementation of Minecraft's
+`Rcon protocol`_ in Python to provide a client for handling Remote Commands
+(RCON) to a Minecraft server.
+
+.. _Rcon protocol: http://wiki.vg/Rcon
+
+Installation
+############
+
+The library is availble on PYPI and can be installed with pip::
+
+    pip install mcrcon
+
+Usage
+#####
+
+The recommend way to run this client is using the python 'with' statement.
+This ensures that the socket is correctly closed when you are done with it
+rather than being left open.
+
+Example::
+
+    In [1]: from mcrcon import MCRcon
+    In [2]: with MCRcon("10.1.1.1", "sekret") as mcr:
+       ...:     resp = mcr.command("/whitelist add bob")
+       ...:     print(resp)
+
+While you can use it without the 'with' statement, you have to connect
+manually, and ideally disconnect::
+
+    In [3]: mcr = MCRcon("10.1.1.1", "sekret")
+    In [4]: mcr.connect()
+    In [5]: resp = mcr.command("/whitelist add bob")
+    In [6]: print(resp)
+    In [7]: mcr.disconnect()
