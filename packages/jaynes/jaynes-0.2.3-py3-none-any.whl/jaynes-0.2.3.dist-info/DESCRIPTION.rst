@@ -1,0 +1,118 @@
+Jaynes, A Utility for training ML models on AWS with docker
+===========================================================
+
+ ## Todo
+
+-  [x] get the initial template to work
+
+Done
+----
+
+Installation
+------------
+
+.. code-block:: bash
+
+    pip install jaynes
+
+Usage (**Show me the Mo-NAY!! :moneybag::money\_with\_wings:**)
+---------------------------------------------------------------
+
+Take a look at the folder `test\_projects/ <test_projects/>`__! These
+project scripts are used for test and development, so they should work
+out-of-the-box (if you have the right box ahem).
+
+To run Local Docker
+~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    import os
+    from jaynes import Jaynes
+    from main import LOG_DIR, train, abs_path
+
+    J = Jaynes(os.getcwd(), bucket="ge-bair", log=LOG_DIR + "/startup.log")
+    J.mount_s3(local="https://github.com/episodeyang/jaynes/blob/master/", pypath=True)
+    J.mount_s3(local=".https://github.com/episodeyang/jaynes/blob/master/.https://github.com/episodeyang/jaynes/blob/master/", pypath=True, file_mask="""https://github.com/episodeyang/jaynes/blob/master/__init__.py https://github.com/episodeyang/jaynes/blob/master/jaynes""")
+    J.mount_output(s3_dir=LOG_DIR, local=LOG_DIR, remote=LOG_DIR, docker=abs_path, sync_s3=False)
+    J.run_local()
+    J.setup_docker_run("python:3.6", docker_startup_scripts=("pip install cloudpickle",), use_gpu=False)
+    J.run_local_docker(train, a="hey", b=[0, 1, 2], log_dir=abs_path)
+
+To run on remote server with ssh
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    from jaynes import Jaynes
+    from main import LOG_DIR, train, abs_path
+
+    J = Jaynes(remote_cwd='/home/ubuntu/', bucket="ge-bair", log=LOG_DIR + "/startup.log")
+    J.mount_s3(local="https://github.com/episodeyang/jaynes/blob/master/", pypath=True)
+    J.mount_s3(local=".https://github.com/episodeyang/jaynes/blob/master/.https://github.com/episodeyang/jaynes/blob/master/", pypath=True, file_mask="""https://github.com/episodeyang/jaynes/blob/master/__init__.py https://github.com/episodeyang/jaynes/blob/master/jaynes""")
+    J.mount_output(s3_dir=LOG_DIR, local=LOG_DIR, remote=LOG_DIR, docker=abs_path)
+    J.run_local(verbose=True)
+    J.setup_docker_run("thanard/matplotlib", docker_startup_scripts=("pip install cloudpickle",), use_gpu=True)
+    J.make_launch_script(train, a="hey", b=[0, 1, 2], log_dir=LOG_DIR, dry=True, verbose=True)
+
+To Launch EC2 instance and Run on Startup
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+make sure the instance terminate after docker run!
+
+.. code-block:: python
+
+    from jaynes import Jaynes
+    from main import LOG_DIR, train, abs_path
+
+    J = Jaynes(remote_cwd='/home/ubuntu/', bucket="ge-bair", log=LOG_DIR + "/startup.log")
+    J.mount_s3(local="https://github.com/episodeyang/jaynes/blob/master/", pypath=True)
+    J.mount_s3(local=".https://github.com/episodeyang/jaynes/blob/master/.https://github.com/episodeyang/jaynes/blob/master/", pypath=True, file_mask="""https://github.com/episodeyang/jaynes/blob/master/__init__.py https://github.com/episodeyang/jaynes/blob/master/jaynes""")
+    J.mount_output(s3_dir=LOG_DIR, local=LOG_DIR, remote=LOG_DIR, docker=abs_path)
+    J.run_local(verbose=True)
+    J.setup_docker_run("thanard/matplotlib", docker_startup_scripts=("pip install cloudpickle",), use_gpu=True)
+    J.make_launch_script(train, a="hey", b=[0, 1, 2], log_dir=LOG_DIR, dry=True, verbose=True, terminate_after_finish=True)
+    J.launch_and_run(region="us-west-2", image_id="ami-bd4fd7c5", instance_type="t2.micro", key_name="ge-berkeley",
+                     security_group="torch-gym-prebuilt", is_spot_instance=True, spot_price=0.004,
+                     iam_instance_profile_arn="arn:aws:iam::055406702465:instance-profile/main", dry=False)
+
+Jaynes does the following:
+
+1. 
+
+To Develop
+----------
+
+.. code-block:: bash
+
+    git clone https://github.com/episodeyang/jaynes.git
+    cd jaynes
+    make dev
+
+To test, run
+
+.. code-block:: bash
+
+    make test
+
+This ``make dev`` command should build the wheel and install it in your
+current python environment. Take a look at the
+`https://github.com/episodeyang/jaynes/blob/master/Makefile <https://github.com/episodeyang/jaynes/blob/master/Makefile>`__ for details.
+
+**To publish**, first update the version number, then do:
+
+.. code-block:: bash
+
+    make publish
+
+Acknowledgements
+----------------
+
+This code-block is inspired by @justinfu's
+`doodad <https://github.com/justinjfu/doodad>`__, which is in turn built
+on top of Peter Chen's script.
+
+This code-block is written from scratch to allow a more permissible
+open-source license (BSD). Go bears :bear: !!
+
+
