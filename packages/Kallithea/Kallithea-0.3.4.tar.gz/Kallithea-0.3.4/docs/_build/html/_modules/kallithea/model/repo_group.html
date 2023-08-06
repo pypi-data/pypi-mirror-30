@@ -1,0 +1,641 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model.repo_group &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" accesskey="U">kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model.repo_group</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model.repo_group
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+repo group model for Kallithea
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Jan 25, 2011
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+&quot;&quot;&quot;
+
+
+import os
+import logging
+import traceback
+import shutil
+import datetime
+
+from kallithea.lib.utils2 import LazyProperty
+
+from kallithea.model import BaseModel
+from kallithea.model.db import RepoGroup, Ui, UserRepoGroupToPerm, \
+    User, Permission, UserGroupRepoGroupToPerm, UserGroup, Repository
+
+log = logging.getLogger(__name__)
+
+
+<div class="viewcode-block" id="RepoGroupModel"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo_group.RepoGroupModel">[docs]</a>class RepoGroupModel(BaseModel):
+
+    cls = RepoGroup
+
+    def _get_user_group(self, users_group):
+        return self._get_instance(UserGroup, users_group,
+                                  callback=UserGroup.get_by_group_name)
+
+    def _get_repo_group(self, repo_group):
+        return self._get_instance(RepoGroup, repo_group,
+                                  callback=RepoGroup.get_by_group_name)
+
+<div class="viewcode-block" id="RepoGroupModel.repos_path"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo_group.RepoGroupModel.repos_path">[docs]</a>    @LazyProperty
+    def repos_path(self):
+        &quot;&quot;&quot;
+        Gets the repositories root path from database
+        &quot;&quot;&quot;
+
+        q = Ui.get_by_key(&#39;/&#39;)
+        return q.ui_value</div>
+
+    def _create_default_perms(self, new_group):
+        # create default permission
+        default_perm = &#39;group.read&#39;
+        def_user = User.get_default_user()
+        for p in def_user.user_perms:
+            if p.permission.permission_name.startswith(&#39;group.&#39;):
+                default_perm = p.permission.permission_name
+                break
+
+        repo_group_to_perm = UserRepoGroupToPerm()
+        repo_group_to_perm.permission = Permission.get_by_key(default_perm)
+
+        repo_group_to_perm.group = new_group
+        repo_group_to_perm.user_id = def_user.user_id
+        return repo_group_to_perm
+
+    def _create_group(self, group_name):
+        &quot;&quot;&quot;
+        makes repository group on filesystem
+
+        :param repo_name:
+        :param parent_id:
+        &quot;&quot;&quot;
+
+        create_path = os.path.join(self.repos_path, group_name)
+        log.debug(&#39;creating new group in %s&#39;, create_path)
+
+        if os.path.isdir(create_path):
+            raise Exception(&#39;That directory already exists !&#39;)
+
+        os.makedirs(create_path)
+        log.debug(&#39;Created group in %s&#39;, create_path)
+
+    def _rename_group(self, old, new):
+        &quot;&quot;&quot;
+        Renames a group on filesystem
+
+        :param group_name:
+        &quot;&quot;&quot;
+
+        if old == new:
+            log.debug(&#39;skipping group rename&#39;)
+            return
+
+        log.debug(&#39;renaming repository group from %s to %s&#39;, old, new)
+
+        old_path = os.path.join(self.repos_path, old)
+        new_path = os.path.join(self.repos_path, new)
+
+        log.debug(&#39;renaming repos paths from %s to %s&#39;, old_path, new_path)
+
+        if os.path.isdir(new_path):
+            raise Exception(&#39;Was trying to rename to already &#39;
+                            &#39;existing dir %s&#39; % new_path)
+        shutil.move(old_path, new_path)
+
+    def _delete_group(self, group, force_delete=False):
+        &quot;&quot;&quot;
+        Deletes a group from a filesystem
+
+        :param group: instance of group from database
+        :param force_delete: use shutil rmtree to remove all objects
+        &quot;&quot;&quot;
+        paths = group.full_path.split(RepoGroup.url_sep())
+        paths = os.sep.join(paths)
+
+        rm_path = os.path.join(self.repos_path, paths)
+        log.info(&quot;Removing group %s&quot;, rm_path)
+        # delete only if that path really exists
+        if os.path.isdir(rm_path):
+            if force_delete:
+                shutil.rmtree(rm_path)
+            else:
+                #archive that group`
+                _now = datetime.datetime.now()
+                _ms = str(_now.microsecond).rjust(6, &#39;0&#39;)
+                _d = &#39;rm__%s_GROUP_%s&#39; % (_now.strftime(&#39;%Y%m%d_%H%M%S_&#39; + _ms),
+                                          group.name)
+                shutil.move(rm_path, os.path.join(self.repos_path, _d))
+
+    def create(self, group_name, group_description, owner, parent=None,
+               just_db=False, copy_permissions=False):
+        try:
+            user = self._get_user(owner)
+            parent_group = self._get_repo_group(parent)
+            new_repo_group = RepoGroup()
+            new_repo_group.user = user
+            new_repo_group.group_description = group_description or group_name
+            new_repo_group.parent_group = parent_group
+            new_repo_group.group_name = new_repo_group.get_new_name(group_name)
+
+            self.sa.add(new_repo_group)
+
+            # create an ADMIN permission for owner except if we&#39;re super admin,
+            # later owner should go into the owner field of groups
+            if not user.is_admin:
+                self.grant_user_permission(repo_group=new_repo_group,
+                                           user=owner, perm=&#39;group.admin&#39;)
+
+            if parent_group and copy_permissions:
+                # copy permissions from parent
+                user_perms = UserRepoGroupToPerm.query() \
+                    .filter(UserRepoGroupToPerm.group == parent_group).all()
+
+                group_perms = UserGroupRepoGroupToPerm.query() \
+                    .filter(UserGroupRepoGroupToPerm.group == parent_group).all()
+
+                for perm in user_perms:
+                    # don&#39;t copy over the permission for user who is creating
+                    # this group, if he is not super admin he get&#39;s admin
+                    # permission set above
+                    if perm.user != user or user.is_admin:
+                        UserRepoGroupToPerm.create(perm.user, new_repo_group, perm.permission)
+
+                for perm in group_perms:
+                    UserGroupRepoGroupToPerm.create(perm.users_group, new_repo_group, perm.permission)
+            else:
+                perm_obj = self._create_default_perms(new_repo_group)
+                self.sa.add(perm_obj)
+
+            if not just_db:
+                # we need to flush here, in order to check if database won&#39;t
+                # throw any exceptions, create filesystem dirs at the very end
+                self.sa.flush()
+                self._create_group(new_repo_group.group_name)
+
+            return new_repo_group
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+    def _update_permissions(self, repo_group, perms_new=None,
+                            perms_updates=None, recursive=None,
+                            check_perms=True):
+        from kallithea.model.repo import RepoModel
+        from kallithea.lib.auth import HasUserGroupPermissionAny
+
+        if not perms_new:
+            perms_new = []
+        if not perms_updates:
+            perms_updates = []
+
+        def _set_perm_user(obj, user, perm):
+            if isinstance(obj, RepoGroup):
+                self.grant_user_permission(repo_group=obj, user=user, perm=perm)
+            elif isinstance(obj, Repository):
+                # private repos will not allow to change the default permissions
+                # using recursive mode
+                if obj.private and user == User.DEFAULT_USER:
+                    return
+
+                # we set group permission but we have to switch to repo
+                # permission
+                perm = perm.replace(&#39;group.&#39;, &#39;repository.&#39;)
+                RepoModel().grant_user_permission(
+                    repo=obj, user=user, perm=perm
+                )
+
+        def _set_perm_group(obj, users_group, perm):
+            if isinstance(obj, RepoGroup):
+                self.grant_user_group_permission(repo_group=obj,
+                                                  group_name=users_group,
+                                                  perm=perm)
+            elif isinstance(obj, Repository):
+                # we set group permission but we have to switch to repo
+                # permission
+                perm = perm.replace(&#39;group.&#39;, &#39;repository.&#39;)
+                RepoModel().grant_user_group_permission(
+                    repo=obj, group_name=users_group, perm=perm
+                )
+
+        # start updates
+        updates = []
+        log.debug(&#39;Now updating permissions for %s in recursive mode:%s&#39;,
+                  repo_group, recursive)
+
+        for obj in repo_group.recursive_groups_and_repos():
+            # iterated obj is an instance of a repos group or repository in
+            # that group, recursive option can be: none, repos, groups, all
+            if recursive == &#39;all&#39;:
+                obj = obj
+            elif recursive == &#39;repos&#39;:
+                # skip groups, other than this one
+                if isinstance(obj, RepoGroup) and not obj == repo_group:
+                    continue
+            elif recursive == &#39;groups&#39;:
+                # skip repos
+                if isinstance(obj, Repository):
+                    continue
+            else:  # recursive == &#39;none&#39;: # DEFAULT don&#39;t apply to iterated objects
+                obj = repo_group
+                # also we do a break at the end of this loop.
+
+            # update permissions
+            for member, perm, member_type in perms_updates:
+                ## set for user
+                if member_type == &#39;user&#39;:
+                    # this updates also current one if found
+                    _set_perm_user(obj, user=member, perm=perm)
+                ## set for user group
+                else:
+                    #check if we have permissions to alter this usergroup
+                    req_perms = (&#39;usergroup.read&#39;, &#39;usergroup.write&#39;, &#39;usergroup.admin&#39;)
+                    if not check_perms or HasUserGroupPermissionAny(*req_perms)(member):
+                        _set_perm_group(obj, users_group=member, perm=perm)
+            # set new permissions
+            for member, perm, member_type in perms_new:
+                if member_type == &#39;user&#39;:
+                    _set_perm_user(obj, user=member, perm=perm)
+                else:
+                    #check if we have permissions to alter this usergroup
+                    req_perms = (&#39;usergroup.read&#39;, &#39;usergroup.write&#39;, &#39;usergroup.admin&#39;)
+                    if not check_perms or HasUserGroupPermissionAny(*req_perms)(member):
+                        _set_perm_group(obj, users_group=member, perm=perm)
+            updates.append(obj)
+            # if it&#39;s not recursive call for all,repos,groups
+            # break the loop and don&#39;t proceed with other changes
+            if recursive not in [&#39;all&#39;, &#39;repos&#39;, &#39;groups&#39;]:
+                break
+
+        return updates
+
+    def update(self, repo_group, form_data):
+
+        try:
+            repo_group = self._get_repo_group(repo_group)
+            old_path = repo_group.full_path
+
+            # change properties
+            repo_group.group_description = form_data[&#39;group_description&#39;]
+            repo_group.group_parent_id = form_data[&#39;group_parent_id&#39;]
+            repo_group.enable_locking = form_data[&#39;enable_locking&#39;]
+
+            repo_group.parent_group = RepoGroup.get(form_data[&#39;group_parent_id&#39;])
+            repo_group.group_name = repo_group.get_new_name(form_data[&#39;group_name&#39;])
+            new_path = repo_group.full_path
+            self.sa.add(repo_group)
+
+            # iterate over all members of this groups and do fixes
+            # set locking if given
+            # if obj is a repoGroup also fix the name of the group according
+            # to the parent
+            # if obj is a Repo fix it&#39;s name
+            # this can be potentially heavy operation
+            for obj in repo_group.recursive_groups_and_repos():
+                #set the value from it&#39;s parent
+                obj.enable_locking = repo_group.enable_locking
+                if isinstance(obj, RepoGroup):
+                    new_name = obj.get_new_name(obj.name)
+                    log.debug(&#39;Fixing group %s to new name %s&#39; \
+                                % (obj.group_name, new_name))
+                    obj.group_name = new_name
+                elif isinstance(obj, Repository):
+                    # we need to get all repositories from this new group and
+                    # rename them accordingly to new group path
+                    new_name = obj.get_new_name(obj.just_name)
+                    log.debug(&#39;Fixing repo %s to new name %s&#39; \
+                                % (obj.repo_name, new_name))
+                    obj.repo_name = new_name
+                self.sa.add(obj)
+
+            self._rename_group(old_path, new_path)
+
+            return repo_group
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+    def delete(self, repo_group, force_delete=False):
+        repo_group = self._get_repo_group(repo_group)
+        try:
+            self.sa.delete(repo_group)
+            self._delete_group(repo_group, force_delete)
+        except Exception:
+            log.error(&#39;Error removing repo_group %s&#39;, repo_group)
+            raise
+
+    def add_permission(self, repo_group, obj, obj_type, perm, recursive):
+        from kallithea.model.repo import RepoModel
+        repo_group = self._get_repo_group(repo_group)
+        perm = self._get_perm(perm)
+
+        for el in repo_group.recursive_groups_and_repos():
+            # iterated obj is an instance of a repos group or repository in
+            # that group, recursive option can be: none, repos, groups, all
+            if recursive == &#39;all&#39;:
+                el = el
+            elif recursive == &#39;repos&#39;:
+                # skip groups, other than this one
+                if isinstance(el, RepoGroup) and not el == repo_group:
+                    continue
+            elif recursive == &#39;groups&#39;:
+                # skip repos
+                if isinstance(el, Repository):
+                    continue
+            else:  # recursive == &#39;none&#39;: # DEFAULT don&#39;t apply to iterated objects
+                el = repo_group
+                # also we do a break at the end of this loop.
+
+            if isinstance(el, RepoGroup):
+                if obj_type == &#39;user&#39;:
+                    RepoGroupModel().grant_user_permission(el, user=obj, perm=perm)
+                elif obj_type == &#39;user_group&#39;:
+                    RepoGroupModel().grant_user_group_permission(el, group_name=obj, perm=perm)
+                else:
+                    raise Exception(&#39;undefined object type %s&#39; % obj_type)
+            elif isinstance(el, Repository):
+                # for repos we need to hotfix the name of permission
+                _perm = perm.permission_name.replace(&#39;group.&#39;, &#39;repository.&#39;)
+                if obj_type == &#39;user&#39;:
+                    RepoModel().grant_user_permission(el, user=obj, perm=_perm)
+                elif obj_type == &#39;user_group&#39;:
+                    RepoModel().grant_user_group_permission(el, group_name=obj, perm=_perm)
+                else:
+                    raise Exception(&#39;undefined object type %s&#39; % obj_type)
+            else:
+                raise Exception(&#39;el should be instance of Repository or &#39;
+                                &#39;RepositoryGroup got %s instead&#39; % type(el))
+
+            # if it&#39;s not recursive call for all,repos,groups
+            # break the loop and don&#39;t proceed with other changes
+            if recursive not in [&#39;all&#39;, &#39;repos&#39;, &#39;groups&#39;]:
+                break
+
+<div class="viewcode-block" id="RepoGroupModel.delete_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo_group.RepoGroupModel.delete_permission">[docs]</a>    def delete_permission(self, repo_group, obj, obj_type, recursive):
+        &quot;&quot;&quot;
+        Revokes permission for repo_group for given obj(user or users_group),
+        obj_type can be user or user group
+
+        :param repo_group:
+        :param obj: user or user group id
+        :param obj_type: user or user group type
+        :param recursive: recurse to all children of group
+        &quot;&quot;&quot;
+        from kallithea.model.repo import RepoModel
+        repo_group = self._get_repo_group(repo_group)
+
+        for el in repo_group.recursive_groups_and_repos():
+            # iterated obj is an instance of a repos group or repository in
+            # that group, recursive option can be: none, repos, groups, all
+            if recursive == &#39;all&#39;:
+                el = el
+            elif recursive == &#39;repos&#39;:
+                # skip groups, other than this one
+                if isinstance(el, RepoGroup) and not el == repo_group:
+                    continue
+            elif recursive == &#39;groups&#39;:
+                # skip repos
+                if isinstance(el, Repository):
+                    continue
+            else:  # recursive == &#39;none&#39;: # DEFAULT don&#39;t apply to iterated objects
+                el = repo_group
+                # also we do a break at the end of this loop.
+
+            if isinstance(el, RepoGroup):
+                if obj_type == &#39;user&#39;:
+                    RepoGroupModel().revoke_user_permission(el, user=obj)
+                elif obj_type == &#39;user_group&#39;:
+                    RepoGroupModel().revoke_user_group_permission(el, group_name=obj)
+                else:
+                    raise Exception(&#39;undefined object type %s&#39; % obj_type)
+            elif isinstance(el, Repository):
+                if obj_type == &#39;user&#39;:
+                    RepoModel().revoke_user_permission(el, user=obj)
+                elif obj_type == &#39;user_group&#39;:
+                    RepoModel().revoke_user_group_permission(el, group_name=obj)
+                else:
+                    raise Exception(&#39;undefined object type %s&#39; % obj_type)
+            else:
+                raise Exception(&#39;el should be instance of Repository or &#39;
+                                &#39;RepositoryGroup got %s instead&#39; % type(el))
+
+            # if it&#39;s not recursive call for all,repos,groups
+            # break the loop and don&#39;t proceed with other changes
+            if recursive not in [&#39;all&#39;, &#39;repos&#39;, &#39;groups&#39;]:
+                break</div>
+
+<div class="viewcode-block" id="RepoGroupModel.grant_user_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo_group.RepoGroupModel.grant_user_permission">[docs]</a>    def grant_user_permission(self, repo_group, user, perm):
+        &quot;&quot;&quot;
+        Grant permission for user on given repository group, or update
+        existing one if found
+
+        :param repo_group: Instance of RepoGroup, repositories_group_id,
+            or repositories_group name
+        :param user: Instance of User, user_id or username
+        :param perm: Instance of Permission, or permission_name
+        &quot;&quot;&quot;
+
+        repo_group = self._get_repo_group(repo_group)
+        user = self._get_user(user)
+        permission = self._get_perm(perm)
+
+        # check if we have that permission already
+        obj = self.sa.query(UserRepoGroupToPerm)\
+            .filter(UserRepoGroupToPerm.user == user)\
+            .filter(UserRepoGroupToPerm.group == repo_group)\
+            .scalar()
+        if obj is None:
+            # create new !
+            obj = UserRepoGroupToPerm()
+        obj.group = repo_group
+        obj.user = user
+        obj.permission = permission
+        self.sa.add(obj)
+        log.debug(&#39;Granted perm %s to %s on %s&#39;, perm, user, repo_group)
+        return obj</div>
+
+<div class="viewcode-block" id="RepoGroupModel.revoke_user_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo_group.RepoGroupModel.revoke_user_permission">[docs]</a>    def revoke_user_permission(self, repo_group, user):
+        &quot;&quot;&quot;
+        Revoke permission for user on given repository group
+
+        :param repo_group: Instance of RepoGroup, repositories_group_id,
+            or repositories_group name
+        :param user: Instance of User, user_id or username
+        &quot;&quot;&quot;
+
+        repo_group = self._get_repo_group(repo_group)
+        user = self._get_user(user)
+
+        obj = self.sa.query(UserRepoGroupToPerm)\
+            .filter(UserRepoGroupToPerm.user == user)\
+            .filter(UserRepoGroupToPerm.group == repo_group)\
+            .scalar()
+        if obj is not None:
+            self.sa.delete(obj)
+            log.debug(&#39;Revoked perm on %s on %s&#39;, repo_group, user)</div>
+
+<div class="viewcode-block" id="RepoGroupModel.grant_user_group_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo_group.RepoGroupModel.grant_user_group_permission">[docs]</a>    def grant_user_group_permission(self, repo_group, group_name, perm):
+        &quot;&quot;&quot;
+        Grant permission for user group on given repository group, or update
+        existing one if found
+
+        :param repo_group: Instance of RepoGroup, repositories_group_id,
+            or repositories_group name
+        :param group_name: Instance of UserGroup, users_group_id,
+            or user group name
+        :param perm: Instance of Permission, or permission_name
+        &quot;&quot;&quot;
+        repo_group = self._get_repo_group(repo_group)
+        group_name = self._get_user_group(group_name)
+        permission = self._get_perm(perm)
+
+        # check if we have that permission already
+        obj = self.sa.query(UserGroupRepoGroupToPerm)\
+            .filter(UserGroupRepoGroupToPerm.group == repo_group)\
+            .filter(UserGroupRepoGroupToPerm.users_group == group_name)\
+            .scalar()
+
+        if obj is None:
+            # create new
+            obj = UserGroupRepoGroupToPerm()
+
+        obj.group = repo_group
+        obj.users_group = group_name
+        obj.permission = permission
+        self.sa.add(obj)
+        log.debug(&#39;Granted perm %s to %s on %s&#39;, perm, group_name, repo_group)
+        return obj</div>
+
+<div class="viewcode-block" id="RepoGroupModel.revoke_user_group_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo_group.RepoGroupModel.revoke_user_group_permission">[docs]</a>    def revoke_user_group_permission(self, repo_group, group_name):
+        &quot;&quot;&quot;
+        Revoke permission for user group on given repository group
+
+        :param repo_group: Instance of RepoGroup, repositories_group_id,
+            or repositories_group name
+        :param group_name: Instance of UserGroup, users_group_id,
+            or user group name
+        &quot;&quot;&quot;
+        repo_group = self._get_repo_group(repo_group)
+        group_name = self._get_user_group(group_name)
+
+        obj = self.sa.query(UserGroupRepoGroupToPerm)\
+            .filter(UserGroupRepoGroupToPerm.group == repo_group)\
+            .filter(UserGroupRepoGroupToPerm.users_group == group_name)\
+            .scalar()
+        if obj is not None:
+            self.sa.delete(obj)
+            log.debug(&#39;Revoked perm to %s on %s&#39;, repo_group, group_name)</div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" >kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>

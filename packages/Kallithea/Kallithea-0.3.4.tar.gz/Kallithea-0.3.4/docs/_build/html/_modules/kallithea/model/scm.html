@@ -1,0 +1,1007 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model.scm &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" accesskey="U">kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model.scm</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model.scm
+~~~~~~~~~~~~~~~~~~~
+
+Scm model for Kallithea
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Apr 9, 2010
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+&quot;&quot;&quot;
+
+import os
+import re
+import time
+import traceback
+import logging
+import cStringIO
+import pkg_resources
+from os.path import join as jn
+
+from sqlalchemy import func
+from pylons.i18n.translation import _
+
+import kallithea
+from kallithea.lib.vcs import get_backend
+from kallithea.lib.vcs.exceptions import RepositoryError
+from kallithea.lib.vcs.utils.lazy import LazyProperty
+from kallithea.lib.vcs.nodes import FileNode
+from kallithea.lib.vcs.backends.base import EmptyChangeset
+
+from kallithea import BACKENDS
+from kallithea.lib import helpers as h
+from kallithea.lib.utils2 import safe_str, safe_unicode, get_server_url,\
+    _set_extras
+from kallithea.lib.auth import HasRepoPermissionAny, HasRepoGroupPermissionAny,\
+    HasUserGroupPermissionAny, HasPermissionAny, HasPermissionAll
+from kallithea.lib.utils import get_filesystem_repos, make_ui, \
+    action_logger
+from kallithea.model import BaseModel
+from kallithea.model.db import Repository, Ui, CacheInvalidation, \
+    UserFollowing, UserLog, User, RepoGroup, PullRequest
+from kallithea.lib.hooks import log_push_action
+from kallithea.lib.exceptions import NonRelativePathError, IMCCommitError
+
+log = logging.getLogger(__name__)
+
+
+class UserTemp(object):
+    def __init__(self, user_id):
+        self.user_id = user_id
+
+    def __repr__(self):
+        return &quot;&lt;%s(&#39;id:%s&#39;)&gt;&quot; % (self.__class__.__name__, self.user_id)
+
+
+class RepoTemp(object):
+    def __init__(self, repo_id):
+        self.repo_id = repo_id
+
+    def __repr__(self):
+        return &quot;&lt;%s(&#39;id:%s&#39;)&gt;&quot; % (self.__class__.__name__, self.repo_id)
+
+
+<div class="viewcode-block" id="CachedRepoList"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.CachedRepoList">[docs]</a>class CachedRepoList(object):
+    &quot;&quot;&quot;
+    Cached repo list. Uses super-fast in-memory cache after initialization.
+    &quot;&quot;&quot;
+
+    def __init__(self, db_repo_list, repos_path, order_by=None, perm_set=None):
+        self.db_repo_list = db_repo_list
+        self.repos_path = repos_path
+        self.order_by = order_by
+        self.reversed = (order_by or &#39;&#39;).startswith(&#39;-&#39;)
+        if not perm_set:
+            perm_set = [&#39;repository.read&#39;, &#39;repository.write&#39;,
+                        &#39;repository.admin&#39;]
+        self.perm_set = perm_set
+
+    def __len__(self):
+        return len(self.db_repo_list)
+
+    def __repr__(self):
+        return &#39;&lt;%s (%s)&gt;&#39; % (self.__class__.__name__, self.__len__())
+
+    def __iter__(self):
+        # pre-propagated valid_cache_keys to save executing select statements
+        # for each repo
+        valid_cache_keys = CacheInvalidation.get_valid_cache_keys()
+
+        for dbr in self.db_repo_list:
+            scmr = dbr.scm_instance_cached(valid_cache_keys)
+            # check permission at this level
+            if not HasRepoPermissionAny(
+                *self.perm_set)(dbr.repo_name, &#39;get repo check&#39;):
+                continue
+
+            try:
+                last_change = scmr.last_change
+                tip = h.get_changeset_safe(scmr, &#39;tip&#39;)
+            except Exception:
+                log.error(
+                    &#39;%s this repository is present in database but it &#39;
+                    &#39;cannot be created as an scm instance, org_exc:%s&#39;
+                    % (dbr.repo_name, traceback.format_exc())
+                )
+                continue
+
+            tmp_d = {}
+            tmp_d[&#39;name&#39;] = dbr.repo_name
+            tmp_d[&#39;name_sort&#39;] = tmp_d[&#39;name&#39;].lower()
+            tmp_d[&#39;raw_name&#39;] = tmp_d[&#39;name&#39;].lower()
+            tmp_d[&#39;description&#39;] = dbr.description
+            tmp_d[&#39;description_sort&#39;] = tmp_d[&#39;description&#39;].lower()
+            tmp_d[&#39;last_change&#39;] = last_change
+            tmp_d[&#39;last_change_sort&#39;] = time.mktime(last_change.timetuple())
+            tmp_d[&#39;tip&#39;] = tip.raw_id
+            tmp_d[&#39;tip_sort&#39;] = tip.revision
+            tmp_d[&#39;rev&#39;] = tip.revision
+            tmp_d[&#39;contact&#39;] = dbr.user.full_contact
+            tmp_d[&#39;contact_sort&#39;] = tmp_d[&#39;contact&#39;]
+            tmp_d[&#39;owner_sort&#39;] = tmp_d[&#39;contact&#39;]
+            tmp_d[&#39;repo_archives&#39;] = list(scmr._get_archives())
+            tmp_d[&#39;last_msg&#39;] = tip.message
+            tmp_d[&#39;author&#39;] = tip.author
+            tmp_d[&#39;dbrepo&#39;] = dbr.get_dict()
+            tmp_d[&#39;dbrepo_fork&#39;] = dbr.fork.get_dict() if dbr.fork else {}
+            yield tmp_d</div>
+
+
+<div class="viewcode-block" id="SimpleCachedRepoList"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.SimpleCachedRepoList">[docs]</a>class SimpleCachedRepoList(CachedRepoList):
+    &quot;&quot;&quot;
+    Lighter version of CachedRepoList without the scm initialisation
+    &quot;&quot;&quot;
+
+    def __iter__(self):
+        for dbr in self.db_repo_list:
+            # check permission at this level
+            if not HasRepoPermissionAny(
+                *self.perm_set)(dbr.repo_name, &#39;get repo check&#39;):
+                continue
+
+            tmp_d = {
+                &#39;name&#39;: dbr.repo_name,
+                &#39;dbrepo&#39;: dbr.get_dict(),
+                &#39;dbrepo_fork&#39;: dbr.fork.get_dict() if dbr.fork else {}
+            }
+            yield tmp_d</div>
+
+
+class _PermCheckIterator(object):
+    def __init__(self, obj_list, obj_attr, perm_set, perm_checker, extra_kwargs=None):
+        &quot;&quot;&quot;
+        Creates iterator from given list of objects, additionally
+        checking permission for them from perm_set var
+
+        :param obj_list: list of db objects
+        :param obj_attr: attribute of object to pass into perm_checker
+        :param perm_set: list of permissions to check
+        :param perm_checker: callable to check permissions against
+        &quot;&quot;&quot;
+        self.obj_list = obj_list
+        self.obj_attr = obj_attr
+        self.perm_set = perm_set
+        self.perm_checker = perm_checker
+        self.extra_kwargs = extra_kwargs or {}
+
+    def __len__(self):
+        return len(self.obj_list)
+
+    def __repr__(self):
+        return &#39;&lt;%s (%s)&gt;&#39; % (self.__class__.__name__, self.__len__())
+
+    def __iter__(self):
+        for db_obj in self.obj_list:
+            # check permission at this level
+            name = getattr(db_obj, self.obj_attr, None)
+            if not self.perm_checker(*self.perm_set)(
+                    name, self.__class__.__name__, **self.extra_kwargs):
+                continue
+
+            yield db_obj
+
+
+class RepoList(_PermCheckIterator):
+
+    def __init__(self, db_repo_list, perm_set=None, extra_kwargs=None):
+        if not perm_set:
+            perm_set = [&#39;repository.read&#39;, &#39;repository.write&#39;, &#39;repository.admin&#39;]
+
+        super(RepoList, self).__init__(obj_list=db_repo_list,
+                    obj_attr=&#39;repo_name&#39;, perm_set=perm_set,
+                    perm_checker=HasRepoPermissionAny,
+                    extra_kwargs=extra_kwargs)
+
+
+class RepoGroupList(_PermCheckIterator):
+
+    def __init__(self, db_repo_group_list, perm_set=None, extra_kwargs=None):
+        if not perm_set:
+            perm_set = [&#39;group.read&#39;, &#39;group.write&#39;, &#39;group.admin&#39;]
+
+        super(RepoGroupList, self).__init__(obj_list=db_repo_group_list,
+                    obj_attr=&#39;group_name&#39;, perm_set=perm_set,
+                    perm_checker=HasRepoGroupPermissionAny,
+                    extra_kwargs=extra_kwargs)
+
+
+class UserGroupList(_PermCheckIterator):
+
+    def __init__(self, db_user_group_list, perm_set=None, extra_kwargs=None):
+        if not perm_set:
+            perm_set = [&#39;usergroup.read&#39;, &#39;usergroup.write&#39;, &#39;usergroup.admin&#39;]
+
+        super(UserGroupList, self).__init__(obj_list=db_user_group_list,
+                    obj_attr=&#39;users_group_name&#39;, perm_set=perm_set,
+                    perm_checker=HasUserGroupPermissionAny,
+                    extra_kwargs=extra_kwargs)
+
+
+<div class="viewcode-block" id="ScmModel"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel">[docs]</a>class ScmModel(BaseModel):
+    &quot;&quot;&quot;
+    Generic Scm Model
+    &quot;&quot;&quot;
+
+    def __get_repo(self, instance):
+        cls = Repository
+        if isinstance(instance, cls):
+            return instance
+        elif isinstance(instance, int) or safe_str(instance).isdigit():
+            return cls.get(instance)
+        elif isinstance(instance, basestring):
+            return cls.get_by_repo_name(instance)
+        elif instance is not None:
+            raise Exception(&#39;given object must be int, basestr or Instance&#39;
+                            &#39; of %s got %s&#39; % (type(cls), type(instance)))
+
+<div class="viewcode-block" id="ScmModel.repos_path"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.repos_path">[docs]</a>    @LazyProperty
+    def repos_path(self):
+        &quot;&quot;&quot;
+        Gets the repositories root path from database
+        &quot;&quot;&quot;
+
+        q = self.sa.query(Ui).filter(Ui.ui_key == &#39;/&#39;).one()
+
+        return q.ui_value</div>
+
+<div class="viewcode-block" id="ScmModel.repo_scan"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.repo_scan">[docs]</a>    def repo_scan(self, repos_path=None):
+        &quot;&quot;&quot;
+        Listing of repositories in given path. This path should not be a
+        repository itself. Return a dictionary of repository objects
+
+        :param repos_path: path to directory containing repositories
+        &quot;&quot;&quot;
+
+        if repos_path is None:
+            repos_path = self.repos_path
+
+        log.info(&#39;scanning for repositories in %s&#39;, repos_path)
+
+        baseui = make_ui(&#39;db&#39;)
+        repos = {}
+
+        for name, path in get_filesystem_repos(repos_path):
+            # name need to be decomposed and put back together using the /
+            # since this is internal storage separator for kallithea
+            name = Repository.normalize_repo_name(name)
+
+            try:
+                if name in repos:
+                    raise RepositoryError(&#39;Duplicate repository name %s &#39;
+                                          &#39;found in %s&#39; % (name, path))
+                else:
+
+                    klass = get_backend(path[0])
+
+                    if path[0] == &#39;hg&#39; and path[0] in BACKENDS.keys():
+                        repos[name] = klass(safe_str(path[1]), baseui=baseui)
+
+                    if path[0] == &#39;git&#39; and path[0] in BACKENDS.keys():
+                        repos[name] = klass(path[1])
+            except OSError:
+                continue
+        log.debug(&#39;found %s paths with repositories&#39;, len(repos))
+        return repos</div>
+
+<div class="viewcode-block" id="ScmModel.get_repos"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.get_repos">[docs]</a>    def get_repos(self, all_repos=None, sort_key=None, simple=False):
+        &quot;&quot;&quot;
+        Get all repos from db and for each repo create its
+        backend instance and fill that backed with information from database
+
+        :param all_repos: list of repository names as strings
+            give specific repositories list, good for filtering
+
+        :param sort_key: initial sorting of repos
+        :param simple: use SimpleCachedList - one without the SCM info
+        &quot;&quot;&quot;
+        if all_repos is None:
+            all_repos = self.sa.query(Repository)\
+                        .filter(Repository.group_id == None)\
+                        .order_by(func.lower(Repository.repo_name)).all()
+        if simple:
+            repo_iter = SimpleCachedRepoList(all_repos,
+                                             repos_path=self.repos_path,
+                                             order_by=sort_key)
+        else:
+            repo_iter = CachedRepoList(all_repos,
+                                       repos_path=self.repos_path,
+                                       order_by=sort_key)
+
+        return repo_iter</div>
+
+    def get_repo_groups(self, all_groups=None):
+        if all_groups is None:
+            all_groups = RepoGroup.query()\
+                .filter(RepoGroup.group_parent_id == None).all()
+        return [x for x in RepoGroupList(all_groups)]
+
+<div class="viewcode-block" id="ScmModel.mark_for_invalidation"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.mark_for_invalidation">[docs]</a>    def mark_for_invalidation(self, repo_name, delete=False):
+        &quot;&quot;&quot;
+        Mark caches of this repo invalid in the database.
+
+        :param repo_name: the repo for which caches should be marked invalid
+        &quot;&quot;&quot;
+        CacheInvalidation.set_invalidate(repo_name, delete=delete)
+        repo = Repository.get_by_repo_name(repo_name)
+        if repo is not None:
+            repo.update_changeset_cache()</div>
+
+    def toggle_following_repo(self, follow_repo_id, user_id):
+
+        f = self.sa.query(UserFollowing)\
+            .filter(UserFollowing.follows_repo_id == follow_repo_id)\
+            .filter(UserFollowing.user_id == user_id).scalar()
+
+        if f is not None:
+            try:
+                self.sa.delete(f)
+                action_logger(UserTemp(user_id),
+                              &#39;stopped_following_repo&#39;,
+                              RepoTemp(follow_repo_id))
+                return
+            except Exception:
+                log.error(traceback.format_exc())
+                raise
+
+        try:
+            f = UserFollowing()
+            f.user_id = user_id
+            f.follows_repo_id = follow_repo_id
+            self.sa.add(f)
+
+            action_logger(UserTemp(user_id),
+                          &#39;started_following_repo&#39;,
+                          RepoTemp(follow_repo_id))
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+    def toggle_following_user(self, follow_user_id, user_id):
+        f = self.sa.query(UserFollowing)\
+            .filter(UserFollowing.follows_user_id == follow_user_id)\
+            .filter(UserFollowing.user_id == user_id).scalar()
+
+        if f is not None:
+            try:
+                self.sa.delete(f)
+                return
+            except Exception:
+                log.error(traceback.format_exc())
+                raise
+
+        try:
+            f = UserFollowing()
+            f.user_id = user_id
+            f.follows_user_id = follow_user_id
+            self.sa.add(f)
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+    def is_following_repo(self, repo_name, user_id, cache=False):
+        r = self.sa.query(Repository)\
+            .filter(Repository.repo_name == repo_name).scalar()
+
+        f = self.sa.query(UserFollowing)\
+            .filter(UserFollowing.follows_repository == r)\
+            .filter(UserFollowing.user_id == user_id).scalar()
+
+        return f is not None
+
+    def is_following_user(self, username, user_id, cache=False):
+        u = User.get_by_username(username)
+
+        f = self.sa.query(UserFollowing)\
+            .filter(UserFollowing.follows_user == u)\
+            .filter(UserFollowing.user_id == user_id).scalar()
+
+        return f is not None
+
+    def get_followers(self, repo):
+        repo = self._get_repo(repo)
+
+        return self.sa.query(UserFollowing)\
+                .filter(UserFollowing.follows_repository == repo).count()
+
+    def get_forks(self, repo):
+        repo = self._get_repo(repo)
+        return self.sa.query(Repository)\
+                .filter(Repository.fork == repo).count()
+
+    def get_pull_requests(self, repo):
+        repo = self._get_repo(repo)
+        return self.sa.query(PullRequest)\
+                .filter(PullRequest.other_repo == repo)\
+                .filter(PullRequest.status != PullRequest.STATUS_CLOSED).count()
+
+    def mark_as_fork(self, repo, fork, user):
+        repo = self.__get_repo(repo)
+        fork = self.__get_repo(fork)
+        if fork and repo.repo_id == fork.repo_id:
+            raise Exception(&quot;Cannot set repository as fork of itself&quot;)
+
+        if fork and repo.repo_type != fork.repo_type:
+            raise RepositoryError(&quot;Cannot set repository as fork of repository with other type&quot;)
+
+        repo.fork = fork
+        self.sa.add(repo)
+        return repo
+
+    def _handle_rc_scm_extras(self, username, repo_name, repo_alias,
+                              action=None):
+        from kallithea import CONFIG
+        from kallithea.lib.base import _get_ip_addr
+        try:
+            from pylons import request
+            environ = request.environ
+        except TypeError:
+            # we might use this outside of request context, let&#39;s fake the
+            # environ data
+            from webob import Request
+            environ = Request.blank(&#39;&#39;).environ
+        extras = {
+            &#39;ip&#39;: _get_ip_addr(environ),
+            &#39;username&#39;: username,
+            &#39;action&#39;: action or &#39;push_local&#39;,
+            &#39;repository&#39;: repo_name,
+            &#39;scm&#39;: repo_alias,
+            &#39;config&#39;: CONFIG[&#39;__file__&#39;],
+            &#39;server_url&#39;: get_server_url(environ),
+            &#39;make_lock&#39;: None,
+            &#39;locked_by&#39;: [None, None]
+        }
+        _set_extras(extras)
+
+    def _handle_push(self, repo, username, action, repo_name, revisions):
+        &quot;&quot;&quot;
+        Triggers push action hooks
+
+        :param repo: SCM repo
+        :param username: username who pushes
+        :param action: push/push_local/push_remote
+        :param repo_name: name of repo
+        :param revisions: list of revisions that we pushed
+        &quot;&quot;&quot;
+        self._handle_rc_scm_extras(username, repo_name, repo_alias=repo.alias)
+        _scm_repo = repo._repo
+        # trigger push hook
+        if repo.alias == &#39;hg&#39;:
+            log_push_action(_scm_repo.ui, _scm_repo, node=revisions[0])
+        elif repo.alias == &#39;git&#39;:
+            log_push_action(None, _scm_repo, _git_revs=revisions)
+
+    def _get_IMC_module(self, scm_type):
+        &quot;&quot;&quot;
+        Returns InMemoryCommit class based on scm_type
+
+        :param scm_type:
+        &quot;&quot;&quot;
+        if scm_type == &#39;hg&#39;:
+            from kallithea.lib.vcs.backends.hg import MercurialInMemoryChangeset
+            return MercurialInMemoryChangeset
+
+        if scm_type == &#39;git&#39;:
+            from kallithea.lib.vcs.backends.git import GitInMemoryChangeset
+            return GitInMemoryChangeset
+
+        raise Exception(&#39;Invalid scm_type, must be one of hg,git got %s&#39;
+                        % (scm_type,))
+
+<div class="viewcode-block" id="ScmModel.pull_changes"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.pull_changes">[docs]</a>    def pull_changes(self, repo, username):
+        &quot;&quot;&quot;
+        Pull from &quot;clone URL&quot;.
+        &quot;&quot;&quot;
+        dbrepo = self.__get_repo(repo)
+        clone_uri = dbrepo.clone_uri
+        if not clone_uri:
+            raise Exception(&quot;This repository doesn&#39;t have a clone uri&quot;)
+
+        repo = dbrepo.scm_instance
+        repo_name = dbrepo.repo_name
+        try:
+            if repo.alias == &#39;git&#39;:
+                repo.fetch(clone_uri)
+                # git doesn&#39;t really have something like post-fetch action
+                # we fake that now. #TODO: extract fetched revisions somehow
+                # here
+                self._handle_push(repo,
+                                  username=username,
+                                  action=&#39;push_remote&#39;,
+                                  repo_name=repo_name,
+                                  revisions=[])
+            else:
+                self._handle_rc_scm_extras(username, dbrepo.repo_name,
+                                           repo.alias, action=&#39;push_remote&#39;)
+                repo.pull(clone_uri)
+
+            self.mark_for_invalidation(repo_name)
+        except Exception:
+            log.error(traceback.format_exc())
+            raise</div>
+
+<div class="viewcode-block" id="ScmModel.commit_change"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.commit_change">[docs]</a>    def commit_change(self, repo, repo_name, cs, user, author, message,
+                      content, f_path):
+        &quot;&quot;&quot;
+        Commit a change to a single file
+
+        :param repo: a db_repo.scm_instance
+        &quot;&quot;&quot;
+        user = self._get_user(user)
+        IMC = self._get_IMC_module(repo.alias)
+
+        # decoding here will force that we have proper encoded values
+        # in any other case this will throw exceptions and deny commit
+        content = safe_str(content)
+        path = safe_str(f_path)
+        # message and author needs to be unicode
+        # proper backend should then translate that into required type
+        message = safe_unicode(message)
+        author = safe_unicode(author)
+        imc = IMC(repo)
+        imc.change(FileNode(path, content, mode=cs.get_file_mode(f_path)))
+        try:
+            tip = imc.commit(message=message, author=author,
+                             parents=[cs], branch=cs.branch)
+        except Exception as e:
+            log.error(traceback.format_exc())
+            raise IMCCommitError(str(e))
+        finally:
+            # always clear caches, if commit fails we want fresh object also
+            self.mark_for_invalidation(repo_name)
+        self._handle_push(repo,
+                          username=user.username,
+                          action=&#39;push_local&#39;,
+                          repo_name=repo_name,
+                          revisions=[tip.raw_id])
+        return tip</div>
+
+    def _sanitize_path(self, f_path):
+        if f_path.startswith(&#39;/&#39;) or f_path.startswith(&#39;.&#39;) or &#39;../&#39; in f_path:
+            raise NonRelativePathError(&#39;%s is not an relative path&#39; % f_path)
+        if f_path:
+            f_path = os.path.normpath(f_path)
+        return f_path
+
+<div class="viewcode-block" id="ScmModel.get_nodes"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.get_nodes">[docs]</a>    def get_nodes(self, repo_name, revision, root_path=&#39;/&#39;, flat=True):
+        &quot;&quot;&quot;
+        Recursively walk root dir and return a set of all paths found.
+
+        :param repo_name: name of repository
+        :param revision: revision for which to list nodes
+        :param root_path: root path to list
+        :param flat: return as a list, if False returns a dict with description
+
+        &quot;&quot;&quot;
+        _files = list()
+        _dirs = list()
+        try:
+            _repo = self.__get_repo(repo_name)
+            changeset = _repo.scm_instance.get_changeset(revision)
+            root_path = root_path.lstrip(&#39;/&#39;)
+            for topnode, dirs, files in changeset.walk(root_path):
+                for f in files:
+                    _files.append(f.path if flat else {&quot;name&quot;: f.path,
+                                                       &quot;type&quot;: &quot;file&quot;})
+                for d in dirs:
+                    _dirs.append(d.path if flat else {&quot;name&quot;: d.path,
+                                                      &quot;type&quot;: &quot;dir&quot;})
+        except RepositoryError:
+            log.debug(traceback.format_exc())
+            raise
+
+        return _dirs, _files</div>
+
+<div class="viewcode-block" id="ScmModel.create_nodes"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.create_nodes">[docs]</a>    def create_nodes(self, user, repo, message, nodes, parent_cs=None,
+                     author=None, trigger_push_hook=True):
+        &quot;&quot;&quot;
+        Commits specified nodes to repo.
+
+        :param user: Kallithea User object or user_id, the committer
+        :param repo: Kallithea Repository object
+        :param message: commit message
+        :param nodes: mapping {filename:{&#39;content&#39;:content},...}
+        :param parent_cs: parent changeset, can be empty than it&#39;s initial commit
+        :param author: author of commit, cna be different that committer only for git
+        :param trigger_push_hook: trigger push hooks
+
+        :returns: new committed changeset
+        &quot;&quot;&quot;
+
+        user = self._get_user(user)
+        scm_instance = repo.scm_instance_no_cache()
+
+        processed_nodes = []
+        for f_path in nodes:
+            f_path = self._sanitize_path(f_path)
+            content = nodes[f_path][&#39;content&#39;]
+            f_path = safe_str(f_path)
+            # decoding here will force that we have proper encoded values
+            # in any other case this will throw exceptions and deny commit
+            if isinstance(content, (basestring,)):
+                content = safe_str(content)
+            elif isinstance(content, (file, cStringIO.OutputType,)):
+                content = content.read()
+            else:
+                raise Exception(&#39;Content is of unrecognized type %s&#39; % (
+                    type(content)
+                ))
+            processed_nodes.append((f_path, content))
+
+        message = safe_unicode(message)
+        committer = user.full_contact
+        author = safe_unicode(author) if author else committer
+
+        IMC = self._get_IMC_module(scm_instance.alias)
+        imc = IMC(scm_instance)
+
+        if not parent_cs:
+            parent_cs = EmptyChangeset(alias=scm_instance.alias)
+
+        if isinstance(parent_cs, EmptyChangeset):
+            # EmptyChangeset means we we&#39;re editing empty repository
+            parents = None
+        else:
+            parents = [parent_cs]
+        # add multiple nodes
+        for path, content in processed_nodes:
+            imc.add(FileNode(path, content=content))
+
+        tip = imc.commit(message=message,
+                         author=author,
+                         parents=parents,
+                         branch=parent_cs.branch)
+
+        self.mark_for_invalidation(repo.repo_name)
+        if trigger_push_hook:
+            self._handle_push(scm_instance,
+                              username=user.username,
+                              action=&#39;push_local&#39;,
+                              repo_name=repo.repo_name,
+                              revisions=[tip.raw_id])
+        return tip</div>
+
+<div class="viewcode-block" id="ScmModel.update_nodes"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.update_nodes">[docs]</a>    def update_nodes(self, user, repo, message, nodes, parent_cs=None,
+                     author=None, trigger_push_hook=True):
+        &quot;&quot;&quot;
+        Commits specified nodes to repo. Again.
+        &quot;&quot;&quot;
+        user = self._get_user(user)
+        scm_instance = repo.scm_instance_no_cache()
+
+        message = safe_unicode(message)
+        committer = user.full_contact
+        author = safe_unicode(author) if author else committer
+
+        imc_class = self._get_IMC_module(scm_instance.alias)
+        imc = imc_class(scm_instance)
+
+        if not parent_cs:
+            parent_cs = EmptyChangeset(alias=scm_instance.alias)
+
+        if isinstance(parent_cs, EmptyChangeset):
+            # EmptyChangeset means we we&#39;re editing empty repository
+            parents = None
+        else:
+            parents = [parent_cs]
+
+        # add multiple nodes
+        for _filename, data in nodes.items():
+            # new filename, can be renamed from the old one
+            filename = self._sanitize_path(data[&#39;filename&#39;])
+            old_filename = self._sanitize_path(_filename)
+            content = data[&#39;content&#39;]
+
+            filenode = FileNode(old_filename, content=content)
+            op = data[&#39;op&#39;]
+            if op == &#39;add&#39;:
+                imc.add(filenode)
+            elif op == &#39;del&#39;:
+                imc.remove(filenode)
+            elif op == &#39;mod&#39;:
+                if filename != old_filename:
+                    #TODO: handle renames, needs vcs lib changes
+                    imc.remove(filenode)
+                    imc.add(FileNode(filename, content=content))
+                else:
+                    imc.change(filenode)
+
+        # commit changes
+        tip = imc.commit(message=message,
+                         author=author,
+                         parents=parents,
+                         branch=parent_cs.branch)
+
+        self.mark_for_invalidation(repo.repo_name)
+        if trigger_push_hook:
+            self._handle_push(scm_instance,
+                              username=user.username,
+                              action=&#39;push_local&#39;,
+                              repo_name=repo.repo_name,
+                              revisions=[tip.raw_id])</div>
+
+<div class="viewcode-block" id="ScmModel.delete_nodes"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.delete_nodes">[docs]</a>    def delete_nodes(self, user, repo, message, nodes, parent_cs=None,
+                     author=None, trigger_push_hook=True):
+        &quot;&quot;&quot;
+        Deletes specified nodes from repo.
+
+        :param user: Kallithea User object or user_id, the committer
+        :param repo: Kallithea Repository object
+        :param message: commit message
+        :param nodes: mapping {filename:{&#39;content&#39;:content},...}
+        :param parent_cs: parent changeset, can be empty than it&#39;s initial commit
+        :param author: author of commit, cna be different that committer only for git
+        :param trigger_push_hook: trigger push hooks
+
+        :returns: new committed changeset after deletion
+        &quot;&quot;&quot;
+
+        user = self._get_user(user)
+        scm_instance = repo.scm_instance_no_cache()
+
+        processed_nodes = []
+        for f_path in nodes:
+            f_path = self._sanitize_path(f_path)
+            # content can be empty but for compatibility it allows same dicts
+            # structure as add_nodes
+            content = nodes[f_path].get(&#39;content&#39;)
+            processed_nodes.append((f_path, content))
+
+        message = safe_unicode(message)
+        committer = user.full_contact
+        author = safe_unicode(author) if author else committer
+
+        IMC = self._get_IMC_module(scm_instance.alias)
+        imc = IMC(scm_instance)
+
+        if not parent_cs:
+            parent_cs = EmptyChangeset(alias=scm_instance.alias)
+
+        if isinstance(parent_cs, EmptyChangeset):
+            # EmptyChangeset means we we&#39;re editing empty repository
+            parents = None
+        else:
+            parents = [parent_cs]
+        # add multiple nodes
+        for path, content in processed_nodes:
+            imc.remove(FileNode(path, content=content))
+
+        tip = imc.commit(message=message,
+                         author=author,
+                         parents=parents,
+                         branch=parent_cs.branch)
+
+        self.mark_for_invalidation(repo.repo_name)
+        if trigger_push_hook:
+            self._handle_push(scm_instance,
+                              username=user.username,
+                              action=&#39;push_local&#39;,
+                              repo_name=repo.repo_name,
+                              revisions=[tip.raw_id])
+        return tip</div>
+
+    def get_unread_journal(self):
+        return self.sa.query(UserLog).count()
+
+<div class="viewcode-block" id="ScmModel.get_repo_landing_revs"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.get_repo_landing_revs">[docs]</a>    def get_repo_landing_revs(self, repo=None):
+        &quot;&quot;&quot;
+        Generates select option with tags branches and bookmarks (for hg only)
+        grouped by type
+
+        :param repo:
+        &quot;&quot;&quot;
+
+        hist_l = []
+        choices = []
+        repo = self.__get_repo(repo)
+        hist_l.append([&#39;rev:tip&#39;, _(&#39;latest tip&#39;)])
+        choices.append(&#39;rev:tip&#39;)
+        if repo is None:
+            return choices, hist_l
+
+        repo = repo.scm_instance
+
+        branches_group = ([(u&#39;branch:%s&#39; % k, k) for k, v in
+                           repo.branches.iteritems()], _(&quot;Branches&quot;))
+        hist_l.append(branches_group)
+        choices.extend([x[0] for x in branches_group[0]])
+
+        if repo.alias == &#39;hg&#39;:
+            bookmarks_group = ([(u&#39;book:%s&#39; % k, k) for k, v in
+                                repo.bookmarks.iteritems()], _(&quot;Bookmarks&quot;))
+            hist_l.append(bookmarks_group)
+            choices.extend([x[0] for x in bookmarks_group[0]])
+
+        tags_group = ([(u&#39;tag:%s&#39; % k, k) for k, v in
+                       repo.tags.iteritems()], _(&quot;Tags&quot;))
+        hist_l.append(tags_group)
+        choices.extend([x[0] for x in tags_group[0]])
+
+        return choices, hist_l</div>
+
+<div class="viewcode-block" id="ScmModel.install_git_hooks"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.ScmModel.install_git_hooks">[docs]</a>    def install_git_hooks(self, repo, force_create=False):
+        &quot;&quot;&quot;
+        Creates a kallithea hook inside a git repository
+
+        :param repo: Instance of VCS repo
+        :param force_create: Create even if same name hook exists
+        &quot;&quot;&quot;
+
+        loc = jn(repo.path, &#39;hooks&#39;)
+        if not repo.bare:
+            loc = jn(repo.path, &#39;.git&#39;, &#39;hooks&#39;)
+        if not os.path.isdir(loc):
+            os.makedirs(loc)
+
+        tmpl_post = pkg_resources.resource_string(
+            &#39;kallithea&#39;, jn(&#39;config&#39;, &#39;post_receive_tmpl.py&#39;)
+        )
+        tmpl_pre = pkg_resources.resource_string(
+            &#39;kallithea&#39;, jn(&#39;config&#39;, &#39;pre_receive_tmpl.py&#39;)
+        )
+
+        for h_type, tmpl in [(&#39;pre&#39;, tmpl_pre), (&#39;post&#39;, tmpl_post)]:
+            _hook_file = jn(loc, &#39;%s-receive&#39; % h_type)
+            has_hook = False
+            log.debug(&#39;Installing git hook in repo %s&#39;, repo)
+            if os.path.exists(_hook_file):
+                # let&#39;s take a look at this hook, maybe it&#39;s kallithea ?
+                log.debug(&#39;hook exists, checking if it is from kallithea&#39;)
+                with open(_hook_file, &#39;rb&#39;) as f:
+                    data = f.read()
+                    matches = re.compile(r&#39;(?:%s)\s*=\s*(.*)&#39;
+                                         % &#39;KALLITHEA_HOOK_VER&#39;).search(data)
+                    if matches:
+                        try:
+                            ver = matches.groups()[0]
+                            log.debug(&#39;got %s it is kallithea&#39;, ver)
+                            has_hook = True
+                        except Exception:
+                            log.error(traceback.format_exc())
+            else:
+                # there is no hook in this dir, so we want to create one
+                has_hook = True
+
+            if has_hook or force_create:
+                log.debug(&#39;writing %s hook file !&#39;, h_type)
+                try:
+                    with open(_hook_file, &#39;wb&#39;) as f:
+                        tmpl = tmpl.replace(&#39;_TMPL_&#39;, kallithea.__version__)
+                        f.write(tmpl)
+                    os.chmod(_hook_file, 0755)
+                except IOError as e:
+                    log.error(&#39;error writing %s: %s&#39;, _hook_file, e)
+            else:
+                log.debug(&#39;skipping writing hook file&#39;)</div></div>
+
+<div class="viewcode-block" id="AvailableRepoGroupChoices"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.scm.AvailableRepoGroupChoices">[docs]</a>def AvailableRepoGroupChoices(top_perms, repo_group_perms, extras=()):
+    &quot;&quot;&quot;Return group_id,string tuples with choices for all the repo groups where
+    the user has the necessary permissions.
+
+    Top level is -1.
+    &quot;&quot;&quot;
+    groups = RepoGroup.query().all()
+    if HasPermissionAll(&#39;hg.admin&#39;)(&#39;available repo groups&#39;):
+        groups.append(None)
+    else:
+        groups = list(RepoGroupList(groups, perm_set=repo_group_perms))
+        if top_perms and HasPermissionAny(*top_perms)(&#39;available repo groups&#39;):
+            groups.append(None)
+        for extra in extras:
+            if not any(rg == extra for rg in groups):
+                groups.append(extra)
+    return RepoGroup.groups_choices(groups=groups)</div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" >kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>

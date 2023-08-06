@@ -1,0 +1,442 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model.notification &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" accesskey="U">kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model.notification</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model.notification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Model for notifications
+
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Nov 20, 2011
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+&quot;&quot;&quot;
+
+import logging
+import traceback
+
+from pylons import tmpl_context as c
+from pylons.i18n.translation import _
+from sqlalchemy.orm import joinedload, subqueryload
+
+import kallithea
+from kallithea.lib import helpers as h
+from kallithea.lib.utils2 import safe_unicode
+from kallithea.model import BaseModel
+from kallithea.model.db import Notification, User, UserNotification
+from kallithea.model.meta import Session
+
+log = logging.getLogger(__name__)
+
+
+<div class="viewcode-block" id="NotificationModel"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.notification.NotificationModel">[docs]</a>class NotificationModel(BaseModel):
+
+    cls = Notification
+
+    def __get_notification(self, notification):
+        if isinstance(notification, Notification):
+            return notification
+        elif isinstance(notification, (int, long)):
+            return Notification.get(notification)
+        else:
+            if notification is not None:
+                raise Exception(&#39;notification must be int, long or Instance&#39;
+                                &#39; of Notification got %s&#39; % type(notification))
+
+<div class="viewcode-block" id="NotificationModel.create"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.notification.NotificationModel.create">[docs]</a>    def create(self, created_by, subject, body, recipients=None,
+               type_=Notification.TYPE_MESSAGE, with_email=True,
+               email_kwargs={}):
+        &quot;&quot;&quot;
+
+        Creates notification of given type
+
+        :param created_by: int, str or User instance. User who created this
+            notification
+        :param subject:
+        :param body:
+        :param recipients: list of int, str or User objects, when None
+            is given send to all admins
+        :param type_: type of notification
+        :param with_email: send email with this notification
+        :param email_kwargs: additional dict to pass as args to email template
+        &quot;&quot;&quot;
+        from kallithea.lib.celerylib import tasks, run_task
+
+        if recipients and not getattr(recipients, &#39;__iter__&#39;, False):
+            raise Exception(&#39;recipients must be a list or iterable&#39;)
+
+        created_by_obj = self._get_user(created_by)
+
+        recipients_objs = []
+        if recipients:
+            for u in recipients:
+                obj = self._get_user(u)
+                if obj is not None:
+                    recipients_objs.append(obj)
+                else:
+                    # TODO: inform user that requested operation couldn&#39;t be completed
+                    log.error(&#39;cannot email unknown user %r&#39;, u)
+            recipients_objs = set(recipients_objs)
+            log.debug(&#39;sending notifications %s to %s&#39;,
+                type_, recipients_objs
+            )
+        elif recipients is None:
+            # empty recipients means to all admins
+            recipients_objs = User.query().filter(User.admin == True).all()
+            log.debug(&#39;sending notifications %s to admins: %s&#39;,
+                type_, recipients_objs
+            )
+        #else: silently skip notification mails?
+
+        # TODO: inform user who are notified
+        notif = Notification.create(
+            created_by=created_by_obj, subject=subject,
+            body=body, recipients=recipients_objs, type_=type_
+        )
+
+        if not with_email:
+            return notif
+
+        #don&#39;t send email to person who created this comment
+        rec_objs = set(recipients_objs).difference(set([created_by_obj]))
+
+        headers = {}
+        headers[&#39;X-Kallithea-Notification-Type&#39;] = type_
+        if &#39;threading&#39; in email_kwargs:
+            headers[&#39;References&#39;] = &#39; &#39;.join(&#39;&lt;%s&gt;&#39; % x for x in email_kwargs[&#39;threading&#39;])
+
+        # send email with notification to all other participants
+        for rec in rec_objs:
+            ## this is passed into template
+            html_kwargs = {
+                      &#39;subject&#39;: subject,
+                      &#39;body&#39;: h.rst_w_mentions(body),
+                      &#39;when&#39;: h.fmt_date(notif.created_on),
+                      &#39;user&#39;: notif.created_by_user.username,
+                      }
+
+            txt_kwargs = {
+                      &#39;subject&#39;: subject,
+                      &#39;body&#39;: body,
+                      &#39;when&#39;: h.fmt_date(notif.created_on),
+                      &#39;user&#39;: notif.created_by_user.username,
+                      }
+
+            html_kwargs.update(email_kwargs)
+            txt_kwargs.update(email_kwargs)
+            email_subject = EmailNotificationModel()\
+                                .get_email_description(type_, **txt_kwargs)
+            email_txt_body = EmailNotificationModel()\
+                                .get_email_tmpl(type_, &#39;txt&#39;, **txt_kwargs)
+            email_html_body = EmailNotificationModel()\
+                                .get_email_tmpl(type_, &#39;html&#39;, **html_kwargs)
+
+            run_task(tasks.send_email, [rec.email], email_subject, email_txt_body,
+                     email_html_body, headers, author=created_by_obj)
+
+        return notif</div>
+
+    def delete(self, user, notification):
+        # we don&#39;t want to remove actual notification just the assignment
+        try:
+            notification = self.__get_notification(notification)
+            user = self._get_user(user)
+            if notification and user:
+                obj = UserNotification.query()\
+                        .filter(UserNotification.user == user)\
+                        .filter(UserNotification.notification
+                                == notification)\
+                        .one()
+                Session().delete(obj)
+                return True
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+<div class="viewcode-block" id="NotificationModel.get_for_user"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.notification.NotificationModel.get_for_user">[docs]</a>    def get_for_user(self, user, filter_=None):
+        &quot;&quot;&quot;
+        Get notifications for given user, filter them if filter dict is given
+
+        :param user:
+        :param filter:
+        &quot;&quot;&quot;
+        user = self._get_user(user)
+
+        q = UserNotification.query()\
+            .filter(UserNotification.user == user)\
+            .join((Notification, UserNotification.notification_id ==
+                                 Notification.notification_id))\
+            .options(joinedload(&#39;notification&#39;))\
+            .options(subqueryload(&#39;notification.created_by_user&#39;))\
+            .order_by(Notification.created_on.desc())
+
+        if filter_:
+            q = q.filter(Notification.type_.in_(filter_))
+
+        return q.all()</div>
+
+    def mark_read(self, user, notification):
+        try:
+            notification = self.__get_notification(notification)
+            user = self._get_user(user)
+            if notification and user:
+                obj = UserNotification.query()\
+                        .filter(UserNotification.user == user)\
+                        .filter(UserNotification.notification
+                                == notification)\
+                        .one()
+                obj.read = True
+                Session().add(obj)
+                return True
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+    def mark_all_read_for_user(self, user, filter_=None):
+        user = self._get_user(user)
+        q = UserNotification.query()\
+            .filter(UserNotification.user == user)\
+            .filter(UserNotification.read == False)\
+            .join((Notification, UserNotification.notification_id ==
+                                 Notification.notification_id))
+        if filter_:
+            q = q.filter(Notification.type_.in_(filter_))
+
+        # this is a little inefficient but sqlalchemy doesn&#39;t support
+        # update on joined tables :(
+        for obj in q.all():
+            obj.read = True
+            Session().add(obj)
+
+    def get_unread_cnt_for_user(self, user):
+        user = self._get_user(user)
+        return UserNotification.query()\
+                .filter(UserNotification.read == False)\
+                .filter(UserNotification.user == user).count()
+
+    def get_unread_for_user(self, user):
+        user = self._get_user(user)
+        return [x.notification for x in UserNotification.query()\
+                .filter(UserNotification.read == False)\
+                .filter(UserNotification.user == user).all()]
+
+    def get_user_notification(self, user, notification):
+        user = self._get_user(user)
+        notification = self.__get_notification(notification)
+
+        return UserNotification.query()\
+            .filter(UserNotification.notification == notification)\
+            .filter(UserNotification.user == user).scalar()
+
+<div class="viewcode-block" id="NotificationModel.make_description"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.notification.NotificationModel.make_description">[docs]</a>    def make_description(self, notification, show_age=True):
+        &quot;&quot;&quot;
+        Creates a human readable description based on properties
+        of notification object
+        &quot;&quot;&quot;
+        #alias
+        _n = notification
+
+        if show_age:
+            return {
+                    _n.TYPE_CHANGESET_COMMENT: _(&#39;%(user)s commented on changeset %(age)s&#39;),
+                    _n.TYPE_MESSAGE: _(&#39;%(user)s sent message %(age)s&#39;),
+                    _n.TYPE_MENTION: _(&#39;%(user)s mentioned you %(age)s&#39;),
+                    _n.TYPE_REGISTRATION: _(&#39;%(user)s registered in Kallithea %(age)s&#39;),
+                    _n.TYPE_PULL_REQUEST: _(&#39;%(user)s opened new pull request %(age)s&#39;),
+                    _n.TYPE_PULL_REQUEST_COMMENT: _(&#39;%(user)s commented on pull request %(age)s&#39;),
+                }[notification.type_] % dict(
+                    user=notification.created_by_user.username,
+                    age=h.age(notification.created_on),
+                )
+        else:
+            return {
+                    _n.TYPE_CHANGESET_COMMENT: _(&#39;%(user)s commented on changeset at %(when)s&#39;),
+                    _n.TYPE_MESSAGE: _(&#39;%(user)s sent message at %(when)s&#39;),
+                    _n.TYPE_MENTION: _(&#39;%(user)s mentioned you at %(when)s&#39;),
+                    _n.TYPE_REGISTRATION: _(&#39;%(user)s registered in Kallithea at %(when)s&#39;),
+                    _n.TYPE_PULL_REQUEST: _(&#39;%(user)s opened new pull request at %(when)s&#39;),
+                    _n.TYPE_PULL_REQUEST_COMMENT: _(&#39;%(user)s commented on pull request at %(when)s&#39;),
+                }[notification.type_] % dict(
+                    user=notification.created_by_user.username,
+                    when=h.fmt_date(notification.created_on),
+                )</div></div>
+
+
+<div class="viewcode-block" id="EmailNotificationModel"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.notification.EmailNotificationModel">[docs]</a>class EmailNotificationModel(BaseModel):
+
+    TYPE_CHANGESET_COMMENT = Notification.TYPE_CHANGESET_COMMENT
+    TYPE_MESSAGE = Notification.TYPE_MESSAGE # only used for testing
+    # Notification.TYPE_MENTION is not used
+    TYPE_PASSWORD_RESET = &#39;password_link&#39;
+    TYPE_REGISTRATION = Notification.TYPE_REGISTRATION
+    TYPE_PULL_REQUEST = Notification.TYPE_PULL_REQUEST
+    TYPE_PULL_REQUEST_COMMENT = Notification.TYPE_PULL_REQUEST_COMMENT
+    TYPE_DEFAULT = &#39;default&#39;
+
+    def __init__(self):
+        super(EmailNotificationModel, self).__init__()
+        self._template_root = kallithea.CONFIG[&#39;pylons.paths&#39;][&#39;templates&#39;][0]
+        self._tmpl_lookup = kallithea.CONFIG[&#39;pylons.app_globals&#39;].mako_lookup
+        self.email_types = {
+            self.TYPE_CHANGESET_COMMENT: &#39;changeset_comment&#39;,
+            self.TYPE_PASSWORD_RESET: &#39;password_reset&#39;,
+            self.TYPE_REGISTRATION: &#39;registration&#39;,
+            self.TYPE_DEFAULT: &#39;default&#39;,
+            self.TYPE_PULL_REQUEST: &#39;pull_request&#39;,
+            self.TYPE_PULL_REQUEST_COMMENT: &#39;pull_request_comment&#39;,
+        }
+        self._subj_map = {
+            self.TYPE_CHANGESET_COMMENT: _(&#39;[Comment] %(repo_name)s changeset %(short_id)s on %(branch)s&#39;),
+            self.TYPE_MESSAGE: &#39;Test Message&#39;,
+            # self.TYPE_PASSWORD_RESET
+            self.TYPE_REGISTRATION: _(&#39;New user %(new_username)s registered&#39;),
+            # self.TYPE_DEFAULT
+            self.TYPE_PULL_REQUEST: _(&#39;[Added] %(repo_name)s pull request %(pr_nice_id)s from %(ref)s&#39;),
+            self.TYPE_PULL_REQUEST_COMMENT: _(&#39;[Comment] %(repo_name)s pull request %(pr_nice_id)s from %(ref)s&#39;),
+        }
+
+<div class="viewcode-block" id="EmailNotificationModel.get_email_description"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.notification.EmailNotificationModel.get_email_description">[docs]</a>    def get_email_description(self, type_, **kwargs):
+        &quot;&quot;&quot;
+        return subject for email based on given type
+        &quot;&quot;&quot;
+        tmpl = self._subj_map[type_]
+        try:
+            subj = tmpl % kwargs
+        except KeyError as e:
+            log.error(&#39;error generating email subject for %r from %s: %s&#39;, type_, &#39;,&#39;.join(self._subj_map.keys()), e)
+            raise
+        l = [safe_unicode(x) for x in [kwargs.get(&#39;status_change&#39;), kwargs.get(&#39;closing_pr&#39;) and _(&#39;Closing&#39;)] if x]
+        if l:
+            if subj.startswith(&#39;[&#39;):
+                subj = &#39;[&#39; + &#39;, &#39;.join(l) + &#39;: &#39; + subj[1:]
+            else:
+                subj = &#39;[&#39; + &#39;, &#39;.join(l) + &#39;] &#39; + subj
+        return subj</div>
+
+<div class="viewcode-block" id="EmailNotificationModel.get_email_tmpl"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.notification.EmailNotificationModel.get_email_tmpl">[docs]</a>    def get_email_tmpl(self, type_, content_type, **kwargs):
+        &quot;&quot;&quot;
+        return generated template for email based on given type
+        &quot;&quot;&quot;
+
+        base = &#39;email_templates/&#39; + self.email_types.get(type_, self.email_types[self.TYPE_DEFAULT]) + &#39;.&#39; + content_type
+        email_template = self._tmpl_lookup.get_template(base)
+        # translator and helpers inject
+        _kwargs = {&#39;_&#39;: _,
+                   &#39;h&#39;: h,
+                   &#39;c&#39;: c}
+        _kwargs.update(kwargs)
+        log.debug(&#39;rendering tmpl %s with kwargs %s&#39;, base, _kwargs)
+        return email_template.render_unicode(**_kwargs)</div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" >kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>

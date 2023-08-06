@@ -1,0 +1,238 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model
+~~~~~~~~~~~~~~~
+
+The application&#39;s model objects
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Nov 25, 2010
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+
+
+:example:
+
+    .. code-block:: python
+
+       from paste.deploy import appconfig
+       from pylons import config
+       from sqlalchemy import engine_from_config
+       from kallithea.config.environment import load_environment
+
+       conf = appconfig(&#39;config:development.ini&#39;, relative_to = &#39;./../../&#39;)
+       load_environment(conf.global_conf, conf.local_conf)
+
+       engine = engine_from_config(config, &#39;sqlalchemy.&#39;)
+       init_model(engine)
+       # RUN YOUR CODE HERE
+
+&quot;&quot;&quot;
+
+
+import logging
+from kallithea.model import meta
+from kallithea.lib.utils2 import safe_str, obfuscate_url_pw
+
+log = logging.getLogger(__name__)
+
+
+<div class="viewcode-block" id="init_model"><a class="viewcode-back" href="../../api/models.html#kallithea.model.init_model">[docs]</a>def init_model(engine):
+    &quot;&quot;&quot;
+    Initializes db session, bind the engine with the metadata,
+    Call this before using any of the tables or classes in the model,
+    preferably once in application start
+
+    :param engine: engine to bind to
+    &quot;&quot;&quot;
+    engine_str = obfuscate_url_pw(str(engine.url))
+    log.info(&quot;initializing db for %s&quot;, engine_str)
+    meta.Base.metadata.bind = engine</div>
+
+
+<div class="viewcode-block" id="BaseModel"><a class="viewcode-back" href="../../api/models.html#kallithea.model.BaseModel">[docs]</a>class BaseModel(object):
+    &quot;&quot;&quot;
+    Base Model for all Kallithea models, it adds sql alchemy session
+    into instance of model
+
+    :param sa: If passed it reuses this session instead of creating a new one
+    &quot;&quot;&quot;
+
+    cls = None  # override in child class
+
+    def __init__(self, sa=None):
+        if sa is not None:
+            self.sa = sa
+        else:
+            self.sa = meta.Session()
+
+    def _get_instance(self, cls, instance, callback=None):
+        &quot;&quot;&quot;
+        Gets instance of given cls using some simple lookup mechanism.
+
+        :param cls: class to fetch
+        :param instance: int or Instance
+        :param callback: callback to call if all lookups failed
+        &quot;&quot;&quot;
+
+        if isinstance(instance, cls):
+            return instance
+        elif isinstance(instance, (int, long)) or safe_str(instance).isdigit():
+            return cls.get(instance)
+        else:
+            if instance is not None:
+                if callback is None:
+                    raise Exception(
+                        &#39;given object must be int, long or Instance of %s &#39;
+                        &#39;got %s, no callback provided&#39; % (cls, type(instance))
+                    )
+                else:
+                    return callback(instance)
+
+    def _get_user(self, user):
+        &quot;&quot;&quot;
+        Helper method to get user by ID, or username fallback
+
+        :param user: UserID, username, or User instance
+        &quot;&quot;&quot;
+        from kallithea.model.db import User
+        return self._get_instance(User, user,
+                                  callback=User.get_by_username)
+
+    def _get_repo(self, repository):
+        &quot;&quot;&quot;
+        Helper method to get repository by ID, or repository name
+
+        :param repository: RepoID, repository name or Repository Instance
+        &quot;&quot;&quot;
+        from kallithea.model.db import Repository
+        return self._get_instance(Repository, repository,
+                                  callback=Repository.get_by_repo_name)
+
+    def _get_perm(self, permission):
+        &quot;&quot;&quot;
+        Helper method to get permission by ID, or permission name
+
+        :param permission: PermissionID, permission_name or Permission instance
+        &quot;&quot;&quot;
+        from kallithea.model.db import Permission
+        return self._get_instance(Permission, permission,
+                                  callback=Permission.get_by_key)
+
+<div class="viewcode-block" id="BaseModel.get_all"><a class="viewcode-back" href="../../api/models.html#kallithea.model.BaseModel.get_all">[docs]</a>    @classmethod
+    def get_all(cls):
+        &quot;&quot;&quot;
+        Returns all instances of what is defined in `cls` class variable
+        &quot;&quot;&quot;
+        return cls.cls.getAll()</div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>

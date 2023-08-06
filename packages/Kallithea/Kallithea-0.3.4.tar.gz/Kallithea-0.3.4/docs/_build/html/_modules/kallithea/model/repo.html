@@ -1,0 +1,871 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model.repo &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" accesskey="U">kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model.repo</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model.repo
+~~~~~~~~~~~~~~~~~~~~
+
+Repository model for kallithea
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Jun 5, 2010
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+
+&quot;&quot;&quot;
+
+import os
+import shutil
+import logging
+import traceback
+from datetime import datetime
+from sqlalchemy.orm import subqueryload
+
+from kallithea.lib.utils import make_ui
+from kallithea.lib.vcs.backends import get_backend
+from kallithea.lib.compat import json
+from kallithea.lib.utils2 import LazyProperty, safe_str, safe_unicode, \
+    remove_prefix, obfuscate_url_pw, get_current_authuser
+from kallithea.lib.caching_query import FromCache
+from kallithea.lib.hooks import log_delete_repository
+
+from kallithea.model import BaseModel
+from kallithea.model.db import Repository, UserRepoToPerm, UserGroupRepoToPerm, \
+    UserRepoGroupToPerm, UserGroupRepoGroupToPerm, User, Permission, \
+    Statistics, UserGroup, Ui, RepoGroup, RepositoryField
+
+from kallithea.lib import helpers as h
+from kallithea.lib.auth import HasRepoPermissionAny, HasUserGroupPermissionAny
+from kallithea.lib.exceptions import AttachedForksError
+from kallithea.model.scm import UserGroupList
+
+log = logging.getLogger(__name__)
+
+
+<div class="viewcode-block" id="RepoModel"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel">[docs]</a>class RepoModel(BaseModel):
+
+    cls = Repository
+    URL_SEPARATOR = Repository.url_sep()
+
+    def _get_user_group(self, users_group):
+        return self._get_instance(UserGroup, users_group,
+                                  callback=UserGroup.get_by_group_name)
+
+    def _get_repo_group(self, repo_group):
+        return self._get_instance(RepoGroup, repo_group,
+                                  callback=RepoGroup.get_by_group_name)
+
+    def _create_default_perms(self, repository, private):
+        # create default permission
+        default = &#39;repository.read&#39;
+        def_user = User.get_default_user()
+        for p in def_user.user_perms:
+            if p.permission.permission_name.startswith(&#39;repository.&#39;):
+                default = p.permission.permission_name
+                break
+
+        default_perm = &#39;repository.none&#39; if private else default
+
+        repo_to_perm = UserRepoToPerm()
+        repo_to_perm.permission = Permission.get_by_key(default_perm)
+
+        repo_to_perm.repository = repository
+        repo_to_perm.user_id = def_user.user_id
+
+        return repo_to_perm
+
+<div class="viewcode-block" id="RepoModel.repos_path"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.repos_path">[docs]</a>    @LazyProperty
+    def repos_path(self):
+        &quot;&quot;&quot;
+        Gets the repositories root path from database
+        &quot;&quot;&quot;
+
+        q = self.sa.query(Ui).filter(Ui.ui_key == &#39;/&#39;).one()
+        return q.ui_value</div>
+
+    def get(self, repo_id, cache=False):
+        repo = self.sa.query(Repository) \
+            .filter(Repository.repo_id == repo_id)
+
+        if cache:
+            repo = repo.options(FromCache(&quot;sql_cache_short&quot;,
+                                          &quot;get_repo_%s&quot; % repo_id))
+        return repo.scalar()
+
+    def get_repo(self, repository):
+        return self._get_repo(repository)
+
+    def get_by_repo_name(self, repo_name, cache=False):
+        repo = self.sa.query(Repository) \
+            .filter(Repository.repo_name == repo_name)
+
+        if cache:
+            repo = repo.options(FromCache(&quot;sql_cache_short&quot;,
+                                          &quot;get_repo_%s&quot; % repo_name))
+        return repo.scalar()
+
+<div class="viewcode-block" id="RepoModel.get_all_user_repos"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.get_all_user_repos">[docs]</a>    def get_all_user_repos(self, user):
+        &quot;&quot;&quot;
+        Gets all repositories that user have at least read access
+
+        :param user:
+        &quot;&quot;&quot;
+        from kallithea.lib.auth import AuthUser
+        user = self._get_user(user)
+        repos = AuthUser(user_id=user.user_id).permissions[&#39;repositories&#39;]
+        access_check = lambda r: r[1] in [&#39;repository.read&#39;,
+                                          &#39;repository.write&#39;,
+                                          &#39;repository.admin&#39;]
+        repos = [x[0] for x in filter(access_check, repos.items())]
+        return Repository.query().filter(Repository.repo_name.in_(repos))</div>
+
+    def get_users_js(self):
+        users = self.sa.query(User).filter(User.active == True).all()
+        return json.dumps([
+            {
+                &#39;id&#39;: u.user_id,
+                &#39;fname&#39;: h.escape(u.name),
+                &#39;lname&#39;: h.escape(u.lastname),
+                &#39;nname&#39;: u.username,
+                &#39;gravatar_lnk&#39;: h.gravatar_url(u.email, size=28),
+                &#39;gravatar_size&#39;: 14,
+            } for u in users]
+        )
+
+    def get_user_groups_js(self):
+        user_groups = self.sa.query(UserGroup) \
+            .filter(UserGroup.users_group_active == True) \
+            .options(subqueryload(UserGroup.members)) \
+            .all()
+        user_groups = UserGroupList(user_groups, perm_set=[&#39;usergroup.read&#39;,
+                                                           &#39;usergroup.write&#39;,
+                                                           &#39;usergroup.admin&#39;])
+        return json.dumps([
+            {
+                &#39;id&#39;: gr.users_group_id,
+                &#39;grname&#39;: gr.users_group_name,
+                &#39;grmembers&#39;: len(gr.members),
+            } for gr in user_groups]
+        )
+
+    @classmethod
+    def _render_datatable(cls, tmpl, *args, **kwargs):
+        import kallithea
+        from pylons import tmpl_context as c
+        from pylons.i18n.translation import _
+
+        _tmpl_lookup = kallithea.CONFIG[&#39;pylons.app_globals&#39;].mako_lookup
+        template = _tmpl_lookup.get_template(&#39;data_table/_dt_elements.html&#39;)
+
+        tmpl = template.get_def(tmpl)
+        kwargs.update(dict(_=_, h=h, c=c))
+        return tmpl.render(*args, **kwargs)
+
+    @classmethod
+    def update_repoinfo(cls, repositories=None):
+        if repositories is None:
+            repositories = Repository.getAll()
+        for repo in repositories:
+            repo.update_changeset_cache()
+
+    def get_repos_as_dict(self, repos_list=None, admin=False, perm_check=True,
+                          super_user_actions=False):
+        _render = self._render_datatable
+        from pylons import tmpl_context as c
+
+        def quick_menu(repo_name):
+            return _render(&#39;quick_menu&#39;, repo_name)
+
+        def repo_lnk(name, rtype, rstate, private, fork_of):
+            return _render(&#39;repo_name&#39;, name, rtype, rstate, private, fork_of,
+                           short_name=not admin, admin=False)
+
+        def last_change(last_change):
+            return _render(&quot;last_change&quot;, last_change)
+
+        def rss_lnk(repo_name):
+            return _render(&quot;rss&quot;, repo_name)
+
+        def atom_lnk(repo_name):
+            return _render(&quot;atom&quot;, repo_name)
+
+        def last_rev(repo_name, cs_cache):
+            return _render(&#39;revision&#39;, repo_name, cs_cache.get(&#39;revision&#39;),
+                           cs_cache.get(&#39;raw_id&#39;), cs_cache.get(&#39;author&#39;),
+                           cs_cache.get(&#39;message&#39;))
+
+        def desc(desc):
+            return h.urlify_text(desc, truncate=60, stylize=c.visual.stylify_metatags)
+
+        def state(repo_state):
+            return _render(&quot;repo_state&quot;, repo_state)
+
+        def repo_actions(repo_name):
+            return _render(&#39;repo_actions&#39;, repo_name, super_user_actions)
+
+        def owner_actions(user_id, username):
+            return _render(&#39;user_name&#39;, user_id, username)
+
+        repos_data = []
+        for repo in repos_list:
+            if perm_check:
+                # check permission at this level
+                if not HasRepoPermissionAny(
+                        &#39;repository.read&#39;, &#39;repository.write&#39;,
+                        &#39;repository.admin&#39;
+                )(repo.repo_name, &#39;get_repos_as_dict check&#39;):
+                    continue
+            cs_cache = repo.changeset_cache
+            row = {
+                &quot;menu&quot;: quick_menu(repo.repo_name),
+                &quot;raw_name&quot;: repo.repo_name.lower(),
+                &quot;name&quot;: repo_lnk(repo.repo_name, repo.repo_type,
+                                 repo.repo_state, repo.private, repo.fork),
+                &quot;last_change&quot;: last_change(repo.last_db_change),
+                &quot;last_changeset&quot;: last_rev(repo.repo_name, cs_cache),
+                &quot;last_rev_raw&quot;: cs_cache.get(&#39;revision&#39;),
+                &quot;desc&quot;: desc(repo.description),
+                &quot;owner&quot;: h.person(repo.user),
+                &quot;state&quot;: state(repo.repo_state),
+                &quot;rss&quot;: rss_lnk(repo.repo_name),
+                &quot;atom&quot;: atom_lnk(repo.repo_name),
+
+            }
+            if admin:
+                row.update({
+                    &quot;action&quot;: repo_actions(repo.repo_name),
+                    &quot;owner&quot;: owner_actions(repo.user.user_id,
+                                           h.person(repo.user))
+                })
+            repos_data.append(row)
+
+        return {
+            &quot;totalRecords&quot;: len(repos_list),
+            &quot;startIndex&quot;: 0,
+            &quot;sort&quot;: &quot;name&quot;,
+            &quot;dir&quot;: &quot;asc&quot;,
+            &quot;records&quot;: repos_data
+        }
+
+    def _get_defaults(self, repo_name):
+        &quot;&quot;&quot;
+        Gets information about repository, and returns a dict for
+        usage in forms
+
+        :param repo_name:
+        &quot;&quot;&quot;
+
+        repo_info = Repository.get_by_repo_name(repo_name)
+
+        if repo_info is None:
+            return None
+
+        defaults = repo_info.get_dict()
+        group, repo_name, repo_name_full = repo_info.groups_and_repo
+        defaults[&#39;repo_name&#39;] = repo_name
+        defaults[&#39;repo_group&#39;] = getattr(group[-1] if group else None,
+                                         &#39;group_id&#39;, None)
+
+        for strip, k in [(0, &#39;repo_type&#39;), (1, &#39;repo_enable_downloads&#39;),
+                         (1, &#39;repo_description&#39;), (1, &#39;repo_enable_locking&#39;),
+                         (1, &#39;repo_landing_rev&#39;), (0, &#39;clone_uri&#39;),
+                         (1, &#39;repo_private&#39;), (1, &#39;repo_enable_statistics&#39;)]:
+            attr = k
+            if strip:
+                attr = remove_prefix(k, &#39;repo_&#39;)
+
+            val = defaults[attr]
+            if k == &#39;repo_landing_rev&#39;:
+                val = &#39;:&#39;.join(defaults[attr])
+            defaults[k] = val
+            if k == &#39;clone_uri&#39;:
+                defaults[&#39;clone_uri_hidden&#39;] = repo_info.clone_uri_hidden
+
+        # fill owner
+        if repo_info.user:
+            defaults.update({&#39;user&#39;: repo_info.user.username})
+        else:
+            replacement_user = User.query().filter(User.admin ==
+                                                   True).first().username
+            defaults.update({&#39;user&#39;: replacement_user})
+
+        # fill repository users
+        for p in repo_info.repo_to_perm:
+            defaults.update({&#39;u_perm_%s&#39; % p.user.username:
+                                 p.permission.permission_name})
+
+        # fill repository groups
+        for p in repo_info.users_group_to_perm:
+            defaults.update({&#39;g_perm_%s&#39; % p.users_group.users_group_name:
+                                 p.permission.permission_name})
+
+        return defaults
+
+    def update(self, repo, **kwargs):
+        try:
+            cur_repo = self._get_repo(repo)
+            org_repo_name = cur_repo.repo_name
+            if &#39;user&#39; in kwargs:
+                cur_repo.user = User.get_by_username(kwargs[&#39;user&#39;])
+
+            if &#39;repo_group&#39; in kwargs:
+                cur_repo.group = RepoGroup.get(kwargs[&#39;repo_group&#39;])
+                cur_repo.repo_name = cur_repo.get_new_name(cur_repo.just_name)
+            log.debug(&#39;Updating repo %s with params:%s&#39;, cur_repo, kwargs)
+            for k in [&#39;repo_enable_downloads&#39;,
+                      &#39;repo_description&#39;,
+                      &#39;repo_enable_locking&#39;,
+                      &#39;repo_landing_rev&#39;,
+                      &#39;repo_private&#39;,
+                      &#39;repo_enable_statistics&#39;,
+                      ]:
+                if k in kwargs:
+                    setattr(cur_repo, remove_prefix(k, &#39;repo_&#39;), kwargs[k])
+            clone_uri = kwargs.get(&#39;clone_uri&#39;)
+            if clone_uri is not None and clone_uri != cur_repo.clone_uri_hidden:
+                cur_repo.clone_uri = clone_uri
+
+            if &#39;repo_name&#39; in kwargs:
+                cur_repo.repo_name = cur_repo.get_new_name(kwargs[&#39;repo_name&#39;])
+
+            #if private flag is set, reset default permission to NONE
+            if kwargs.get(&#39;repo_private&#39;):
+                EMPTY_PERM = &#39;repository.none&#39;
+                RepoModel().grant_user_permission(
+                    repo=cur_repo, user=&#39;default&#39;, perm=EMPTY_PERM
+                )
+                #handle extra fields
+            for field in filter(lambda k: k.startswith(RepositoryField.PREFIX),
+                                kwargs):
+                k = RepositoryField.un_prefix_key(field)
+                ex_field = RepositoryField.get_by_key_name(key=k, repo=cur_repo)
+                if ex_field:
+                    ex_field.field_value = kwargs[field]
+                    self.sa.add(ex_field)
+            self.sa.add(cur_repo)
+
+            if org_repo_name != cur_repo.repo_name:
+                # rename repository
+                self._rename_filesystem_repo(old=org_repo_name, new=cur_repo.repo_name)
+
+            return cur_repo
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+    def _create_repo(self, repo_name, repo_type, description, owner,
+                     private=False, clone_uri=None, repo_group=None,
+                     landing_rev=&#39;rev:tip&#39;, fork_of=None,
+                     copy_fork_permissions=False, enable_statistics=False,
+                     enable_locking=False, enable_downloads=False,
+                     copy_group_permissions=False, state=Repository.STATE_PENDING):
+        &quot;&quot;&quot;
+        Create repository inside database with PENDING state. This should only be
+        executed by create() repo, with exception of importing existing repos.
+
+        &quot;&quot;&quot;
+        from kallithea.model.scm import ScmModel
+
+        owner = self._get_user(owner)
+        fork_of = self._get_repo(fork_of)
+        repo_group = self._get_repo_group(repo_group)
+        try:
+            repo_name = safe_unicode(repo_name)
+            description = safe_unicode(description)
+            # repo name is just a name of repository
+            # while repo_name_full is a full qualified name that is combined
+            # with name and path of group
+            repo_name_full = repo_name
+            repo_name = repo_name.split(self.URL_SEPARATOR)[-1]
+
+            new_repo = Repository()
+            new_repo.repo_state = state
+            new_repo.enable_statistics = False
+            new_repo.repo_name = repo_name_full
+            new_repo.repo_type = repo_type
+            new_repo.user = owner
+            new_repo.group = repo_group
+            new_repo.description = description or repo_name
+            new_repo.private = private
+            new_repo.clone_uri = clone_uri
+            new_repo.landing_rev = landing_rev
+
+            new_repo.enable_statistics = enable_statistics
+            new_repo.enable_locking = enable_locking
+            new_repo.enable_downloads = enable_downloads
+
+            if repo_group:
+                new_repo.enable_locking = repo_group.enable_locking
+
+            if fork_of:
+                parent_repo = fork_of
+                new_repo.fork = parent_repo
+
+            self.sa.add(new_repo)
+
+            if fork_of and copy_fork_permissions:
+                repo = fork_of
+                user_perms = UserRepoToPerm.query() \
+                    .filter(UserRepoToPerm.repository == repo).all()
+                group_perms = UserGroupRepoToPerm.query() \
+                    .filter(UserGroupRepoToPerm.repository == repo).all()
+
+                for perm in user_perms:
+                    UserRepoToPerm.create(perm.user, new_repo, perm.permission)
+
+                for perm in group_perms:
+                    UserGroupRepoToPerm.create(perm.users_group, new_repo,
+                                               perm.permission)
+
+            elif repo_group and copy_group_permissions:
+
+                user_perms = UserRepoGroupToPerm.query() \
+                    .filter(UserRepoGroupToPerm.group == repo_group).all()
+
+                group_perms = UserGroupRepoGroupToPerm.query() \
+                    .filter(UserGroupRepoGroupToPerm.group == repo_group).all()
+
+                for perm in user_perms:
+                    perm_name = perm.permission.permission_name.replace(&#39;group.&#39;, &#39;repository.&#39;)
+                    perm_obj = Permission.get_by_key(perm_name)
+                    UserRepoToPerm.create(perm.user, new_repo, perm_obj)
+
+                for perm in group_perms:
+                    perm_name = perm.permission.permission_name.replace(&#39;group.&#39;, &#39;repository.&#39;)
+                    perm_obj = Permission.get_by_key(perm_name)
+                    UserGroupRepoToPerm.create(perm.users_group, new_repo, perm_obj)
+
+            else:
+                perm_obj = self._create_default_perms(new_repo, private)
+                self.sa.add(perm_obj)
+
+            # now automatically start following this repository as owner
+            ScmModel(self.sa).toggle_following_repo(new_repo.repo_id,
+                                                    owner.user_id)
+            # we need to flush here, in order to check if database won&#39;t
+            # throw any exceptions, create filesystem dirs at the very end
+            self.sa.flush()
+            return new_repo
+        except Exception:
+            log.error(traceback.format_exc())
+            raise
+
+<div class="viewcode-block" id="RepoModel.create"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.create">[docs]</a>    def create(self, form_data, cur_user):
+        &quot;&quot;&quot;
+        Create repository using celery tasks
+
+        :param form_data:
+        :param cur_user:
+        &quot;&quot;&quot;
+        from kallithea.lib.celerylib import tasks, run_task
+        return run_task(tasks.create_repo, form_data, cur_user)</div>
+
+    def _update_permissions(self, repo, perms_new=None, perms_updates=None,
+                            check_perms=True):
+        if not perms_new:
+            perms_new = []
+        if not perms_updates:
+            perms_updates = []
+
+        # update permissions
+        for member, perm, member_type in perms_updates:
+            if member_type == &#39;user&#39;:
+                # this updates existing one
+                self.grant_user_permission(
+                    repo=repo, user=member, perm=perm
+                )
+            else:
+                #check if we have permissions to alter this usergroup
+                req_perms = (
+                    &#39;usergroup.read&#39;, &#39;usergroup.write&#39;, &#39;usergroup.admin&#39;)
+                if not check_perms or HasUserGroupPermissionAny(*req_perms)(
+                        member):
+                    self.grant_user_group_permission(
+                        repo=repo, group_name=member, perm=perm
+                    )
+            # set new permissions
+        for member, perm, member_type in perms_new:
+            if member_type == &#39;user&#39;:
+                self.grant_user_permission(
+                    repo=repo, user=member, perm=perm
+                )
+            else:
+                #check if we have permissions to alter this usergroup
+                req_perms = (
+                    &#39;usergroup.read&#39;, &#39;usergroup.write&#39;, &#39;usergroup.admin&#39;)
+                if not check_perms or HasUserGroupPermissionAny(*req_perms)(
+                        member):
+                    self.grant_user_group_permission(
+                        repo=repo, group_name=member, perm=perm
+                    )
+
+<div class="viewcode-block" id="RepoModel.create_fork"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.create_fork">[docs]</a>    def create_fork(self, form_data, cur_user):
+        &quot;&quot;&quot;
+        Simple wrapper into executing celery task for fork creation
+
+        :param form_data:
+        :param cur_user:
+        &quot;&quot;&quot;
+        from kallithea.lib.celerylib import tasks, run_task
+        return run_task(tasks.create_repo_fork, form_data, cur_user)</div>
+
+<div class="viewcode-block" id="RepoModel.delete"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.delete">[docs]</a>    def delete(self, repo, forks=None, fs_remove=True, cur_user=None):
+        &quot;&quot;&quot;
+        Delete given repository, forks parameter defines what do do with
+        attached forks. Throws AttachedForksError if deleted repo has attached
+        forks
+
+        :param repo:
+        :param forks: str &#39;delete&#39; or &#39;detach&#39;
+        :param fs_remove: remove(archive) repo from filesystem
+        &quot;&quot;&quot;
+        if not cur_user:
+            cur_user = getattr(get_current_authuser(), &#39;username&#39;, None)
+        repo = self._get_repo(repo)
+        if repo is not None:
+            if forks == &#39;detach&#39;:
+                for r in repo.forks:
+                    r.fork = None
+                    self.sa.add(r)
+            elif forks == &#39;delete&#39;:
+                for r in repo.forks:
+                    self.delete(r, forks=&#39;delete&#39;)
+            elif [f for f in repo.forks]:
+                raise AttachedForksError()
+
+            old_repo_dict = repo.get_dict()
+            try:
+                self.sa.delete(repo)
+                if fs_remove:
+                    self._delete_filesystem_repo(repo)
+                else:
+                    log.debug(&#39;skipping removal from filesystem&#39;)
+                log_delete_repository(old_repo_dict,
+                                      deleted_by=cur_user)
+            except Exception:
+                log.error(traceback.format_exc())
+                raise</div>
+
+<div class="viewcode-block" id="RepoModel.grant_user_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.grant_user_permission">[docs]</a>    def grant_user_permission(self, repo, user, perm):
+        &quot;&quot;&quot;
+        Grant permission for user on given repository, or update existing one
+        if found
+
+        :param repo: Instance of Repository, repository_id, or repository name
+        :param user: Instance of User, user_id or username
+        :param perm: Instance of Permission, or permission_name
+        &quot;&quot;&quot;
+        user = self._get_user(user)
+        repo = self._get_repo(repo)
+        permission = self._get_perm(perm)
+
+        # check if we have that permission already
+        obj = self.sa.query(UserRepoToPerm) \
+            .filter(UserRepoToPerm.user == user) \
+            .filter(UserRepoToPerm.repository == repo) \
+            .scalar()
+        if obj is None:
+            # create new !
+            obj = UserRepoToPerm()
+        obj.repository = repo
+        obj.user = user
+        obj.permission = permission
+        self.sa.add(obj)
+        log.debug(&#39;Granted perm %s to %s on %s&#39;, perm, user, repo)
+        return obj</div>
+
+<div class="viewcode-block" id="RepoModel.revoke_user_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.revoke_user_permission">[docs]</a>    def revoke_user_permission(self, repo, user):
+        &quot;&quot;&quot;
+        Revoke permission for user on given repository
+
+        :param repo: Instance of Repository, repository_id, or repository name
+        :param user: Instance of User, user_id or username
+        &quot;&quot;&quot;
+
+        user = self._get_user(user)
+        repo = self._get_repo(repo)
+
+        obj = self.sa.query(UserRepoToPerm) \
+            .filter(UserRepoToPerm.repository == repo) \
+            .filter(UserRepoToPerm.user == user) \
+            .scalar()
+        if obj is not None:
+            self.sa.delete(obj)
+            log.debug(&#39;Revoked perm on %s on %s&#39;, repo, user)</div>
+
+<div class="viewcode-block" id="RepoModel.grant_user_group_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.grant_user_group_permission">[docs]</a>    def grant_user_group_permission(self, repo, group_name, perm):
+        &quot;&quot;&quot;
+        Grant permission for user group on given repository, or update
+        existing one if found
+
+        :param repo: Instance of Repository, repository_id, or repository name
+        :param group_name: Instance of UserGroup, users_group_id,
+            or user group name
+        :param perm: Instance of Permission, or permission_name
+        &quot;&quot;&quot;
+        repo = self._get_repo(repo)
+        group_name = self._get_user_group(group_name)
+        permission = self._get_perm(perm)
+
+        # check if we have that permission already
+        obj = self.sa.query(UserGroupRepoToPerm) \
+            .filter(UserGroupRepoToPerm.users_group == group_name) \
+            .filter(UserGroupRepoToPerm.repository == repo) \
+            .scalar()
+
+        if obj is None:
+            # create new
+            obj = UserGroupRepoToPerm()
+
+        obj.repository = repo
+        obj.users_group = group_name
+        obj.permission = permission
+        self.sa.add(obj)
+        log.debug(&#39;Granted perm %s to %s on %s&#39;, perm, group_name, repo)
+        return obj</div>
+
+<div class="viewcode-block" id="RepoModel.revoke_user_group_permission"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.revoke_user_group_permission">[docs]</a>    def revoke_user_group_permission(self, repo, group_name):
+        &quot;&quot;&quot;
+        Revoke permission for user group on given repository
+
+        :param repo: Instance of Repository, repository_id, or repository name
+        :param group_name: Instance of UserGroup, users_group_id,
+            or user group name
+        &quot;&quot;&quot;
+        repo = self._get_repo(repo)
+        group_name = self._get_user_group(group_name)
+
+        obj = self.sa.query(UserGroupRepoToPerm) \
+            .filter(UserGroupRepoToPerm.repository == repo) \
+            .filter(UserGroupRepoToPerm.users_group == group_name) \
+            .scalar()
+        if obj is not None:
+            self.sa.delete(obj)
+            log.debug(&#39;Revoked perm to %s on %s&#39;, repo, group_name)</div>
+
+<div class="viewcode-block" id="RepoModel.delete_stats"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.repo.RepoModel.delete_stats">[docs]</a>    def delete_stats(self, repo_name):
+        &quot;&quot;&quot;
+        removes stats for given repo
+
+        :param repo_name:
+        &quot;&quot;&quot;
+        repo = self._get_repo(repo_name)
+        try:
+            obj = self.sa.query(Statistics) \
+                .filter(Statistics.repository == repo).scalar()
+            if obj is not None:
+                self.sa.delete(obj)
+        except Exception:
+            log.error(traceback.format_exc())
+            raise</div>
+
+    def _create_filesystem_repo(self, repo_name, repo_type, repo_group,
+                                clone_uri=None, repo_store_location=None):
+        &quot;&quot;&quot;
+        Makes repository on filesystem. Operation is group aware, meaning that it will create
+        a repository within a group, and alter the paths accordingly to the group location.
+
+        :param repo_name:
+        :param alias:
+        :param parent:
+        :param clone_uri:
+        :param repo_store_location:
+        &quot;&quot;&quot;
+        from kallithea.lib.utils import is_valid_repo, is_valid_repo_group
+        from kallithea.model.scm import ScmModel
+
+        if &#39;/&#39; in repo_name:
+            raise ValueError(&#39;repo_name must not contain groups got `%s`&#39; % repo_name)
+
+        if isinstance(repo_group, RepoGroup):
+            new_parent_path = os.sep.join(repo_group.full_path_splitted)
+        else:
+            new_parent_path = repo_group or &#39;&#39;
+
+        if repo_store_location:
+            _paths = [repo_store_location]
+        else:
+            _paths = [self.repos_path, new_parent_path, repo_name]
+            # we need to make it str for mercurial
+        repo_path = os.path.join(*map(lambda x: safe_str(x), _paths))
+
+        # check if this path is not a repository
+        if is_valid_repo(repo_path, self.repos_path):
+            raise Exception(&#39;This path %s is a valid repository&#39; % repo_path)
+
+        # check if this path is a group
+        if is_valid_repo_group(repo_path, self.repos_path):
+            raise Exception(&#39;This path %s is a valid group&#39; % repo_path)
+
+        log.info(&#39;creating repo %s in %s from url: `%s`&#39;,
+            repo_name, safe_unicode(repo_path),
+            obfuscate_url_pw(clone_uri))
+
+        backend = get_backend(repo_type)
+
+        if repo_type == &#39;hg&#39;:
+            baseui = make_ui(&#39;db&#39;, clear_session=False)
+            # patch and reset hooks section of UI config to not run any
+            # hooks on creating remote repo
+            for k, v in baseui.configitems(&#39;hooks&#39;):
+                baseui.setconfig(&#39;hooks&#39;, k, None)
+
+            repo = backend(repo_path, create=True, src_url=clone_uri, baseui=baseui)
+        elif repo_type == &#39;git&#39;:
+            repo = backend(repo_path, create=True, src_url=clone_uri, bare=True)
+            # add kallithea hook into this repo
+            ScmModel().install_git_hooks(repo=repo)
+        else:
+            raise Exception(&#39;Not supported repo_type %s expected hg/git&#39; % repo_type)
+
+        log.debug(&#39;Created repo %s with %s backend&#39;,
+                  safe_unicode(repo_name), safe_unicode(repo_type))
+        return repo
+
+    def _rename_filesystem_repo(self, old, new):
+        &quot;&quot;&quot;
+        renames repository on filesystem
+
+        :param old: old name
+        :param new: new name
+        &quot;&quot;&quot;
+        log.info(&#39;renaming repo from %s to %s&#39;, old, new)
+
+        old_path = safe_str(os.path.join(self.repos_path, old))
+        new_path = safe_str(os.path.join(self.repos_path, new))
+        if os.path.isdir(new_path):
+            raise Exception(
+                &#39;Was trying to rename to already existing dir %s&#39; % new_path
+            )
+        shutil.move(old_path, new_path)
+
+    def _delete_filesystem_repo(self, repo):
+        &quot;&quot;&quot;
+        removes repo from filesystem, the removal is actually done by
+        renaming dir to a &#39;rm__*&#39; prefix which Kallithea will skip.
+        It can be undeleted later by reverting the rename.
+
+        :param repo: repo object
+        &quot;&quot;&quot;
+        rm_path = safe_str(os.path.join(self.repos_path, repo.repo_name))
+        log.info(&quot;Removing %s&quot;, rm_path)
+
+        _now = datetime.now()
+        _ms = str(_now.microsecond).rjust(6, &#39;0&#39;)
+        _d = &#39;rm__%s__%s&#39; % (_now.strftime(&#39;%Y%m%d_%H%M%S_&#39; + _ms),
+                             repo.just_name)
+        if repo.group:
+            args = repo.group.full_path_splitted + [_d]
+            _d = os.path.join(*args)
+        shutil.move(rm_path, safe_str(os.path.join(self.repos_path, _d)))</div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" >kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>

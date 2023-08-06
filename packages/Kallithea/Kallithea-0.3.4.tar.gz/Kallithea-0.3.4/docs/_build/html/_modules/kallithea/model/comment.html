@@ -1,0 +1,377 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model.comment &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" accesskey="U">kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model.comment</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model.comment
+~~~~~~~~~~~~~~~~~~~~~~~
+
+comments model for Kallithea
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Nov 11, 2011
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+&quot;&quot;&quot;
+
+import logging
+
+from pylons.i18n.translation import _
+from collections import defaultdict
+
+from kallithea.lib.utils2 import extract_mentioned_users, safe_unicode
+from kallithea.lib import helpers as h
+from kallithea.model import BaseModel
+from kallithea.model.db import ChangesetComment, User, \
+    Notification, PullRequest
+from kallithea.model.notification import NotificationModel
+from kallithea.model.meta import Session
+
+log = logging.getLogger(__name__)
+
+
+<div class="viewcode-block" id="ChangesetCommentsModel"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.comment.ChangesetCommentsModel">[docs]</a>class ChangesetCommentsModel(BaseModel):
+
+    cls = ChangesetComment
+
+    def __get_changeset_comment(self, changeset_comment):
+        return self._get_instance(ChangesetComment, changeset_comment)
+
+    def __get_pull_request(self, pull_request):
+        return self._get_instance(PullRequest, pull_request)
+
+    def _extract_mentions(self, s):
+        user_objects = []
+        for username in extract_mentioned_users(s):
+            user_obj = User.get_by_username(username, case_insensitive=True)
+            if user_obj:
+                user_objects.append(user_obj)
+        return user_objects
+
+    def _get_notification_data(self, repo, comment, user, comment_text,
+                               line_no=None, revision=None, pull_request=None,
+                               status_change=None, closing_pr=False):
+        &quot;&quot;&quot;
+        :returns: tuple (subj,body,recipients,notification_type,email_kwargs)
+        &quot;&quot;&quot;
+        # make notification
+        body = comment_text  # text of the comment
+        line = &#39;&#39;
+        if line_no:
+            line = _(&#39;on line %s&#39;) % line_no
+
+        #changeset
+        if revision:
+            notification_type = Notification.TYPE_CHANGESET_COMMENT
+            cs = repo.scm_instance.get_changeset(revision)
+            desc = cs.short_id
+
+            threading = [&#39;%s-rev-%s@%s&#39; % (repo.repo_name, revision, h.canonical_hostname())]
+            if line_no: # TODO: url to file _and_ line number
+                threading.append(&#39;%s-rev-%s-line-%s@%s&#39; % (repo.repo_name, revision, line_no,
+                                                           h.canonical_hostname()))
+            comment_url = h.canonical_url(&#39;changeset_home&#39;,
+                repo_name=repo.repo_name,
+                revision=revision,
+                anchor=&#39;comment-%s&#39; % comment.comment_id)
+            subj = safe_unicode(
+                h.link_to(&#39;Re changeset: %(desc)s %(line)s&#39; % \
+                          {&#39;desc&#39;: desc, &#39;line&#39;: line},
+                          comment_url)
+            )
+            # get the current participants of this changeset
+            recipients = ChangesetComment.get_users(revision=revision)
+            # add changeset author if it&#39;s known locally
+            cs_author = User.get_from_cs_author(cs.author)
+            if not cs_author:
+                #use repo owner if we cannot extract the author correctly
+                cs_author = repo.user
+            recipients += [cs_author]
+            email_kwargs = {
+                &#39;status_change&#39;: status_change,
+                &#39;cs_comment_user&#39;: user.full_name_and_username,
+                &#39;cs_target_repo&#39;: h.canonical_url(&#39;summary_home&#39;, repo_name=repo.repo_name),
+                &#39;cs_comment_url&#39;: comment_url,
+                &#39;raw_id&#39;: revision,
+                &#39;message&#39;: cs.message,
+                &#39;repo_name&#39;: repo.repo_name,
+                &#39;short_id&#39;: h.short_id(revision),
+                &#39;branch&#39;: cs.branch,
+                &#39;comment_username&#39;: user.username,
+                &#39;threading&#39;: threading,
+            }
+        #pull request
+        elif pull_request:
+            notification_type = Notification.TYPE_PULL_REQUEST_COMMENT
+            desc = comment.pull_request.title
+            _org_ref_type, org_ref_name, _org_rev = comment.pull_request.org_ref.split(&#39;:&#39;)
+            threading = [&#39;%s-pr-%s@%s&#39; % (pull_request.other_repo.repo_name,
+                                          pull_request.pull_request_id,
+                                          h.canonical_hostname())]
+            if line_no: # TODO: url to file _and_ line number
+                threading.append(&#39;%s-pr-%s-line-%s@%s&#39; % (pull_request.other_repo.repo_name,
+                                                          pull_request.pull_request_id, line_no,
+                                                          h.canonical_hostname()))
+            comment_url = pull_request.url(canonical=True,
+                anchor=&#39;comment-%s&#39; % comment.comment_id)
+            subj = safe_unicode(
+                h.link_to(&#39;Re pull request %(pr_nice_id)s: %(desc)s %(line)s&#39; % \
+                          {&#39;desc&#39;: desc,
+                           &#39;pr_nice_id&#39;: comment.pull_request.nice_id(),
+                           &#39;line&#39;: line},
+                          comment_url)
+            )
+            # get the current participants of this pull request
+            recipients = ChangesetComment.get_users(pull_request_id=
+                                                pull_request.pull_request_id)
+            # add pull request author
+            recipients += [pull_request.owner]
+
+            # add the reviewers to notification
+            recipients += [x.user for x in pull_request.reviewers]
+
+            #set some variables for email notification
+            email_kwargs = {
+                &#39;pr_title&#39;: pull_request.title,
+                &#39;pr_nice_id&#39;: pull_request.nice_id(),
+                &#39;status_change&#39;: status_change,
+                &#39;closing_pr&#39;: closing_pr,
+                &#39;pr_comment_url&#39;: comment_url,
+                &#39;pr_comment_user&#39;: user.full_name_and_username,
+                &#39;pr_target_repo&#39;: h.canonical_url(&#39;summary_home&#39;,
+                                   repo_name=pull_request.other_repo.repo_name),
+                &#39;repo_name&#39;: pull_request.other_repo.repo_name,
+                &#39;ref&#39;: org_ref_name,
+                &#39;comment_username&#39;: user.username,
+                &#39;threading&#39;: threading,
+            }
+
+        return subj, body, recipients, notification_type, email_kwargs
+
+<div class="viewcode-block" id="ChangesetCommentsModel.create"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.comment.ChangesetCommentsModel.create">[docs]</a>    def create(self, text, repo, user, revision=None, pull_request=None,
+               f_path=None, line_no=None, status_change=None, closing_pr=False,
+               send_email=True):
+        &quot;&quot;&quot;
+        Creates a new comment for either a changeset or a pull request.
+        status_change and closing_pr is only for the optional email.
+
+        Returns the created comment.
+        &quot;&quot;&quot;
+        if not status_change and not text:
+            log.warning(&#39;Missing text for comment, skipping...&#39;)
+            return None
+
+        repo = self._get_repo(repo)
+        user = self._get_user(user)
+        comment = ChangesetComment()
+        comment.repo = repo
+        comment.author = user
+        comment.text = text
+        comment.f_path = f_path
+        comment.line_no = line_no
+
+        if revision is not None:
+            comment.revision = revision
+        elif pull_request is not None:
+            pull_request = self.__get_pull_request(pull_request)
+            comment.pull_request = pull_request
+        else:
+            raise Exception(&#39;Please specify revision or pull_request_id&#39;)
+
+        Session().add(comment)
+        Session().flush()
+
+        if send_email:
+            (subj, body, recipients, notification_type,
+             email_kwargs) = self._get_notification_data(
+                                repo, comment, user,
+                                comment_text=text,
+                                line_no=line_no,
+                                revision=revision,
+                                pull_request=pull_request,
+                                status_change=status_change,
+                                closing_pr=closing_pr)
+            email_kwargs[&#39;is_mention&#39;] = False
+            # create notification objects, and emails
+            NotificationModel().create(
+                created_by=user, subject=subj, body=body,
+                recipients=recipients, type_=notification_type,
+                email_kwargs=email_kwargs,
+            )
+
+            mention_recipients = set(self._extract_mentions(body))\
+                                    .difference(recipients)
+            if mention_recipients:
+                email_kwargs[&#39;is_mention&#39;] = True
+                subj = _(&#39;[Mention]&#39;) + &#39; &#39; + subj
+                NotificationModel().create(
+                    created_by=user, subject=subj, body=body,
+                    recipients=mention_recipients,
+                    type_=notification_type,
+                    email_kwargs=email_kwargs
+                )
+
+        return comment</div>
+
+    def delete(self, comment):
+        comment = self.__get_changeset_comment(comment)
+        Session().delete(comment)
+
+        return comment
+
+<div class="viewcode-block" id="ChangesetCommentsModel.get_comments"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.comment.ChangesetCommentsModel.get_comments">[docs]</a>    def get_comments(self, repo_id, revision=None, pull_request=None):
+        &quot;&quot;&quot;
+        Gets general comments for either revision or pull_request.
+
+        Returns a list, ordered by creation date.
+        &quot;&quot;&quot;
+        return self._get_comments(repo_id, revision=revision, pull_request=pull_request,
+                                  inline=False)</div>
+
+<div class="viewcode-block" id="ChangesetCommentsModel.get_inline_comments"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.comment.ChangesetCommentsModel.get_inline_comments">[docs]</a>    def get_inline_comments(self, repo_id, revision=None, pull_request=None):
+        &quot;&quot;&quot;
+        Gets inline comments for either revision or pull_request.
+
+        Returns a list of tuples with file path and list of comments per line number.
+        &quot;&quot;&quot;
+        comments = self._get_comments(repo_id, revision=revision, pull_request=pull_request,
+                                      inline=True)
+
+        paths = defaultdict(lambda: defaultdict(list))
+        for co in comments:
+            paths[co.f_path][co.line_no].append(co)
+        return paths.items()</div>
+
+    def _get_comments(self, repo_id, revision=None, pull_request=None, inline=False):
+        &quot;&quot;&quot;
+        Gets comments for either revision or pull_request_id, either inline or general.
+        &quot;&quot;&quot;
+        q = Session().query(ChangesetComment)
+
+        if inline:
+            q = q.filter(ChangesetComment.line_no != None)\
+                .filter(ChangesetComment.f_path != None)
+        else:
+            q = q.filter(ChangesetComment.line_no == None)\
+                .filter(ChangesetComment.f_path == None)
+
+        if revision:
+            q = q.filter(ChangesetComment.revision == revision)\
+                .filter(ChangesetComment.repo_id == repo_id)
+        elif pull_request:
+            pull_request = self.__get_pull_request(pull_request)
+            q = q.filter(ChangesetComment.pull_request == pull_request)
+        else:
+            raise Exception(&#39;Please specify either revision or pull_request&#39;)
+
+        return q.order_by(ChangesetComment.created_on).all()</div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" >kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>

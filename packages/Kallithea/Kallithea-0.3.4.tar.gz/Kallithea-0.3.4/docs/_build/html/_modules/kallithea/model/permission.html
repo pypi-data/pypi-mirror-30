@@ -1,0 +1,275 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model.permission &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" accesskey="U">kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model.permission</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model.permission
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+permissions model for Kallithea
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Aug 20, 2010
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+&quot;&quot;&quot;
+
+
+import logging
+import traceback
+
+from sqlalchemy.exc import DatabaseError
+
+from kallithea.model import BaseModel
+from kallithea.model.db import User, Permission, UserToPerm, UserRepoToPerm,\
+    UserRepoGroupToPerm, UserUserGroupToPerm
+from kallithea.lib.utils2 import str2bool
+
+log = logging.getLogger(__name__)
+
+
+<div class="viewcode-block" id="PermissionModel"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.permission.PermissionModel">[docs]</a>class PermissionModel(BaseModel):
+    &quot;&quot;&quot;
+    Permissions model for Kallithea
+    &quot;&quot;&quot;
+
+    cls = Permission
+
+<div class="viewcode-block" id="PermissionModel.create_permissions"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.permission.PermissionModel.create_permissions">[docs]</a>    def create_permissions(self):
+        &quot;&quot;&quot;
+        Create permissions for whole system
+        &quot;&quot;&quot;
+        for p in Permission.PERMS:
+            if not Permission.get_by_key(p[0]):
+                new_perm = Permission()
+                new_perm.permission_name = p[0]
+                new_perm.permission_longname = p[0]  #translation err with p[1]
+                self.sa.add(new_perm)</div>
+
+<div class="viewcode-block" id="PermissionModel.create_default_permissions"><a class="viewcode-back" href="../../../api/models.html#kallithea.model.permission.PermissionModel.create_default_permissions">[docs]</a>    def create_default_permissions(self, user, force=False):
+        &quot;&quot;&quot;
+        Create missing default permissions for user. If force is set, the default
+        permissions for the user are reset, otherwise only missing permissions are
+        created.
+
+        :param user:
+        &quot;&quot;&quot;
+        user = self._get_user(user)
+
+        def _make_perm(perm):
+            new_perm = UserToPerm()
+            new_perm.user = user
+            new_perm.permission = Permission.get_by_key(perm)
+            return new_perm
+
+        def _get_group(perm_name):
+            return &#39;.&#39;.join(perm_name.split(&#39;.&#39;)[:1])
+
+        perms = UserToPerm.query().filter(UserToPerm.user == user).all()
+        defined_perms_groups = map(_get_group,
+                                (x.permission.permission_name for x in perms))
+        log.debug(&#39;GOT ALREADY DEFINED:%s&#39;, perms)
+        DEFAULT_PERMS = Permission.DEFAULT_USER_PERMISSIONS
+
+        if force:
+            for perm in perms:
+                self.sa.delete(perm)
+            self.sa.commit()
+            defined_perms_groups = []
+        # For every default permission that needs to be created, we check if
+        # its group is already defined. If it&#39;s not, we create default permission.
+        for perm_name in DEFAULT_PERMS:
+            gr = _get_group(perm_name)
+            if gr not in defined_perms_groups:
+                log.debug(&#39;GR:%s not found, creating permission %s&#39;,
+                          gr, perm_name)
+                new_perm = _make_perm(perm_name)
+                self.sa.add(new_perm)</div>
+
+    def update(self, form_result):
+        perm_user = User.get_by_username(username=form_result[&#39;perm_user_name&#39;])
+
+        try:
+            # stage 1 set anonymous access
+            if perm_user.username == User.DEFAULT_USER:
+                perm_user.active = str2bool(form_result[&#39;anonymous&#39;])
+                self.sa.add(perm_user)
+
+            # stage 2 reset defaults and set them from form data
+            def _make_new(usr, perm_name):
+                log.debug(&#39;Creating new permission:%s&#39;, perm_name)
+                new = UserToPerm()
+                new.user = usr
+                new.permission = Permission.get_by_key(perm_name)
+                return new
+            # clear current entries, to make this function idempotent
+            # it will fix even if we define more permissions or permissions
+            # are somehow missing
+            u2p = self.sa.query(UserToPerm)\
+                .filter(UserToPerm.user == perm_user)\
+                .all()
+            for p in u2p:
+                self.sa.delete(p)
+            #create fresh set of permissions
+            for def_perm_key in [&#39;default_repo_perm&#39;,
+                                 &#39;default_group_perm&#39;,
+                                 &#39;default_user_group_perm&#39;,
+                                 &#39;default_repo_create&#39;,
+                                 &#39;create_on_write&#39;, # special case for create repos on write access to group
+                                 #&#39;default_repo_group_create&#39;, #not implemented yet
+                                 &#39;default_user_group_create&#39;,
+                                 &#39;default_fork&#39;,
+                                 &#39;default_register&#39;,
+                                 &#39;default_extern_activate&#39;]:
+                p = _make_new(perm_user, form_result[def_perm_key])
+                self.sa.add(p)
+
+            #stage 3 update all default permissions for repos if checked
+            if form_result[&#39;overwrite_default_repo&#39;]:
+                _def_name = form_result[&#39;default_repo_perm&#39;].split(&#39;repository.&#39;)[-1]
+                _def = Permission.get_by_key(&#39;repository.&#39; + _def_name)
+                # repos
+                for r2p in self.sa.query(UserRepoToPerm)\
+                               .filter(UserRepoToPerm.user == perm_user)\
+                               .all():
+
+                    #don&#39;t reset PRIVATE repositories
+                    if not r2p.repository.private:
+                        r2p.permission = _def
+                        self.sa.add(r2p)
+
+            if form_result[&#39;overwrite_default_group&#39;]:
+                _def_name = form_result[&#39;default_group_perm&#39;].split(&#39;group.&#39;)[-1]
+                # groups
+                _def = Permission.get_by_key(&#39;group.&#39; + _def_name)
+                for g2p in self.sa.query(UserRepoGroupToPerm)\
+                               .filter(UserRepoGroupToPerm.user == perm_user)\
+                               .all():
+                    g2p.permission = _def
+                    self.sa.add(g2p)
+
+            if form_result[&#39;overwrite_default_user_group&#39;]:
+                _def_name = form_result[&#39;default_user_group_perm&#39;].split(&#39;usergroup.&#39;)[-1]
+                # groups
+                _def = Permission.get_by_key(&#39;usergroup.&#39; + _def_name)
+                for g2p in self.sa.query(UserUserGroupToPerm)\
+                               .filter(UserUserGroupToPerm.user == perm_user)\
+                               .all():
+                    g2p.permission = _def
+                    self.sa.add(g2p)
+
+            self.sa.commit()
+        except (DatabaseError,):
+            log.error(traceback.format_exc())
+            self.sa.rollback()
+            raise</div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" >kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>

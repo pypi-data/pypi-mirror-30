@@ -1,0 +1,2661 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>kallithea.model.db &#8212; Kallithea 0.3.4 documentation</title>
+    <link rel="stylesheet" href="../../../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" accesskey="U">kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for kallithea.model.db</h1><div class="highlight"><pre>
+<span></span># -*- coding: utf-8 -*-
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.
+&quot;&quot;&quot;
+kallithea.model.db
+~~~~~~~~~~~~~~~~~~
+
+Database Models for Kallithea
+
+This file was forked by the Kallithea project in July 2014.
+Original author and date, and relevant copyright and licensing information is below:
+:created_on: Apr 08, 2010
+:author: marcink
+:copyright: (c) 2013 RhodeCode GmbH, and others.
+:license: GPLv3, see LICENSE.md for more details.
+&quot;&quot;&quot;
+
+import os
+import time
+import logging
+import datetime
+import traceback
+import hashlib
+import collections
+import functools
+
+import sqlalchemy
+from sqlalchemy import *
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import relationship, joinedload, class_mapper, validates
+from beaker.cache import cache_region, region_invalidate
+from webob.exc import HTTPNotFound
+
+from pylons.i18n.translation import lazy_ugettext as _
+
+from kallithea import DB_PREFIX
+from kallithea.lib.exceptions import DefaultUserException
+from kallithea.lib.vcs import get_backend
+from kallithea.lib.vcs.utils.helpers import get_scm
+from kallithea.lib.vcs.utils.lazy import LazyProperty
+from kallithea.lib.vcs.backends.base import EmptyChangeset
+
+from kallithea.lib.utils2 import str2bool, safe_str, get_changeset_safe, \
+    safe_unicode, remove_prefix, time_to_datetime, aslist, Optional, safe_int, \
+    get_clone_url, urlreadable
+from kallithea.lib.compat import json
+from kallithea.lib.caching_query import FromCache
+
+from kallithea.model.meta import Base, Session
+
+URL_SEP = &#39;/&#39;
+log = logging.getLogger(__name__)
+
+#==============================================================================
+# BASE CLASSES
+#==============================================================================
+
+_hash_key = lambda k: hashlib.md5(safe_str(k)).hexdigest()
+
+
+class BaseModel(object):
+    &quot;&quot;&quot;
+    Base Model for all classes
+    &quot;&quot;&quot;
+
+    @classmethod
+    def _get_keys(cls):
+        &quot;&quot;&quot;return column names for this model &quot;&quot;&quot;
+        return class_mapper(cls).c.keys()
+
+    def get_dict(self):
+        &quot;&quot;&quot;
+        return dict with keys and values corresponding
+        to this model data &quot;&quot;&quot;
+
+        d = {}
+        for k in self._get_keys():
+            d[k] = getattr(self, k)
+
+        # also use __json__() if present to get additional fields
+        _json_attr = getattr(self, &#39;__json__&#39;, None)
+        if _json_attr:
+            # update with attributes from __json__
+            if callable(_json_attr):
+                _json_attr = _json_attr()
+            for k, val in _json_attr.iteritems():
+                d[k] = val
+        return d
+
+    def get_appstruct(self):
+        &quot;&quot;&quot;return list with keys and values tuples corresponding
+        to this model data &quot;&quot;&quot;
+
+        l = []
+        for k in self._get_keys():
+            l.append((k, getattr(self, k),))
+        return l
+
+    def populate_obj(self, populate_dict):
+        &quot;&quot;&quot;populate model with data from given populate_dict&quot;&quot;&quot;
+
+        for k in self._get_keys():
+            if k in populate_dict:
+                setattr(self, k, populate_dict[k])
+
+    @classmethod
+    def query(cls):
+        return Session().query(cls)
+
+    @classmethod
+    def get(cls, id_):
+        if id_:
+            return cls.query().get(id_)
+
+    @classmethod
+    def get_or_404(cls, id_):
+        try:
+            id_ = int(id_)
+        except (TypeError, ValueError):
+            raise HTTPNotFound
+
+        res = cls.query().get(id_)
+        if res is None:
+            raise HTTPNotFound
+        return res
+
+    @classmethod
+    def getAll(cls):
+        # deprecated and left for backward compatibility
+        return cls.get_all()
+
+    @classmethod
+    def get_all(cls):
+        return cls.query().all()
+
+    @classmethod
+    def delete(cls, id_):
+        obj = cls.query().get(id_)
+        Session().delete(obj)
+
+    def __repr__(self):
+        if hasattr(self, &#39;__unicode__&#39;):
+            # python repr needs to return str
+            try:
+                return safe_str(self.__unicode__())
+            except UnicodeDecodeError:
+                pass
+        return &#39;&lt;DB:%s&gt;&#39; % (self.__class__.__name__)
+
+
+class Setting(Base, BaseModel):
+    __tablename__ = DB_PREFIX + &#39;settings&#39;
+
+    __table_args__ = (
+        UniqueConstraint(&#39;app_settings_name&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+
+    SETTINGS_TYPES = {
+        &#39;str&#39;: safe_str,
+        &#39;int&#39;: safe_int,
+        &#39;unicode&#39;: safe_unicode,
+        &#39;bool&#39;: str2bool,
+        &#39;list&#39;: functools.partial(aslist, sep=&#39;,&#39;)
+    }
+    DEFAULT_UPDATE_URL = &#39;&#39;
+
+    app_settings_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    app_settings_name = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    _app_settings_value = Column(&quot;app_settings_value&quot;, String(4096, convert_unicode=False), nullable=True, unique=None, default=None)
+    _app_settings_type = Column(&quot;app_settings_type&quot;, String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+
+    def __init__(self, key=&#39;&#39;, val=&#39;&#39;, type=&#39;unicode&#39;):
+        self.app_settings_name = key
+        self.app_settings_value = val
+        self.app_settings_type = type
+
+    @validates(&#39;_app_settings_value&#39;)
+    def validate_settings_value(self, key, val):
+        assert type(val) == unicode
+        return val
+
+    @hybrid_property
+    def app_settings_value(self):
+        v = self._app_settings_value
+        _type = self.app_settings_type
+        converter = self.SETTINGS_TYPES.get(_type) or self.SETTINGS_TYPES[&#39;unicode&#39;]
+        return converter(v)
+
+    @app_settings_value.setter
+    def app_settings_value(self, val):
+        &quot;&quot;&quot;
+        Setter that will always make sure we use unicode in app_settings_value
+
+        :param val:
+        &quot;&quot;&quot;
+        self._app_settings_value = safe_unicode(val)
+
+    @hybrid_property
+    def app_settings_type(self):
+        return self._app_settings_type
+
+    @app_settings_type.setter
+    def app_settings_type(self, val):
+        if val not in self.SETTINGS_TYPES:
+            raise Exception(&#39;type must be one of %s got %s&#39;
+                            % (self.SETTINGS_TYPES.keys(), val))
+        self._app_settings_type = val
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;%s:%s[%s]&#39;)&gt;&quot; % (
+            self.__class__.__name__,
+            self.app_settings_name, self.app_settings_value, self.app_settings_type
+        )
+
+    @classmethod
+    def get_by_name(cls, key):
+        return cls.query()\
+            .filter(cls.app_settings_name == key).scalar()
+
+    @classmethod
+    def get_by_name_or_create(cls, key, val=&#39;&#39;, type=&#39;unicode&#39;):
+        res = cls.get_by_name(key)
+        if res is None:
+            res = cls(key, val, type)
+        return res
+
+    @classmethod
+    def create_or_update(cls, key, val=Optional(&#39;&#39;), type=Optional(&#39;unicode&#39;)):
+        &quot;&quot;&quot;
+        Creates or updates Kallithea setting. If updates are triggered, it will only
+        update parameters that are explicitly set. Optional instance will be skipped.
+
+        :param key:
+        :param val:
+        :param type:
+        :return:
+        &quot;&quot;&quot;
+        res = cls.get_by_name(key)
+        if res is None:
+            val = Optional.extract(val)
+            type = Optional.extract(type)
+            res = cls(key, val, type)
+        else:
+            res.app_settings_name = key
+            if not isinstance(val, Optional):
+                # update if set
+                res.app_settings_value = val
+            if not isinstance(type, Optional):
+                # update if set
+                res.app_settings_type = type
+        return res
+
+    @classmethod
+    def get_app_settings(cls, cache=False):
+
+        ret = cls.query()
+
+        if cache:
+            ret = ret.options(FromCache(&quot;sql_cache_short&quot;, &quot;get_hg_settings&quot;))
+
+        if ret is None:
+            raise Exception(&#39;Could not get application settings !&#39;)
+        settings = {}
+        for each in ret:
+            settings[each.app_settings_name] = \
+                each.app_settings_value
+
+        return settings
+
+    @classmethod
+    def get_auth_plugins(cls, cache=False):
+        auth_plugins = cls.get_by_name(&quot;auth_plugins&quot;).app_settings_value
+        return auth_plugins
+
+    @classmethod
+    def get_auth_settings(cls, cache=False):
+        ret = cls.query()\
+                .filter(cls.app_settings_name.startswith(&#39;auth_&#39;)).all()
+        fd = {}
+        for row in ret:
+            fd[row.app_settings_name] = row.app_settings_value
+        return fd
+
+    @classmethod
+    def get_default_repo_settings(cls, cache=False, strip_prefix=False):
+        ret = cls.query()\
+                .filter(cls.app_settings_name.startswith(&#39;default_&#39;)).all()
+        fd = {}
+        for row in ret:
+            key = row.app_settings_name
+            if strip_prefix:
+                key = remove_prefix(key, prefix=&#39;default_&#39;)
+            fd.update({key: row.app_settings_value})
+
+        return fd
+
+    @classmethod
+    def get_server_info(cls):
+        import pkg_resources
+        import platform
+        import kallithea
+        from kallithea.lib.utils import check_git_version
+        mods = [(p.project_name, p.version) for p in pkg_resources.working_set]
+        info = {
+            &#39;modules&#39;: sorted(mods, key=lambda k: k[0].lower()),
+            &#39;py_version&#39;: platform.python_version(),
+            &#39;platform&#39;: safe_unicode(platform.platform()),
+            &#39;kallithea_version&#39;: kallithea.__version__,
+            &#39;git_version&#39;: safe_unicode(check_git_version()),
+            &#39;git_path&#39;: kallithea.CONFIG.get(&#39;git_path&#39;)
+        }
+        return info
+
+
+class Ui(Base, BaseModel):
+    __tablename__ = DB_PREFIX + &#39;ui&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;ui_key&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+
+    HOOK_UPDATE = &#39;changegroup.update&#39;
+    HOOK_REPO_SIZE = &#39;changegroup.repo_size&#39;
+    HOOK_PUSH = &#39;changegroup.push_logger&#39;
+    HOOK_PRE_PUSH = &#39;prechangegroup.pre_push&#39;
+    HOOK_PULL = &#39;outgoing.pull_logger&#39;
+    HOOK_PRE_PULL = &#39;preoutgoing.pre_pull&#39;
+
+    ui_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    ui_section = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    ui_key = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    ui_value = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    ui_active = Column(Boolean(), nullable=True, unique=None, default=True)
+
+    # def __init__(self, section=&#39;&#39;, key=&#39;&#39;, value=&#39;&#39;):
+    #     self.ui_section = section
+    #     self.ui_key = key
+    #     self.ui_value = value
+
+    @classmethod
+    def get_by_key(cls, key):
+        return cls.query().filter(cls.ui_key == key).scalar()
+
+    @classmethod
+    def get_builtin_hooks(cls):
+        q = cls.query()
+        q = q.filter(cls.ui_key.in_([cls.HOOK_UPDATE, cls.HOOK_REPO_SIZE,
+                                     cls.HOOK_PUSH, cls.HOOK_PRE_PUSH,
+                                     cls.HOOK_PULL, cls.HOOK_PRE_PULL]))
+        return q.all()
+
+    @classmethod
+    def get_custom_hooks(cls):
+        q = cls.query()
+        q = q.filter(~cls.ui_key.in_([cls.HOOK_UPDATE, cls.HOOK_REPO_SIZE,
+                                      cls.HOOK_PUSH, cls.HOOK_PRE_PUSH,
+                                      cls.HOOK_PULL, cls.HOOK_PRE_PULL]))
+        q = q.filter(cls.ui_section == &#39;hooks&#39;)
+        return q.all()
+
+    @classmethod
+    def get_repos_location(cls):
+        return cls.get_by_key(&#39;/&#39;).ui_value
+
+    @classmethod
+    def create_or_update_hook(cls, key, val):
+        new_ui = cls.get_by_key(key) or cls()
+        new_ui.ui_section = &#39;hooks&#39;
+        new_ui.ui_active = True
+        new_ui.ui_key = key
+        new_ui.ui_value = val
+
+        Session().add(new_ui)
+
+    def __repr__(self):
+        return &#39;&lt;%s[%s]%s=&gt;%s]&gt;&#39; % (self.__class__.__name__, self.ui_section,
+                                    self.ui_key, self.ui_value)
+
+
+class User(Base, BaseModel):
+    __tablename__ = &#39;users&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;username&#39;), UniqueConstraint(&#39;email&#39;),
+        Index(&#39;u_username_idx&#39;, &#39;username&#39;),
+        Index(&#39;u_email_idx&#39;, &#39;email&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    DEFAULT_USER = &#39;default&#39;
+    DEFAULT_GRAVATAR_URL = &#39;https://secure.gravatar.com/avatar/{md5email}?d=identicon&amp;s={size}&#39;
+
+    user_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    username = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    password = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    active = Column(Boolean(), nullable=True, unique=None, default=True)
+    admin = Column(Boolean(), nullable=True, unique=None, default=False)
+    name = Column(&quot;firstname&quot;, String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    lastname = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    _email = Column(&quot;email&quot;, String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    last_login = Column(DateTime(timezone=False), nullable=True, unique=None, default=None)
+    extern_type = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    extern_name = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    api_key = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    inherit_default_permissions = Column(Boolean(), nullable=False, unique=None, default=True)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+    _user_data = Column(&quot;user_data&quot;, LargeBinary(), nullable=True)  # JSON data
+
+    user_log = relationship(&#39;UserLog&#39;)
+    user_perms = relationship(&#39;UserToPerm&#39;, primaryjoin=&quot;User.user_id==UserToPerm.user_id&quot;, cascade=&#39;all&#39;)
+
+    repositories = relationship(&#39;Repository&#39;)
+    repo_groups = relationship(&#39;RepoGroup&#39;)
+    user_groups = relationship(&#39;UserGroup&#39;)
+    user_followers = relationship(&#39;UserFollowing&#39;, primaryjoin=&#39;UserFollowing.follows_user_id==User.user_id&#39;, cascade=&#39;all&#39;)
+    followings = relationship(&#39;UserFollowing&#39;, primaryjoin=&#39;UserFollowing.user_id==User.user_id&#39;, cascade=&#39;all&#39;)
+
+    repo_to_perm = relationship(&#39;UserRepoToPerm&#39;, primaryjoin=&#39;UserRepoToPerm.user_id==User.user_id&#39;, cascade=&#39;all&#39;)
+    repo_group_to_perm = relationship(&#39;UserRepoGroupToPerm&#39;, primaryjoin=&#39;UserRepoGroupToPerm.user_id==User.user_id&#39;, cascade=&#39;all&#39;)
+
+    group_member = relationship(&#39;UserGroupMember&#39;, cascade=&#39;all&#39;)
+
+    notifications = relationship(&#39;UserNotification&#39;, cascade=&#39;all&#39;)
+    # notifications assigned to this user
+    user_created_notifications = relationship(&#39;Notification&#39;, cascade=&#39;all&#39;)
+    # comments created by this user
+    user_comments = relationship(&#39;ChangesetComment&#39;, cascade=&#39;all&#39;)
+    #extra emails for this user
+    user_emails = relationship(&#39;UserEmailMap&#39;, cascade=&#39;all&#39;)
+    #extra API keys
+    user_api_keys = relationship(&#39;UserApiKeys&#39;, cascade=&#39;all&#39;)
+
+
+    @hybrid_property
+    def email(self):
+        return self._email
+
+    @email.setter
+    def email(self, val):
+        self._email = val.lower() if val else None
+
+    @property
+    def firstname(self):
+        # alias for future
+        return self.name
+
+    @property
+    def emails(self):
+        other = UserEmailMap.query().filter(UserEmailMap.user==self).all()
+        return [self.email] + [x.email for x in other]
+
+    @property
+    def api_keys(self):
+        other = UserApiKeys.query().filter(UserApiKeys.user==self).all()
+        return [self.api_key] + [x.api_key for x in other]
+
+    @property
+    def ip_addresses(self):
+        ret = UserIpMap.query().filter(UserIpMap.user == self).all()
+        return [x.ip_addr for x in ret]
+
+    @property
+    def full_name(self):
+        return &#39;%s %s&#39; % (self.firstname, self.lastname)
+
+    @property
+    def full_name_or_username(self):
+        &quot;&quot;&quot;
+        Show full name.
+        If full name is not set, fall back to username.
+        &quot;&quot;&quot;
+        return (&#39;%s %s&#39; % (self.firstname, self.lastname)
+                if (self.firstname and self.lastname) else self.username)
+
+    @property
+    def full_name_and_username(self):
+        &quot;&quot;&quot;
+        Show full name and username as &#39;Firstname Lastname (username)&#39;.
+        If full name is not set, fall back to username.
+        &quot;&quot;&quot;
+        return (&#39;%s %s (%s)&#39; % (self.firstname, self.lastname, self.username)
+                if (self.firstname and self.lastname) else self.username)
+
+    @property
+    def full_contact(self):
+        return &#39;%s %s &lt;%s&gt;&#39; % (self.firstname, self.lastname, self.email)
+
+    @property
+    def short_contact(self):
+        return &#39;%s %s&#39; % (self.firstname, self.lastname)
+
+    @property
+    def is_admin(self):
+        return self.admin
+
+    @property
+    def AuthUser(self):
+        &quot;&quot;&quot;
+        Returns instance of AuthUser for this user
+        &quot;&quot;&quot;
+        from kallithea.lib.auth import AuthUser
+        return AuthUser(dbuser=self)
+
+    @hybrid_property
+    def user_data(self):
+        if not self._user_data:
+            return {}
+
+        try:
+            return json.loads(self._user_data)
+        except TypeError:
+            return {}
+
+    @user_data.setter
+    def user_data(self, val):
+        try:
+            self._user_data = json.dumps(val)
+        except Exception:
+            log.error(traceback.format_exc())
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;id:%s:%s&#39;)&gt;&quot; % (self.__class__.__name__,
+                                      self.user_id, self.username)
+
+    @classmethod
+    def get_or_404(cls, id_, allow_default=True):
+        &#39;&#39;&#39;
+        Overridden version of BaseModel.get_or_404, with an extra check on
+        the default user.
+        &#39;&#39;&#39;
+        user = super(User, cls).get_or_404(id_)
+        if allow_default == False:
+            if user.username == User.DEFAULT_USER:
+                raise DefaultUserException
+        return user
+
+    @classmethod
+    def get_by_username(cls, username, case_insensitive=False, cache=False):
+        if case_insensitive:
+            q = cls.query().filter(cls.username.ilike(username))
+        else:
+            q = cls.query().filter(cls.username == username)
+
+        if cache:
+            q = q.options(FromCache(
+                            &quot;sql_cache_short&quot;,
+                            &quot;get_user_%s&quot; % _hash_key(username)
+                          )
+            )
+        return q.scalar()
+
+    @classmethod
+    def get_by_api_key(cls, api_key, cache=False, fallback=True):
+        if len(api_key) != 40 or not api_key.isalnum():
+            return None
+
+        q = cls.query().filter(cls.api_key == api_key)
+
+        if cache:
+            q = q.options(FromCache(&quot;sql_cache_short&quot;,
+                                    &quot;get_api_key_%s&quot; % api_key))
+        res = q.scalar()
+
+        if fallback and not res:
+            #fallback to additional keys
+            _res = UserApiKeys.query()\
+                .filter(UserApiKeys.api_key == api_key)\
+                .filter(or_(UserApiKeys.expires == -1,
+                            UserApiKeys.expires &gt;= time.time()))\
+                .first()
+            if _res:
+                res = _res.user
+        return res
+
+    @classmethod
+    def get_by_email(cls, email, case_insensitive=False, cache=False):
+        if case_insensitive:
+            q = cls.query().filter(cls.email.ilike(email))
+        else:
+            q = cls.query().filter(cls.email == email)
+
+        if cache:
+            q = q.options(FromCache(&quot;sql_cache_short&quot;,
+                                    &quot;get_email_key_%s&quot; % email))
+
+        ret = q.scalar()
+        if ret is None:
+            q = UserEmailMap.query()
+            # try fetching in alternate email map
+            if case_insensitive:
+                q = q.filter(UserEmailMap.email.ilike(email))
+            else:
+                q = q.filter(UserEmailMap.email == email)
+            q = q.options(joinedload(UserEmailMap.user))
+            if cache:
+                q = q.options(FromCache(&quot;sql_cache_short&quot;,
+                                        &quot;get_email_map_key_%s&quot; % email))
+            ret = getattr(q.scalar(), &#39;user&#39;, None)
+
+        return ret
+
+    @classmethod
+    def get_from_cs_author(cls, author):
+        &quot;&quot;&quot;
+        Tries to get User objects out of commit author string
+
+        :param author:
+        &quot;&quot;&quot;
+        from kallithea.lib.helpers import email, author_name
+        # Valid email in the attribute passed, see if they&#39;re in the system
+        _email = email(author)
+        if _email:
+            user = cls.get_by_email(_email, case_insensitive=True)
+            if user is not None:
+                return user
+        # Maybe we can match by username?
+        _author = author_name(author)
+        user = cls.get_by_username(_author, case_insensitive=True)
+        if user is not None:
+            return user
+
+    def update_lastlogin(self):
+        &quot;&quot;&quot;Update user lastlogin&quot;&quot;&quot;
+        self.last_login = datetime.datetime.now()
+        Session().add(self)
+        log.debug(&#39;updated user %s lastlogin&#39;, self.username)
+
+    @classmethod
+    def get_first_admin(cls):
+        user = User.query().filter(User.admin == True).first()
+        if user is None:
+            raise Exception(&#39;Missing administrative account!&#39;)
+        return user
+
+    @classmethod
+    def get_default_user(cls, cache=False):
+        user = User.get_by_username(User.DEFAULT_USER, cache=cache)
+        if user is None:
+            raise Exception(&#39;Missing default account!&#39;)
+        return user
+
+    def get_api_data(self, details=False):
+        &quot;&quot;&quot;
+        Common function for generating user related data for API
+        &quot;&quot;&quot;
+        user = self
+        data = dict(
+            user_id=user.user_id,
+            username=user.username,
+            firstname=user.name,
+            lastname=user.lastname,
+            email=user.email,
+            emails=user.emails,
+            active=user.active,
+            admin=user.admin,
+        )
+        if details:
+            data.update(dict(
+                extern_type=user.extern_type,
+                extern_name=user.extern_name,
+                api_key=user.api_key,
+                api_keys=user.api_keys,
+                last_login=user.last_login,
+                ip_addresses=user.ip_addresses
+                ))
+        return data
+
+    def __json__(self):
+        data = dict(
+            full_name=self.full_name,
+            full_name_or_username=self.full_name_or_username,
+            short_contact=self.short_contact,
+            full_contact=self.full_contact
+        )
+        data.update(self.get_api_data())
+        return data
+
+
+class UserApiKeys(Base, BaseModel):
+    __tablename__ = &#39;user_api_keys&#39;
+    __table_args__ = (
+        Index(&#39;uak_api_key_idx&#39;, &#39;api_key&#39;),
+        Index(&#39;uak_api_key_expires_idx&#39;, &#39;api_key&#39;, &#39;expires&#39;),
+        UniqueConstraint(&#39;api_key&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    __mapper_args__ = {}
+
+    user_api_key_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True, unique=None, default=None)
+    api_key = Column(String(255, convert_unicode=False), nullable=False, unique=True)
+    description = Column(UnicodeText(1024))
+    expires = Column(Float(53), nullable=False)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+
+    user = relationship(&#39;User&#39;)
+
+    @property
+    def expired(self):
+        if self.expires == -1:
+            return False
+        return time.time() &gt; self.expires
+
+
+class UserEmailMap(Base, BaseModel):
+    __tablename__ = &#39;user_email_map&#39;
+    __table_args__ = (
+        Index(&#39;uem_email_idx&#39;, &#39;email&#39;),
+        UniqueConstraint(&#39;email&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    __mapper_args__ = {}
+
+    email_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True, unique=None, default=None)
+    _email = Column(&quot;email&quot;, String(255, convert_unicode=False), nullable=True, unique=False, default=None)
+    user = relationship(&#39;User&#39;)
+
+    @validates(&#39;_email&#39;)
+    def validate_email(self, key, email):
+        # check if this email is not main one
+        main_email = Session().query(User).filter(User.email == email).scalar()
+        if main_email is not None:
+            raise AttributeError(&#39;email %s is present is user table&#39; % email)
+        return email
+
+    @hybrid_property
+    def email(self):
+        return self._email
+
+    @email.setter
+    def email(self, val):
+        self._email = val.lower() if val else None
+
+
+class UserIpMap(Base, BaseModel):
+    __tablename__ = &#39;user_ip_map&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;user_id&#39;, &#39;ip_addr&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    __mapper_args__ = {}
+
+    ip_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True, unique=None, default=None)
+    ip_addr = Column(String(255, convert_unicode=False), nullable=True, unique=False, default=None)
+    active = Column(Boolean(), nullable=True, unique=None, default=True)
+    user = relationship(&#39;User&#39;)
+
+    @classmethod
+    def _get_ip_range(cls, ip_addr):
+        from kallithea.lib import ipaddr
+        net = ipaddr.IPNetwork(address=ip_addr)
+        return [str(net.network), str(net.broadcast)]
+
+    def __json__(self):
+        return dict(
+          ip_addr=self.ip_addr,
+          ip_range=self._get_ip_range(self.ip_addr)
+        )
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;user_id:%s=&gt;%s&#39;)&gt;&quot; % (self.__class__.__name__,
+                                            self.user_id, self.ip_addr)
+
+class UserLog(Base, BaseModel):
+    __tablename__ = &#39;user_logs&#39;
+    __table_args__ = (
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    user_log_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True, unique=None, default=None)
+    username = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    repository_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=True)
+    repository_name = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    user_ip = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    action = Column(UnicodeText(1200000, convert_unicode=False), nullable=True, unique=None, default=None)
+    action_date = Column(DateTime(timezone=False), nullable=True, unique=None, default=None)
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;id:%s:%s&#39;)&gt;&quot; % (self.__class__.__name__,
+                                      self.repository_name,
+                                      self.action)
+
+    @property
+    def action_as_day(self):
+        return datetime.date(*self.action_date.timetuple()[:3])
+
+    user = relationship(&#39;User&#39;)
+    repository = relationship(&#39;Repository&#39;, cascade=&#39;&#39;)
+
+
+class UserGroup(Base, BaseModel):
+    __tablename__ = &#39;users_groups&#39;
+    __table_args__ = (
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+
+    users_group_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    users_group_name = Column(String(255, convert_unicode=False), nullable=False, unique=True, default=None)
+    user_group_description = Column(String(10000, convert_unicode=False), nullable=True, unique=None, default=None)
+    users_group_active = Column(Boolean(), nullable=True, unique=None, default=None)
+    inherit_default_permissions = Column(&quot;users_group_inherit_default_permissions&quot;, Boolean(), nullable=False, unique=None, default=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=False, default=None)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+    _group_data = Column(&quot;group_data&quot;, LargeBinary(), nullable=True)  # JSON data
+
+    members = relationship(&#39;UserGroupMember&#39;, cascade=&quot;all, delete-orphan&quot;)
+    users_group_to_perm = relationship(&#39;UserGroupToPerm&#39;, cascade=&#39;all&#39;)
+    users_group_repo_to_perm = relationship(&#39;UserGroupRepoToPerm&#39;, cascade=&#39;all&#39;)
+    users_group_repo_group_to_perm = relationship(&#39;UserGroupRepoGroupToPerm&#39;, cascade=&#39;all&#39;)
+    user_user_group_to_perm = relationship(&#39;UserUserGroupToPerm &#39;, cascade=&#39;all&#39;)
+    user_group_user_group_to_perm = relationship(&#39;UserGroupUserGroupToPerm &#39;, primaryjoin=&quot;UserGroupUserGroupToPerm.target_user_group_id==UserGroup.users_group_id&quot;, cascade=&#39;all&#39;)
+
+    user = relationship(&#39;User&#39;)
+
+    @hybrid_property
+    def group_data(self):
+        if not self._group_data:
+            return {}
+
+        try:
+            return json.loads(self._group_data)
+        except TypeError:
+            return {}
+
+    @group_data.setter
+    def group_data(self, val):
+        try:
+            self._group_data = json.dumps(val)
+        except Exception:
+            log.error(traceback.format_exc())
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;id:%s:%s&#39;)&gt;&quot; % (self.__class__.__name__,
+                                      self.users_group_id,
+                                      self.users_group_name)
+
+    @classmethod
+    def get_by_group_name(cls, group_name, cache=False,
+                          case_insensitive=False):
+        if case_insensitive:
+            q = cls.query().filter(cls.users_group_name.ilike(group_name))
+        else:
+            q = cls.query().filter(cls.users_group_name == group_name)
+        if cache:
+            q = q.options(FromCache(
+                            &quot;sql_cache_short&quot;,
+                            &quot;get_group_%s&quot; % _hash_key(group_name)
+                          )
+            )
+        return q.scalar()
+
+    @classmethod
+    def get(cls, user_group_id, cache=False):
+        user_group = cls.query()
+        if cache:
+            user_group = user_group.options(FromCache(&quot;sql_cache_short&quot;,
+                                    &quot;get_users_group_%s&quot; % user_group_id))
+        return user_group.get(user_group_id)
+
+    def get_api_data(self, with_members=True):
+        user_group = self
+
+        data = dict(
+            users_group_id=user_group.users_group_id,
+            group_name=user_group.users_group_name,
+            group_description=user_group.user_group_description,
+            active=user_group.users_group_active,
+            owner=user_group.user.username,
+        )
+        if with_members:
+            members = []
+            for user in user_group.members:
+                user = user.user
+                members.append(user.get_api_data())
+            data[&#39;members&#39;] = members
+
+        return data
+
+
+class UserGroupMember(Base, BaseModel):
+    __tablename__ = &#39;users_groups_members&#39;
+    __table_args__ = (
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+
+    users_group_member_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    users_group_id = Column(Integer(), ForeignKey(&#39;users_groups.users_group_id&#39;), nullable=False, unique=None, default=None)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None, default=None)
+
+    user = relationship(&#39;User&#39;)
+    users_group = relationship(&#39;UserGroup&#39;)
+
+    def __init__(self, gr_id=&#39;&#39;, u_id=&#39;&#39;):
+        self.users_group_id = gr_id
+        self.user_id = u_id
+
+
+class RepositoryField(Base, BaseModel):
+    __tablename__ = &#39;repositories_fields&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;repository_id&#39;, &#39;field_key&#39;),  # no-multi field
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    PREFIX = &#39;ex_&#39;  # prefix used in form to not conflict with already existing fields
+
+    repo_field_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    repository_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False, unique=None, default=None)
+    field_key = Column(String(250, convert_unicode=False))
+    field_label = Column(String(1024, convert_unicode=False), nullable=False)
+    field_value = Column(String(10000, convert_unicode=False), nullable=False)
+    field_desc = Column(String(1024, convert_unicode=False), nullable=False)
+    field_type = Column(String(255), nullable=False, unique=None)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+
+    repository = relationship(&#39;Repository&#39;)
+
+    @property
+    def field_key_prefixed(self):
+        return &#39;ex_%s&#39; % self.field_key
+
+    @classmethod
+    def un_prefix_key(cls, key):
+        if key.startswith(cls.PREFIX):
+            return key[len(cls.PREFIX):]
+        return key
+
+    @classmethod
+    def get_by_key_name(cls, key, repo):
+        row = cls.query()\
+                .filter(cls.repository == repo)\
+                .filter(cls.field_key == key).scalar()
+        return row
+
+
+class Repository(Base, BaseModel):
+    __tablename__ = &#39;repositories&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;repo_name&#39;),
+        Index(&#39;r_repo_name_idx&#39;, &#39;repo_name&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    DEFAULT_CLONE_URI = &#39;{scheme}://{user}@{netloc}/{repo}&#39;
+    DEFAULT_CLONE_URI_ID = &#39;{scheme}://{user}@{netloc}/_{repoid}&#39;
+
+    STATE_CREATED = &#39;repo_state_created&#39;
+    STATE_PENDING = &#39;repo_state_pending&#39;
+    STATE_ERROR = &#39;repo_state_error&#39;
+
+    repo_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    repo_name = Column(String(255, convert_unicode=False), nullable=False, unique=True, default=None)
+    repo_state = Column(String(255), nullable=True)
+
+    clone_uri = Column(String(255, convert_unicode=False), nullable=True, unique=False, default=None)
+    repo_type = Column(String(255, convert_unicode=False), nullable=False, unique=False, default=None)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=False, default=None)
+    private = Column(Boolean(), nullable=True, unique=None, default=None)
+    enable_statistics = Column(&quot;statistics&quot;, Boolean(), nullable=True, unique=None, default=True)
+    enable_downloads = Column(&quot;downloads&quot;, Boolean(), nullable=True, unique=None, default=True)
+    description = Column(String(10000, convert_unicode=False), nullable=True, unique=None, default=None)
+    created_on = Column(DateTime(timezone=False), nullable=False, unique=None, default=datetime.datetime.now)
+    updated_on = Column(DateTime(timezone=False), nullable=False, unique=None, default=datetime.datetime.now)
+    _landing_revision = Column(&quot;landing_revision&quot;, String(255, convert_unicode=False), nullable=False, unique=False, default=None)
+    enable_locking = Column(Boolean(), nullable=False, unique=None, default=False)
+    _locked = Column(&quot;locked&quot;, String(255, convert_unicode=False), nullable=True, unique=False, default=None)
+    _changeset_cache = Column(&quot;changeset_cache&quot;, LargeBinary(), nullable=True) #JSON data
+
+    fork_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=True, unique=False, default=None)
+    group_id = Column(Integer(), ForeignKey(&#39;groups.group_id&#39;), nullable=True, unique=False, default=None)
+
+    user = relationship(&#39;User&#39;)
+    fork = relationship(&#39;Repository&#39;, remote_side=repo_id)
+    group = relationship(&#39;RepoGroup&#39;)
+    repo_to_perm = relationship(&#39;UserRepoToPerm&#39;, cascade=&#39;all&#39;, order_by=&#39;UserRepoToPerm.repo_to_perm_id&#39;)
+    users_group_to_perm = relationship(&#39;UserGroupRepoToPerm&#39;, cascade=&#39;all&#39;)
+    stats = relationship(&#39;Statistics&#39;, cascade=&#39;all&#39;, uselist=False)
+
+    followers = relationship(&#39;UserFollowing&#39;,
+                             primaryjoin=&#39;UserFollowing.follows_repo_id==Repository.repo_id&#39;,
+                             cascade=&#39;all&#39;)
+    extra_fields = relationship(&#39;RepositoryField&#39;,
+                                cascade=&quot;all, delete-orphan&quot;)
+
+    logs = relationship(&#39;UserLog&#39;)
+    comments = relationship(&#39;ChangesetComment&#39;, cascade=&quot;all, delete-orphan&quot;)
+
+    pull_requests_org = relationship(&#39;PullRequest&#39;,
+                    primaryjoin=&#39;PullRequest.org_repo_id==Repository.repo_id&#39;,
+                    cascade=&quot;all, delete-orphan&quot;)
+
+    pull_requests_other = relationship(&#39;PullRequest&#39;,
+                    primaryjoin=&#39;PullRequest.other_repo_id==Repository.repo_id&#39;,
+                    cascade=&quot;all, delete-orphan&quot;)
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;%s:%s&#39;)&gt;&quot; % (self.__class__.__name__, self.repo_id,
+                                   safe_unicode(self.repo_name))
+
+    @hybrid_property
+    def landing_rev(self):
+        # always should return [rev_type, rev]
+        if self._landing_revision:
+            _rev_info = self._landing_revision.split(&#39;:&#39;)
+            if len(_rev_info) &lt; 2:
+                _rev_info.insert(0, &#39;rev&#39;)
+            return [_rev_info[0], _rev_info[1]]
+        return [None, None]
+
+    @landing_rev.setter
+    def landing_rev(self, val):
+        if &#39;:&#39; not in val:
+            raise ValueError(&#39;value must be delimited with `:` and consist &#39;
+                             &#39;of &lt;rev_type&gt;:&lt;rev&gt;, got %s instead&#39; % val)
+        self._landing_revision = val
+
+    @hybrid_property
+    def locked(self):
+        # always should return [user_id, timelocked]
+        if self._locked:
+            _lock_info = self._locked.split(&#39;:&#39;)
+            return int(_lock_info[0]), _lock_info[1]
+        return [None, None]
+
+    @locked.setter
+    def locked(self, val):
+        if val and isinstance(val, (list, tuple)):
+            self._locked = &#39;:&#39;.join(map(str, val))
+        else:
+            self._locked = None
+
+    @hybrid_property
+    def changeset_cache(self):
+        try:
+            cs_cache = json.loads(self._changeset_cache) # might raise on bad data
+            cs_cache[&#39;raw_id&#39;] # verify data, raise exception on error
+            return cs_cache
+        except (TypeError, KeyError, ValueError):
+            return EmptyChangeset().__json__()
+
+    @changeset_cache.setter
+    def changeset_cache(self, val):
+        try:
+            self._changeset_cache = json.dumps(val)
+        except Exception:
+            log.error(traceback.format_exc())
+
+    @classmethod
+    def url_sep(cls):
+        return URL_SEP
+
+    @classmethod
+    def normalize_repo_name(cls, repo_name):
+        &quot;&quot;&quot;
+        Normalizes os specific repo_name to the format internally stored inside
+        database using URL_SEP
+
+        :param cls:
+        :param repo_name:
+        &quot;&quot;&quot;
+        return cls.url_sep().join(repo_name.split(os.sep))
+
+    @classmethod
+    def get_by_repo_name(cls, repo_name):
+        q = Session().query(cls).filter(cls.repo_name == repo_name)
+        q = q.options(joinedload(Repository.fork))\
+                .options(joinedload(Repository.user))\
+                .options(joinedload(Repository.group))
+        return q.scalar()
+
+    @classmethod
+    def get_by_full_path(cls, repo_full_path):
+        repo_name = repo_full_path.split(cls.base_path(), 1)[-1]
+        repo_name = cls.normalize_repo_name(repo_name)
+        return cls.get_by_repo_name(repo_name.strip(URL_SEP))
+
+    @classmethod
+    def get_repo_forks(cls, repo_id):
+        return cls.query().filter(Repository.fork_id == repo_id)
+
+    @classmethod
+    def base_path(cls):
+        &quot;&quot;&quot;
+        Returns base path where all repos are stored
+
+        :param cls:
+        &quot;&quot;&quot;
+        q = Session().query(Ui)\
+            .filter(Ui.ui_key == cls.url_sep())
+        q = q.options(FromCache(&quot;sql_cache_short&quot;, &quot;repository_repo_path&quot;))
+        return q.one().ui_value
+
+    @property
+    def forks(self):
+        &quot;&quot;&quot;
+        Return forks of this repo
+        &quot;&quot;&quot;
+        return Repository.get_repo_forks(self.repo_id)
+
+    @property
+    def parent(self):
+        &quot;&quot;&quot;
+        Returns fork parent
+        &quot;&quot;&quot;
+        return self.fork
+
+    @property
+    def just_name(self):
+        return self.repo_name.split(Repository.url_sep())[-1]
+
+    @property
+    def groups_with_parents(self):
+        groups = []
+        if self.group is None:
+            return groups
+
+        cur_gr = self.group
+        groups.insert(0, cur_gr)
+        while 1:
+            gr = getattr(cur_gr, &#39;parent_group&#39;, None)
+            cur_gr = cur_gr.parent_group
+            if gr is None:
+                break
+            groups.insert(0, gr)
+
+        return groups
+
+    @property
+    def groups_and_repo(self):
+        return self.groups_with_parents, self.just_name, self.repo_name
+
+    @LazyProperty
+    def repo_path(self):
+        &quot;&quot;&quot;
+        Returns base full path for that repository means where it actually
+        exists on a filesystem
+        &quot;&quot;&quot;
+        q = Session().query(Ui).filter(Ui.ui_key ==
+                                              Repository.url_sep())
+        q = q.options(FromCache(&quot;sql_cache_short&quot;, &quot;repository_repo_path&quot;))
+        return q.one().ui_value
+
+    @property
+    def repo_full_path(self):
+        p = [self.repo_path]
+        # we need to split the name by / since this is how we store the
+        # names in the database, but that eventually needs to be converted
+        # into a valid system path
+        p += self.repo_name.split(Repository.url_sep())
+        return os.path.join(*map(safe_unicode, p))
+
+    @property
+    def cache_keys(self):
+        &quot;&quot;&quot;
+        Returns associated cache keys for that repo
+        &quot;&quot;&quot;
+        return CacheInvalidation.query()\
+            .filter(CacheInvalidation.cache_args == self.repo_name)\
+            .order_by(CacheInvalidation.cache_key)\
+            .all()
+
+    def get_new_name(self, repo_name):
+        &quot;&quot;&quot;
+        returns new full repository name based on assigned group and new new
+
+        :param group_name:
+        &quot;&quot;&quot;
+        path_prefix = self.group.full_path_splitted if self.group else []
+        return Repository.url_sep().join(path_prefix + [repo_name])
+
+    @property
+    def _ui(self):
+        &quot;&quot;&quot;
+        Creates an db based ui object for this repository
+        &quot;&quot;&quot;
+        from kallithea.lib.utils import make_ui
+        return make_ui(&#39;db&#39;, clear_session=False)
+
+    @classmethod
+    def is_valid(cls, repo_name):
+        &quot;&quot;&quot;
+        returns True if given repo name is a valid filesystem repository
+
+        :param cls:
+        :param repo_name:
+        &quot;&quot;&quot;
+        from kallithea.lib.utils import is_valid_repo
+
+        return is_valid_repo(repo_name, cls.base_path())
+
+    def get_api_data(self):
+        &quot;&quot;&quot;
+        Common function for generating repo api data
+
+        &quot;&quot;&quot;
+        repo = self
+        data = dict(
+            repo_id=repo.repo_id,
+            repo_name=repo.repo_name,
+            repo_type=repo.repo_type,
+            clone_uri=repo.clone_uri,
+            private=repo.private,
+            created_on=repo.created_on,
+            description=repo.description,
+            landing_rev=repo.landing_rev,
+            owner=repo.user.username,
+            fork_of=repo.fork.repo_name if repo.fork else None,
+            enable_statistics=repo.enable_statistics,
+            enable_locking=repo.enable_locking,
+            enable_downloads=repo.enable_downloads,
+            last_changeset=repo.changeset_cache,
+            locked_by=User.get(self.locked[0]).get_api_data() \
+                if self.locked[0] else None,
+            locked_date=time_to_datetime(self.locked[1]) \
+                if self.locked[1] else None
+        )
+        rc_config = Setting.get_app_settings()
+        repository_fields = str2bool(rc_config.get(&#39;repository_fields&#39;))
+        if repository_fields:
+            for f in self.extra_fields:
+                data[f.field_key_prefixed] = f.field_value
+
+        return data
+
+    @classmethod
+    def lock(cls, repo, user_id, lock_time=None):
+        if lock_time is not None:
+            lock_time = time.time()
+        repo.locked = [user_id, lock_time]
+        Session().add(repo)
+        Session().commit()
+
+    @classmethod
+    def unlock(cls, repo):
+        repo.locked = None
+        Session().add(repo)
+        Session().commit()
+
+    @classmethod
+    def getlock(cls, repo):
+        return repo.locked
+
+    @property
+    def last_db_change(self):
+        return self.updated_on
+
+    @property
+    def clone_uri_hidden(self):
+        clone_uri = self.clone_uri
+        if clone_uri:
+            import urlobject
+            url_obj = urlobject.URLObject(self.clone_uri)
+            if url_obj.password:
+                clone_uri = url_obj.with_password(&#39;*****&#39;)
+        return clone_uri
+
+    def clone_url(self, **override):
+        import kallithea.lib.helpers as h
+        qualified_home_url = h.canonical_url(&#39;home&#39;)
+
+        uri_tmpl = None
+        if &#39;with_id&#39; in override:
+            uri_tmpl = self.DEFAULT_CLONE_URI_ID
+            del override[&#39;with_id&#39;]
+
+        if &#39;uri_tmpl&#39; in override:
+            uri_tmpl = override[&#39;uri_tmpl&#39;]
+            del override[&#39;uri_tmpl&#39;]
+
+        # we didn&#39;t override our tmpl from **overrides
+        if not uri_tmpl:
+            uri_tmpl = self.DEFAULT_CLONE_URI
+            try:
+                from pylons import tmpl_context as c
+                uri_tmpl = c.clone_uri_tmpl
+            except AttributeError:
+                # in any case if we call this outside of request context,
+                # ie, not having tmpl_context set up
+                pass
+
+        return get_clone_url(uri_tmpl=uri_tmpl,
+                             qualified_home_url=qualified_home_url,
+                             repo_name=self.repo_name,
+                             repo_id=self.repo_id, **override)
+
+    def set_state(self, state):
+        self.repo_state = state
+        Session().add(self)
+    #==========================================================================
+    # SCM PROPERTIES
+    #==========================================================================
+
+    def get_changeset(self, rev=None):
+        return get_changeset_safe(self.scm_instance, rev)
+
+    def get_landing_changeset(self):
+        &quot;&quot;&quot;
+        Returns landing changeset, or if that doesn&#39;t exist returns the tip
+        &quot;&quot;&quot;
+        _rev_type, _rev = self.landing_rev
+        cs = self.get_changeset(_rev)
+        if isinstance(cs, EmptyChangeset):
+            return self.get_changeset()
+        return cs
+
+    def update_changeset_cache(self, cs_cache=None):
+        &quot;&quot;&quot;
+        Update cache of last changeset for repository, keys should be::
+
+            short_id
+            raw_id
+            revision
+            message
+            date
+            author
+
+        :param cs_cache:
+        &quot;&quot;&quot;
+        from kallithea.lib.vcs.backends.base import BaseChangeset
+        if cs_cache is None:
+            cs_cache = EmptyChangeset()
+            # use no-cache version here
+            scm_repo = self.scm_instance_no_cache()
+            if scm_repo:
+                cs_cache = scm_repo.get_changeset()
+
+        if isinstance(cs_cache, BaseChangeset):
+            cs_cache = cs_cache.__json__()
+
+        if (not self.changeset_cache or cs_cache[&#39;raw_id&#39;] != self.changeset_cache[&#39;raw_id&#39;]):
+            _default = datetime.datetime.fromtimestamp(0)
+            last_change = cs_cache.get(&#39;date&#39;) or _default
+            log.debug(&#39;updated repo %s with new cs cache %s&#39;,
+                      self.repo_name, cs_cache)
+            self.updated_on = last_change
+            self.changeset_cache = cs_cache
+            Session().add(self)
+            Session().commit()
+        else:
+            log.debug(&#39;changeset_cache for %s already up to date with %s&#39;,
+                      self.repo_name, cs_cache[&#39;raw_id&#39;])
+
+    @property
+    def tip(self):
+        return self.get_changeset(&#39;tip&#39;)
+
+    @property
+    def author(self):
+        return self.tip.author
+
+    @property
+    def last_change(self):
+        return self.scm_instance.last_change
+
+    def get_comments(self, revisions=None):
+        &quot;&quot;&quot;
+        Returns comments for this repository grouped by revisions
+
+        :param revisions: filter query by revisions only
+        &quot;&quot;&quot;
+        cmts = ChangesetComment.query()\
+            .filter(ChangesetComment.repo == self)
+        if revisions is not None:
+            if not revisions:
+                return [] # don&#39;t use sql &#39;in&#39; on empty set
+            cmts = cmts.filter(ChangesetComment.revision.in_(revisions))
+        grouped = collections.defaultdict(list)
+        for cmt in cmts.all():
+            grouped[cmt.revision].append(cmt)
+        return grouped
+
+    def statuses(self, revisions):
+        &quot;&quot;&quot;
+        Returns statuses for this repository.
+        PRs without any votes do _not_ show up as unreviewed.
+
+        :param revisions: list of revisions to get statuses for
+        &quot;&quot;&quot;
+        if not revisions:
+            return {}
+
+        statuses = ChangesetStatus.query()\
+            .filter(ChangesetStatus.repo == self)\
+            .filter(ChangesetStatus.version == 0)\
+            .filter(ChangesetStatus.revision.in_(revisions))
+
+        grouped = {}
+        for stat in statuses.all():
+            pr_id = pr_nice_id = pr_repo = None
+            if stat.pull_request:
+                pr_id = stat.pull_request.pull_request_id
+                pr_nice_id = PullRequest.make_nice_id(pr_id)
+                pr_repo = stat.pull_request.other_repo.repo_name
+            grouped[stat.revision] = [str(stat.status), stat.status_lbl,
+                                      pr_id, pr_repo, pr_nice_id]
+        return grouped
+
+    def _repo_size(self):
+        from kallithea.lib import helpers as h
+        log.debug(&#39;calculating repository size...&#39;)
+        return h.format_byte_size(self.scm_instance.size)
+
+    #==========================================================================
+    # SCM CACHE INSTANCE
+    #==========================================================================
+
+    def set_invalidate(self):
+        &quot;&quot;&quot;
+        Mark caches of this repo as invalid.
+        &quot;&quot;&quot;
+        CacheInvalidation.set_invalidate(self.repo_name)
+
+    def scm_instance_no_cache(self):
+        return self.__get_instance()
+
+    @property
+    def scm_instance(self):
+        import kallithea
+        full_cache = str2bool(kallithea.CONFIG.get(&#39;vcs_full_cache&#39;))
+        if full_cache:
+            return self.scm_instance_cached()
+        return self.__get_instance()
+
+    def scm_instance_cached(self, valid_cache_keys=None):
+        @cache_region(&#39;long_term&#39;)
+        def _c(repo_name):
+            return self.__get_instance()
+        rn = self.repo_name
+
+        valid = CacheInvalidation.test_and_set_valid(rn, None, valid_cache_keys=valid_cache_keys)
+        if not valid:
+            log.debug(&#39;Cache for %s invalidated, getting new object&#39;, rn)
+            region_invalidate(_c, None, rn)
+        else:
+            log.debug(&#39;Getting scm_instance of %s from cache&#39;, rn)
+        return _c(rn)
+
+    def __get_instance(self):
+        repo_full_path = self.repo_full_path
+
+        alias = get_scm(safe_str(repo_full_path))[0]
+        log.debug(&#39;Creating instance of %s repository from %s&#39;,
+                  alias, repo_full_path)
+        backend = get_backend(alias)
+
+        if alias == &#39;hg&#39;:
+            repo = backend(safe_str(repo_full_path), create=False,
+                           baseui=self._ui)
+        else:
+            repo = backend(repo_full_path, create=False)
+
+        return repo
+
+    def __json__(self):
+        return dict(landing_rev = self.landing_rev)
+
+class RepoGroup(Base, BaseModel):
+    __tablename__ = &#39;groups&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;group_name&#39;, &#39;group_parent_id&#39;),
+        CheckConstraint(&#39;group_id != group_parent_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    __mapper_args__ = {&#39;order_by&#39;: &#39;group_name&#39;}
+
+    SEP = &#39; &amp;raquo; &#39;
+
+    group_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    group_name = Column(String(255, convert_unicode=False), nullable=False, unique=True, default=None)
+    group_parent_id = Column(Integer(), ForeignKey(&#39;groups.group_id&#39;), nullable=True, unique=None, default=None)
+    group_description = Column(String(10000, convert_unicode=False), nullable=True, unique=None, default=None)
+    enable_locking = Column(Boolean(), nullable=False, unique=None, default=False)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=False, default=None)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+
+    repo_group_to_perm = relationship(&#39;UserRepoGroupToPerm&#39;, cascade=&#39;all&#39;, order_by=&#39;UserRepoGroupToPerm.group_to_perm_id&#39;)
+    users_group_to_perm = relationship(&#39;UserGroupRepoGroupToPerm&#39;, cascade=&#39;all&#39;)
+    parent_group = relationship(&#39;RepoGroup&#39;, remote_side=group_id)
+    user = relationship(&#39;User&#39;)
+
+    def __init__(self, group_name=&#39;&#39;, parent_group=None):
+        self.group_name = group_name
+        self.parent_group = parent_group
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;id:%s:%s&#39;)&gt;&quot; % (self.__class__.__name__, self.group_id,
+                                      self.group_name)
+
+    @classmethod
+    def _generate_choice(cls, repo_group):
+        &quot;&quot;&quot;Return tuple with group_id and name as html literal&quot;&quot;&quot;
+        from webhelpers.html import literal
+        if repo_group is None:
+            return (-1, u&#39;-- %s --&#39; % _(&#39;top level&#39;))
+        return repo_group.group_id, literal(cls.SEP.join(repo_group.full_path_splitted))
+
+    @classmethod
+    def groups_choices(cls, groups):
+        &quot;&quot;&quot;Return tuples with group_id and name as html literal.&quot;&quot;&quot;
+        return sorted((cls._generate_choice(g) for g in groups),
+                      key=lambda c: c[1].split(cls.SEP))
+
+    @classmethod
+    def url_sep(cls):
+        return URL_SEP
+
+    @classmethod
+    def get_by_group_name(cls, group_name, cache=False, case_insensitive=False):
+        if case_insensitive:
+            gr = cls.query()\
+                .filter(cls.group_name.ilike(group_name))
+        else:
+            gr = cls.query()\
+                .filter(cls.group_name == group_name)
+        if cache:
+            gr = gr.options(FromCache(
+                            &quot;sql_cache_short&quot;,
+                            &quot;get_group_%s&quot; % _hash_key(group_name)
+                            )
+            )
+        return gr.scalar()
+
+    @property
+    def parents(self):
+        parents_recursion_limit = 10
+        groups = []
+        if self.parent_group is None:
+            return groups
+        cur_gr = self.parent_group
+        groups.insert(0, cur_gr)
+        cnt = 0
+        while 1:
+            cnt += 1
+            gr = getattr(cur_gr, &#39;parent_group&#39;, None)
+            cur_gr = cur_gr.parent_group
+            if gr is None:
+                break
+            if cnt == parents_recursion_limit:
+                # this will prevent accidental infinite loops
+                log.error((&#39;more than %s parents found for group %s, stopping &#39;
+                           &#39;recursive parent fetching&#39; % (parents_recursion_limit, self)))
+                break
+
+            groups.insert(0, gr)
+        return groups
+
+    @property
+    def children(self):
+        return RepoGroup.query().filter(RepoGroup.parent_group == self)
+
+    @property
+    def name(self):
+        return self.group_name.split(RepoGroup.url_sep())[-1]
+
+    @property
+    def full_path(self):
+        return self.group_name
+
+    @property
+    def full_path_splitted(self):
+        return self.group_name.split(RepoGroup.url_sep())
+
+    @property
+    def repositories(self):
+        return Repository.query()\
+                .filter(Repository.group == self)\
+                .order_by(Repository.repo_name)
+
+    @property
+    def repositories_recursive_count(self):
+        cnt = self.repositories.count()
+
+        def children_count(group):
+            cnt = 0
+            for child in group.children:
+                cnt += child.repositories.count()
+                cnt += children_count(child)
+            return cnt
+
+        return cnt + children_count(self)
+
+    def _recursive_objects(self, include_repos=True):
+        all_ = []
+
+        def _get_members(root_gr):
+            if include_repos:
+                for r in root_gr.repositories:
+                    all_.append(r)
+            childs = root_gr.children.all()
+            if childs:
+                for gr in childs:
+                    all_.append(gr)
+                    _get_members(gr)
+
+        _get_members(self)
+        return [self] + all_
+
+    def recursive_groups_and_repos(self):
+        &quot;&quot;&quot;
+        Recursive return all groups, with repositories in those groups
+        &quot;&quot;&quot;
+        return self._recursive_objects()
+
+    def recursive_groups(self):
+        &quot;&quot;&quot;
+        Returns all children groups for this group including children of children
+        &quot;&quot;&quot;
+        return self._recursive_objects(include_repos=False)
+
+    def get_new_name(self, group_name):
+        &quot;&quot;&quot;
+        returns new full group name based on parent and new name
+
+        :param group_name:
+        &quot;&quot;&quot;
+        path_prefix = (self.parent_group.full_path_splitted if
+                       self.parent_group else [])
+        return RepoGroup.url_sep().join(path_prefix + [group_name])
+
+    def get_api_data(self):
+        &quot;&quot;&quot;
+        Common function for generating api data
+
+        &quot;&quot;&quot;
+        group = self
+        data = dict(
+            group_id=group.group_id,
+            group_name=group.group_name,
+            group_description=group.group_description,
+            parent_group=group.parent_group.group_name if group.parent_group else None,
+            repositories=[x.repo_name for x in group.repositories],
+            owner=group.user.username
+        )
+        return data
+
+
+class Permission(Base, BaseModel):
+    __tablename__ = &#39;permissions&#39;
+    __table_args__ = (
+        Index(&#39;p_perm_name_idx&#39;, &#39;permission_name&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    PERMS = [
+        (&#39;hg.admin&#39;, _(&#39;Kallithea Administrator&#39;)),
+
+        (&#39;repository.none&#39;, _(&#39;Default user has no access to new repositories&#39;)),
+        (&#39;repository.read&#39;, _(&#39;Default user has read access to new repositories&#39;)),
+        (&#39;repository.write&#39;, _(&#39;Default user has write access to new repositories&#39;)),
+        (&#39;repository.admin&#39;, _(&#39;Default user has admin access to new repositories&#39;)),
+
+        (&#39;group.none&#39;, _(&#39;Default user has no access to new repository groups&#39;)),
+        (&#39;group.read&#39;, _(&#39;Default user has read access to new repository groups&#39;)),
+        (&#39;group.write&#39;, _(&#39;Default user has write access to new repository groups&#39;)),
+        (&#39;group.admin&#39;, _(&#39;Default user has admin access to new repository groups&#39;)),
+
+        (&#39;usergroup.none&#39;, _(&#39;Default user has no access to new user groups&#39;)),
+        (&#39;usergroup.read&#39;, _(&#39;Default user has read access to new user groups&#39;)),
+        (&#39;usergroup.write&#39;, _(&#39;Default user has write access to new user groups&#39;)),
+        (&#39;usergroup.admin&#39;, _(&#39;Default user has admin access to new user groups&#39;)),
+
+        (&#39;hg.repogroup.create.false&#39;, _(&#39;Only admins can create repository groups&#39;)),
+        (&#39;hg.repogroup.create.true&#39;, _(&#39;Non-admins can create repository groups&#39;)),
+
+        (&#39;hg.usergroup.create.false&#39;, _(&#39;Only admins can create user groups&#39;)),
+        (&#39;hg.usergroup.create.true&#39;, _(&#39;Non-admins can create user groups&#39;)),
+
+        (&#39;hg.create.none&#39;, _(&#39;Only admins can create top level repositories&#39;)),
+        (&#39;hg.create.repository&#39;, _(&#39;Non-admins can create top level repositories&#39;)),
+
+        (&#39;hg.create.write_on_repogroup.true&#39;, _(&#39;Repository creation enabled with write permission to a repository group&#39;)),
+        (&#39;hg.create.write_on_repogroup.false&#39;, _(&#39;Repository creation disabled with write permission to a repository group&#39;)),
+
+        (&#39;hg.fork.none&#39;, _(&#39;Only admins can fork repositories&#39;)),
+        (&#39;hg.fork.repository&#39;, _(&#39;Non-admins can fork repositories&#39;)),
+
+        (&#39;hg.register.none&#39;, _(&#39;Registration disabled&#39;)),
+        (&#39;hg.register.manual_activate&#39;, _(&#39;User registration with manual account activation&#39;)),
+        (&#39;hg.register.auto_activate&#39;, _(&#39;User registration with automatic account activation&#39;)),
+
+        (&#39;hg.extern_activate.manual&#39;, _(&#39;Manual activation of external account&#39;)),
+        (&#39;hg.extern_activate.auto&#39;, _(&#39;Automatic activation of external account&#39;)),
+    ]
+
+    #definition of system default permissions for DEFAULT user
+    DEFAULT_USER_PERMISSIONS = [
+        &#39;repository.read&#39;,
+        &#39;group.read&#39;,
+        &#39;usergroup.read&#39;,
+        &#39;hg.create.repository&#39;,
+        &#39;hg.create.write_on_repogroup.true&#39;,
+        &#39;hg.fork.repository&#39;,
+        &#39;hg.register.manual_activate&#39;,
+        &#39;hg.extern_activate.auto&#39;,
+    ]
+
+    # defines which permissions are more important higher the more important
+    # Weight defines which permissions are more important.
+    # The higher number the more important.
+    PERM_WEIGHTS = {
+        &#39;repository.none&#39;: 0,
+        &#39;repository.read&#39;: 1,
+        &#39;repository.write&#39;: 3,
+        &#39;repository.admin&#39;: 4,
+
+        &#39;group.none&#39;: 0,
+        &#39;group.read&#39;: 1,
+        &#39;group.write&#39;: 3,
+        &#39;group.admin&#39;: 4,
+
+        &#39;usergroup.none&#39;: 0,
+        &#39;usergroup.read&#39;: 1,
+        &#39;usergroup.write&#39;: 3,
+        &#39;usergroup.admin&#39;: 4,
+
+        &#39;hg.repogroup.create.false&#39;: 0,
+        &#39;hg.repogroup.create.true&#39;: 1,
+
+        &#39;hg.usergroup.create.false&#39;: 0,
+        &#39;hg.usergroup.create.true&#39;: 1,
+
+        &#39;hg.fork.none&#39;: 0,
+        &#39;hg.fork.repository&#39;: 1,
+
+        &#39;hg.create.none&#39;: 0,
+        &#39;hg.create.repository&#39;: 1
+    }
+
+    permission_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    permission_name = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+    permission_longname = Column(String(255, convert_unicode=False), nullable=True, unique=None, default=None)
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;%s:%s&#39;)&gt;&quot; % (
+            self.__class__.__name__, self.permission_id, self.permission_name
+        )
+
+    @classmethod
+    def get_by_key(cls, key):
+        return cls.query().filter(cls.permission_name == key).scalar()
+
+    @classmethod
+    def get_default_perms(cls, default_user_id):
+        q = Session().query(UserRepoToPerm, Repository, cls)\
+         .join((Repository, UserRepoToPerm.repository_id == Repository.repo_id))\
+         .join((cls, UserRepoToPerm.permission_id == cls.permission_id))\
+         .filter(UserRepoToPerm.user_id == default_user_id)
+
+        return q.all()
+
+    @classmethod
+    def get_default_group_perms(cls, default_user_id):
+        q = Session().query(UserRepoGroupToPerm, RepoGroup, cls)\
+         .join((RepoGroup, UserRepoGroupToPerm.group_id == RepoGroup.group_id))\
+         .join((cls, UserRepoGroupToPerm.permission_id == cls.permission_id))\
+         .filter(UserRepoGroupToPerm.user_id == default_user_id)
+
+        return q.all()
+
+    @classmethod
+    def get_default_user_group_perms(cls, default_user_id):
+        q = Session().query(UserUserGroupToPerm, UserGroup, cls)\
+         .join((UserGroup, UserUserGroupToPerm.user_group_id == UserGroup.users_group_id))\
+         .join((cls, UserUserGroupToPerm.permission_id == cls.permission_id))\
+         .filter(UserUserGroupToPerm.user_id == default_user_id)
+
+        return q.all()
+
+
+class UserRepoToPerm(Base, BaseModel):
+    __tablename__ = &#39;repo_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;user_id&#39;, &#39;repository_id&#39;, &#39;permission_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    repo_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+    repository_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False, unique=None, default=None)
+
+    user = relationship(&#39;User&#39;)
+    repository = relationship(&#39;Repository&#39;)
+    permission = relationship(&#39;Permission&#39;)
+
+    @classmethod
+    def create(cls, user, repository, permission):
+        n = cls()
+        n.user = user
+        n.repository = repository
+        n.permission = permission
+        Session().add(n)
+        return n
+
+    def __unicode__(self):
+        return u&#39;&lt;%s =&gt; %s &gt;&#39; % (self.user, self.repository)
+
+
+class UserUserGroupToPerm(Base, BaseModel):
+    __tablename__ = &#39;user_user_group_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;user_id&#39;, &#39;user_group_id&#39;, &#39;permission_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    user_user_group_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+    user_group_id = Column(Integer(), ForeignKey(&#39;users_groups.users_group_id&#39;), nullable=False, unique=None, default=None)
+
+    user = relationship(&#39;User&#39;)
+    user_group = relationship(&#39;UserGroup&#39;)
+    permission = relationship(&#39;Permission&#39;)
+
+    @classmethod
+    def create(cls, user, user_group, permission):
+        n = cls()
+        n.user = user
+        n.user_group = user_group
+        n.permission = permission
+        Session().add(n)
+        return n
+
+    def __unicode__(self):
+        return u&#39;&lt;%s =&gt; %s &gt;&#39; % (self.user, self.user_group)
+
+
+class UserToPerm(Base, BaseModel):
+    __tablename__ = &#39;user_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;user_id&#39;, &#39;permission_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    user_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+
+    user = relationship(&#39;User&#39;)
+    permission = relationship(&#39;Permission&#39;)
+
+    def __unicode__(self):
+        return u&#39;&lt;%s =&gt; %s &gt;&#39; % (self.user, self.permission)
+
+
+class UserGroupRepoToPerm(Base, BaseModel):
+    __tablename__ = &#39;users_group_repo_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;repository_id&#39;, &#39;users_group_id&#39;, &#39;permission_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    users_group_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    users_group_id = Column(Integer(), ForeignKey(&#39;users_groups.users_group_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+    repository_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False, unique=None, default=None)
+
+    users_group = relationship(&#39;UserGroup&#39;)
+    permission = relationship(&#39;Permission&#39;)
+    repository = relationship(&#39;Repository&#39;)
+
+    @classmethod
+    def create(cls, users_group, repository, permission):
+        n = cls()
+        n.users_group = users_group
+        n.repository = repository
+        n.permission = permission
+        Session().add(n)
+        return n
+
+    def __unicode__(self):
+        return u&#39;&lt;UserGroupRepoToPerm:%s =&gt; %s &gt;&#39; % (self.users_group, self.repository)
+
+
+class UserGroupUserGroupToPerm(Base, BaseModel):
+    __tablename__ = &#39;user_group_user_group_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;target_user_group_id&#39;, &#39;user_group_id&#39;, &#39;permission_id&#39;),
+        CheckConstraint(&#39;target_user_group_id != user_group_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    user_group_user_group_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    target_user_group_id = Column(Integer(), ForeignKey(&#39;users_groups.users_group_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+    user_group_id = Column(Integer(), ForeignKey(&#39;users_groups.users_group_id&#39;), nullable=False, unique=None, default=None)
+
+    target_user_group = relationship(&#39;UserGroup&#39;, primaryjoin=&#39;UserGroupUserGroupToPerm.target_user_group_id==UserGroup.users_group_id&#39;)
+    user_group = relationship(&#39;UserGroup&#39;, primaryjoin=&#39;UserGroupUserGroupToPerm.user_group_id==UserGroup.users_group_id&#39;)
+    permission = relationship(&#39;Permission&#39;)
+
+    @classmethod
+    def create(cls, target_user_group, user_group, permission):
+        n = cls()
+        n.target_user_group = target_user_group
+        n.user_group = user_group
+        n.permission = permission
+        Session().add(n)
+        return n
+
+    def __unicode__(self):
+        return u&#39;&lt;UserGroupUserGroup:%s =&gt; %s &gt;&#39; % (self.target_user_group, self.user_group)
+
+
+class UserGroupToPerm(Base, BaseModel):
+    __tablename__ = &#39;users_group_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;users_group_id&#39;, &#39;permission_id&#39;,),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    users_group_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    users_group_id = Column(Integer(), ForeignKey(&#39;users_groups.users_group_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+
+    users_group = relationship(&#39;UserGroup&#39;)
+    permission = relationship(&#39;Permission&#39;)
+
+
+class UserRepoGroupToPerm(Base, BaseModel):
+    __tablename__ = &#39;user_repo_group_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;user_id&#39;, &#39;group_id&#39;, &#39;permission_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+
+    group_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None, default=None)
+    group_id = Column(Integer(), ForeignKey(&#39;groups.group_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+
+    user = relationship(&#39;User&#39;)
+    group = relationship(&#39;RepoGroup&#39;)
+    permission = relationship(&#39;Permission&#39;)
+
+    @classmethod
+    def create(cls, user, repository_group, permission):
+        n = cls()
+        n.user = user
+        n.group = repository_group
+        n.permission = permission
+        Session().add(n)
+        return n
+
+
+class UserGroupRepoGroupToPerm(Base, BaseModel):
+    __tablename__ = &#39;users_group_repo_group_to_perm&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;users_group_id&#39;, &#39;group_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+
+    users_group_repo_group_to_perm_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    users_group_id = Column(Integer(), ForeignKey(&#39;users_groups.users_group_id&#39;), nullable=False, unique=None, default=None)
+    group_id = Column(Integer(), ForeignKey(&#39;groups.group_id&#39;), nullable=False, unique=None, default=None)
+    permission_id = Column(Integer(), ForeignKey(&#39;permissions.permission_id&#39;), nullable=False, unique=None, default=None)
+
+    users_group = relationship(&#39;UserGroup&#39;)
+    permission = relationship(&#39;Permission&#39;)
+    group = relationship(&#39;RepoGroup&#39;)
+
+    @classmethod
+    def create(cls, user_group, repository_group, permission):
+        n = cls()
+        n.users_group = user_group
+        n.group = repository_group
+        n.permission = permission
+        Session().add(n)
+        return n
+
+
+class Statistics(Base, BaseModel):
+    __tablename__ = &#39;statistics&#39;
+    __table_args__ = (
+         UniqueConstraint(&#39;repository_id&#39;),
+         {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+          &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    stat_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    repository_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False, unique=True, default=None)
+    stat_on_revision = Column(Integer(), nullable=False)
+    commit_activity = Column(LargeBinary(1000000), nullable=False)#JSON data
+    commit_activity_combined = Column(LargeBinary(), nullable=False)#JSON data
+    languages = Column(LargeBinary(1000000), nullable=False)#JSON data
+
+    repository = relationship(&#39;Repository&#39;, single_parent=True)
+
+
+class UserFollowing(Base, BaseModel):
+    __tablename__ = &#39;user_followings&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;user_id&#39;, &#39;follows_repository_id&#39;),
+        UniqueConstraint(&#39;user_id&#39;, &#39;follows_user_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+
+    user_following_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None, default=None)
+    follows_repo_id = Column(&quot;follows_repository_id&quot;, Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=True, unique=None, default=None)
+    follows_user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True, unique=None, default=None)
+    follows_from = Column(DateTime(timezone=False), nullable=True, unique=None, default=datetime.datetime.now)
+
+    user = relationship(&#39;User&#39;, primaryjoin=&#39;User.user_id==UserFollowing.user_id&#39;)
+
+    follows_user = relationship(&#39;User&#39;, primaryjoin=&#39;User.user_id==UserFollowing.follows_user_id&#39;)
+    follows_repository = relationship(&#39;Repository&#39;, order_by=&#39;Repository.repo_name&#39;)
+
+    @classmethod
+    def get_repo_followers(cls, repo_id):
+        return cls.query().filter(cls.follows_repo_id == repo_id)
+
+
+class CacheInvalidation(Base, BaseModel):
+    __tablename__ = &#39;cache_invalidation&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;cache_key&#39;),
+        Index(&#39;key_idx&#39;, &#39;cache_key&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    # cache_id, not used
+    cache_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    # cache_key as created by _get_cache_key
+    cache_key = Column(String(255, convert_unicode=False))
+    # cache_args is a repo_name
+    cache_args = Column(String(255, convert_unicode=False))
+    # instance sets cache_active True when it is caching, other instances set
+    # cache_active to False to indicate that this cache is invalid
+    cache_active = Column(Boolean(), nullable=True, unique=None, default=False)
+
+    def __init__(self, cache_key, repo_name=&#39;&#39;):
+        self.cache_key = cache_key
+        self.cache_args = repo_name
+        self.cache_active = False
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;%s:%s[%s]&#39;)&gt;&quot; % (
+            self.__class__.__name__,
+            self.cache_id, self.cache_key, self.cache_active)
+
+    def _cache_key_partition(self):
+        prefix, repo_name, suffix = self.cache_key.partition(self.cache_args)
+        return prefix, repo_name, suffix
+
+    def get_prefix(self):
+        &quot;&quot;&quot;
+        get prefix that might have been used in _get_cache_key to
+        generate self.cache_key. Only used for informational purposes
+        in repo_edit.html.
+        &quot;&quot;&quot;
+        # prefix, repo_name, suffix
+        return self._cache_key_partition()[0]
+
+    def get_suffix(self):
+        &quot;&quot;&quot;
+        get suffix that might have been used in _get_cache_key to
+        generate self.cache_key. Only used for informational purposes
+        in repo_edit.html.
+        &quot;&quot;&quot;
+        # prefix, repo_name, suffix
+        return self._cache_key_partition()[2]
+
+    @classmethod
+    def clear_cache(cls):
+        &quot;&quot;&quot;
+        Delete all cache keys from database.
+        Should only be run when all instances are down and all entries thus stale.
+        &quot;&quot;&quot;
+        cls.query().delete()
+        Session().commit()
+
+    @classmethod
+    def _get_cache_key(cls, key):
+        &quot;&quot;&quot;
+        Wrapper for generating a unique cache key for this instance and &quot;key&quot;.
+        key must / will start with a repo_name which will be stored in .cache_args .
+        &quot;&quot;&quot;
+        import kallithea
+        prefix = kallithea.CONFIG.get(&#39;instance_id&#39;, &#39;&#39;)
+        return &quot;%s%s&quot; % (prefix, key)
+
+    @classmethod
+    def set_invalidate(cls, repo_name, delete=False):
+        &quot;&quot;&quot;
+        Mark all caches of a repo as invalid in the database.
+        &quot;&quot;&quot;
+        inv_objs = Session().query(cls).filter(cls.cache_args == repo_name).all()
+        log.debug(&#39;for repo %s got %s invalidation objects&#39;,
+                  safe_str(repo_name), inv_objs)
+
+        for inv_obj in inv_objs:
+            log.debug(&#39;marking %s key for invalidation based on repo_name=%s&#39;,
+                      inv_obj, safe_str(repo_name))
+            if delete:
+                Session().delete(inv_obj)
+            else:
+                inv_obj.cache_active = False
+                Session().add(inv_obj)
+        Session().commit()
+
+    @classmethod
+    def test_and_set_valid(cls, repo_name, kind, valid_cache_keys=None):
+        &quot;&quot;&quot;
+        Mark this cache key as active and currently cached.
+        Return True if the existing cache registration still was valid.
+        Return False to indicate that it had been invalidated and caches should be refreshed.
+        &quot;&quot;&quot;
+
+        key = (repo_name + &#39;_&#39; + kind) if kind else repo_name
+        cache_key = cls._get_cache_key(key)
+
+        if valid_cache_keys and cache_key in valid_cache_keys:
+            return True
+
+        inv_obj = cls.query().filter(cls.cache_key == cache_key).scalar()
+        if inv_obj is None:
+            inv_obj = CacheInvalidation(cache_key, repo_name)
+        elif inv_obj.cache_active:
+            return True
+        inv_obj.cache_active = True
+        Session().add(inv_obj)
+        try:
+            Session().commit()
+        except sqlalchemy.exc.IntegrityError:
+            log.error(&#39;commit of CacheInvalidation failed - retrying&#39;)
+            Session().rollback()
+            inv_obj = cls.query().filter(cls.cache_key == cache_key).scalar()
+            if inv_obj is None:
+                log.error(&#39;failed to create CacheInvalidation entry&#39;)
+                # TODO: fail badly?
+            # else: TOCTOU - another thread added the key at the same time; no further action required
+        return False
+
+    @classmethod
+    def get_valid_cache_keys(cls):
+        &quot;&quot;&quot;
+        Return opaque object with information of which caches still are valid
+        and can be used without checking for invalidation.
+        &quot;&quot;&quot;
+        return set(inv_obj.cache_key for inv_obj in cls.query().filter(cls.cache_active).all())
+
+
+class ChangesetComment(Base, BaseModel):
+    __tablename__ = &#39;changeset_comments&#39;
+    __table_args__ = (
+        Index(&#39;cc_revision_idx&#39;, &#39;revision&#39;),
+        Index(&#39;cc_pull_request_id_idx&#39;, &#39;pull_request_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    comment_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    repo_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False)
+    revision = Column(String(40))
+    pull_request_id = Column(Integer(), ForeignKey(&#39;pull_requests.pull_request_id&#39;))
+    line_no = Column(Unicode(10))
+    f_path = Column(Unicode(1000))
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False)
+    text = Column(UnicodeText(25000), nullable=False)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+    modified_at = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+
+    author = relationship(&#39;User&#39;)
+    repo = relationship(&#39;Repository&#39;)
+    # status_change is frequently used directly in templates - make it a lazy
+    # join to avoid fetching each related ChangesetStatus on demand.
+    # There will only be one ChangesetStatus referencing each comment so the join will not explode.
+    status_change = relationship(&#39;ChangesetStatus&#39;,
+                                 cascade=&quot;all, delete-orphan&quot;, lazy=&#39;joined&#39;)
+    pull_request = relationship(&#39;PullRequest&#39;)
+
+    @classmethod
+    def get_users(cls, revision=None, pull_request_id=None):
+        &quot;&quot;&quot;
+        Returns user associated with this ChangesetComment. ie those
+        who actually commented
+
+        :param cls:
+        :param revision:
+        &quot;&quot;&quot;
+        q = Session().query(User)\
+                .join(ChangesetComment.author)
+        if revision is not None:
+            q = q.filter(cls.revision == revision)
+        elif pull_request_id is not None:
+            q = q.filter(cls.pull_request_id == pull_request_id)
+        return q.all()
+
+    def url(self):
+        anchor = &quot;comment-%s&quot; % self.comment_id
+        import kallithea.lib.helpers as h
+        if self.revision:
+            return h.url(&#39;changeset_home&#39;, repo_name=self.repo.repo_name, revision=self.revision, anchor=anchor)
+        elif self.pull_request_id is not None:
+            return self.pull_request.url(anchor=anchor)
+
+class ChangesetStatus(Base, BaseModel):
+    __tablename__ = &#39;changeset_statuses&#39;
+    __table_args__ = (
+        Index(&#39;cs_revision_idx&#39;, &#39;revision&#39;),
+        Index(&#39;cs_version_idx&#39;, &#39;version&#39;),
+        Index(&#39;cs_pull_request_id_idx&#39;, &#39;pull_request_id&#39;),
+        Index(&#39;cs_changeset_comment_id_idx&#39;, &#39;changeset_comment_id&#39;),
+        Index(&#39;cs_pull_request_id_user_id_version_idx&#39;, &#39;pull_request_id&#39;, &#39;user_id&#39;, &#39;version&#39;),
+        UniqueConstraint(&#39;repo_id&#39;, &#39;revision&#39;, &#39;version&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    STATUS_NOT_REVIEWED = DEFAULT = &#39;not_reviewed&#39;
+    STATUS_APPROVED = &#39;approved&#39;
+    STATUS_REJECTED = &#39;rejected&#39;
+    STATUS_UNDER_REVIEW = &#39;under_review&#39;
+
+    STATUSES = [
+        (STATUS_NOT_REVIEWED, _(&quot;Not reviewed&quot;)),  # (no icon) and default
+        (STATUS_APPROVED, _(&quot;Approved&quot;)),
+        (STATUS_REJECTED, _(&quot;Rejected&quot;)),
+        (STATUS_UNDER_REVIEW, _(&quot;Under review&quot;)),
+    ]
+
+    changeset_status_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    repo_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None)
+    revision = Column(String(40), nullable=False)
+    status = Column(String(128), nullable=False, default=DEFAULT)
+    changeset_comment_id = Column(Integer(), ForeignKey(&#39;changeset_comments.comment_id&#39;), nullable=False)
+    modified_at = Column(DateTime(), nullable=False, default=datetime.datetime.now)
+    version = Column(Integer(), nullable=False, default=0)
+    pull_request_id = Column(Integer(), ForeignKey(&#39;pull_requests.pull_request_id&#39;), nullable=True)
+
+    author = relationship(&#39;User&#39;)
+    repo = relationship(&#39;Repository&#39;)
+    comment = relationship(&#39;ChangesetComment&#39;)
+    pull_request = relationship(&#39;PullRequest&#39;)
+
+    def __unicode__(self):
+        return u&quot;&lt;%s(&#39;%s:%s&#39;)&gt;&quot; % (
+            self.__class__.__name__,
+            self.status, self.author
+        )
+
+    @classmethod
+    def get_status_lbl(cls, value):
+        return dict(cls.STATUSES).get(value)
+
+    @property
+    def status_lbl(self):
+        return ChangesetStatus.get_status_lbl(self.status)
+
+
+class PullRequest(Base, BaseModel):
+    __tablename__ = &#39;pull_requests&#39;
+    __table_args__ = (
+        Index(&#39;pr_org_repo_id_idx&#39;, &#39;org_repo_id&#39;),
+        Index(&#39;pr_other_repo_id_idx&#39;, &#39;other_repo_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+
+    # values for .status
+    STATUS_NEW = u&#39;new&#39;
+    STATUS_CLOSED = u&#39;closed&#39;
+
+    pull_request_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    title = Column(Unicode(255), nullable=True)
+    description = Column(UnicodeText(10240))
+    status = Column(Unicode(255), nullable=False, default=STATUS_NEW) # only for closedness, not approve/reject/etc
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+    updated_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=False, unique=None)
+    _revisions = Column(&#39;revisions&#39;, UnicodeText(20500))  # 500 revisions max
+    org_repo_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False)
+    org_ref = Column(Unicode(255), nullable=False)
+    other_repo_id = Column(Integer(), ForeignKey(&#39;repositories.repo_id&#39;), nullable=False)
+    other_ref = Column(Unicode(255), nullable=False)
+
+    @hybrid_property
+    def revisions(self):
+        return self._revisions.split(&#39;:&#39;)
+
+    @revisions.setter
+    def revisions(self, val):
+        self._revisions = safe_unicode(&#39;:&#39;.join(val))
+
+    @property
+    def org_ref_parts(self):
+        return self.org_ref.split(&#39;:&#39;)
+
+    @property
+    def other_ref_parts(self):
+        return self.other_ref.split(&#39;:&#39;)
+
+    owner = relationship(&#39;User&#39;)
+    reviewers = relationship(&#39;PullRequestReviewers&#39;,
+                             cascade=&quot;all, delete-orphan&quot;)
+    org_repo = relationship(&#39;Repository&#39;, primaryjoin=&#39;PullRequest.org_repo_id==Repository.repo_id&#39;)
+    other_repo = relationship(&#39;Repository&#39;, primaryjoin=&#39;PullRequest.other_repo_id==Repository.repo_id&#39;)
+    statuses = relationship(&#39;ChangesetStatus&#39;)
+    comments = relationship(&#39;ChangesetComment&#39;,
+                             cascade=&quot;all, delete-orphan&quot;)
+
+    def is_closed(self):
+        return self.status == self.STATUS_CLOSED
+
+    def user_review_status(self, user_id):
+        &quot;&quot;&quot;Return the user&#39;s latest status votes on PR&quot;&quot;&quot;
+        # note: no filtering on repo - that would be redundant
+        status = ChangesetStatus.query()\
+            .filter(ChangesetStatus.pull_request == self)\
+            .filter(ChangesetStatus.user_id == user_id)\
+            .order_by(ChangesetStatus.version)\
+            .first()
+        return str(status.status) if status else &#39;&#39;
+
+    @classmethod
+    def make_nice_id(cls, pull_request_id):
+        &#39;&#39;&#39;Return pull request id nicely formatted for displaying&#39;&#39;&#39;
+        return &#39;#%s&#39; % pull_request_id
+
+    def nice_id(self):
+        &#39;&#39;&#39;Return the id of this pull request, nicely formatted for displaying&#39;&#39;&#39;
+        return self.make_nice_id(self.pull_request_id)
+
+    def __json__(self):
+        return dict(
+            revisions=self.revisions
+        )
+
+    def url(self, **kwargs):
+        canonical = kwargs.pop(&#39;canonical&#39;, None)
+        import kallithea.lib.helpers as h
+        b = self.org_ref_parts[1]
+        if b != self.other_ref_parts[1]:
+            s = &#39;/_/&#39; + b
+        else:
+            s = &#39;/_/&#39; + self.title
+        kwargs[&#39;extra&#39;] = urlreadable(s)
+        if canonical:
+            return h.canonical_url(&#39;pullrequest_show&#39;, repo_name=self.other_repo.repo_name,
+                                   pull_request_id=self.pull_request_id, **kwargs)
+        return h.url(&#39;pullrequest_show&#39;, repo_name=self.other_repo.repo_name,
+                     pull_request_id=self.pull_request_id, **kwargs)
+
+class PullRequestReviewers(Base, BaseModel):
+    __tablename__ = &#39;pull_request_reviewers&#39;
+    __table_args__ = (
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+
+    def __init__(self, user=None, pull_request=None):
+        self.user = user
+        self.pull_request = pull_request
+
+    pull_requests_reviewers_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    pull_request_id = Column(Integer(), ForeignKey(&#39;pull_requests.pull_request_id&#39;), nullable=False)
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True)
+
+    user = relationship(&#39;User&#39;)
+    pull_request = relationship(&#39;PullRequest&#39;)
+
+
+class Notification(Base, BaseModel):
+    __tablename__ = &#39;notifications&#39;
+    __table_args__ = (
+        Index(&#39;notification_type_idx&#39;, &#39;type&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+
+    TYPE_CHANGESET_COMMENT = u&#39;cs_comment&#39;
+    TYPE_MESSAGE = u&#39;message&#39;
+    TYPE_MENTION = u&#39;mention&#39;
+    TYPE_REGISTRATION = u&#39;registration&#39;
+    TYPE_PULL_REQUEST = u&#39;pull_request&#39;
+    TYPE_PULL_REQUEST_COMMENT = u&#39;pull_request_comment&#39;
+
+    notification_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    subject = Column(Unicode(512), nullable=True)
+    body = Column(UnicodeText(50000), nullable=True)
+    created_by = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+    type_ = Column(&#39;type&#39;, Unicode(255))
+
+    created_by_user = relationship(&#39;User&#39;)
+    notifications_to_users = relationship(&#39;UserNotification&#39;, cascade=&quot;all, delete-orphan&quot;)
+
+    @property
+    def recipients(self):
+        return [x.user for x in UserNotification.query()
+                .filter(UserNotification.notification == self)
+                .order_by(UserNotification.user_id.asc()).all()]
+
+    @classmethod
+    def create(cls, created_by, subject, body, recipients, type_=None):
+        if type_ is None:
+            type_ = Notification.TYPE_MESSAGE
+
+        notification = cls()
+        notification.created_by_user = created_by
+        notification.subject = subject
+        notification.body = body
+        notification.type_ = type_
+        notification.created_on = datetime.datetime.now()
+
+        for u in recipients:
+            assoc = UserNotification()
+            assoc.notification = notification
+            assoc.user_id = u.user_id
+            Session().add(assoc)
+        Session().add(notification)
+        Session().flush() # assign notificaiton.notification_id
+        return notification
+
+    @property
+    def description(self):
+        from kallithea.model.notification import NotificationModel
+        return NotificationModel().make_description(self)
+
+
+class UserNotification(Base, BaseModel):
+    __tablename__ = &#39;user_to_notification&#39;
+    __table_args__ = (
+        UniqueConstraint(&#39;user_id&#39;, &#39;notification_id&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    user_id = Column(Integer(), ForeignKey(&#39;users.user_id&#39;), primary_key=True)
+    notification_id = Column(Integer(), ForeignKey(&#39;notifications.notification_id&#39;), primary_key=True)
+    read = Column(Boolean, default=False)
+    sent_on = Column(DateTime(timezone=False), nullable=True, unique=None)
+
+    user = relationship(&#39;User&#39;)
+    notification = relationship(&#39;Notification&#39;)
+
+    def mark_as_read(self):
+        self.read = True
+        Session().add(self)
+
+
+class Gist(Base, BaseModel):
+    __tablename__ = &#39;gists&#39;
+    __table_args__ = (
+        Index(&#39;g_gist_access_id_idx&#39;, &#39;gist_access_id&#39;),
+        Index(&#39;g_created_on_idx&#39;, &#39;created_on&#39;),
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True}
+    )
+    GIST_PUBLIC = u&#39;public&#39;
+    GIST_PRIVATE = u&#39;private&#39;
+    DEFAULT_FILENAME = u&#39;gistfile1.txt&#39;
+
+    gist_id = Column(Integer(), nullable=False, unique=True, primary_key=True)
+    gist_access_id = Column(Unicode(250))
+    gist_description = Column(UnicodeText(1024))
+    gist_owner = Column(&#39;user_id&#39;, Integer(), ForeignKey(&#39;users.user_id&#39;), nullable=True)
+    gist_expires = Column(Float(53), nullable=False)
+    gist_type = Column(Unicode(128), nullable=False)
+    created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+    modified_at = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+
+    owner = relationship(&#39;User&#39;)
+
+    def __repr__(self):
+        return &#39;&lt;Gist:[%s]%s&gt;&#39; % (self.gist_type, self.gist_access_id)
+
+    @classmethod
+    def get_or_404(cls, id_):
+        res = cls.query().filter(cls.gist_access_id == id_).scalar()
+        if res is None:
+            raise HTTPNotFound
+        return res
+
+    @classmethod
+    def get_by_access_id(cls, gist_access_id):
+        return cls.query().filter(cls.gist_access_id == gist_access_id).scalar()
+
+    def gist_url(self):
+        import kallithea
+        alias_url = kallithea.CONFIG.get(&#39;gist_alias_url&#39;)
+        if alias_url:
+            return alias_url.replace(&#39;{gistid}&#39;, self.gist_access_id)
+
+        import kallithea.lib.helpers as h
+        return h.canonical_url(&#39;gist&#39;, gist_id=self.gist_access_id)
+
+    @classmethod
+    def base_path(cls):
+        &quot;&quot;&quot;
+        Returns base path where all gists are stored
+
+        :param cls:
+        &quot;&quot;&quot;
+        from kallithea.model.gist import GIST_STORE_LOC
+        q = Session().query(Ui)\
+            .filter(Ui.ui_key == URL_SEP)
+        q = q.options(FromCache(&quot;sql_cache_short&quot;, &quot;repository_repo_path&quot;))
+        return os.path.join(q.one().ui_value, GIST_STORE_LOC)
+
+    def get_api_data(self):
+        &quot;&quot;&quot;
+        Common function for generating gist related data for API
+        &quot;&quot;&quot;
+        gist = self
+        data = dict(
+            gist_id=gist.gist_id,
+            type=gist.gist_type,
+            access_id=gist.gist_access_id,
+            description=gist.gist_description,
+            url=gist.gist_url(),
+            expires=gist.gist_expires,
+            created_on=gist.created_on,
+        )
+        return data
+
+    def __json__(self):
+        data = dict(
+        )
+        data.update(self.get_api_data())
+        return data
+    ## SCM functions
+
+    @property
+    def scm_instance(self):
+        from kallithea.lib.vcs import get_repo
+        base_path = self.base_path()
+        return get_repo(os.path.join(*map(safe_str,
+                                          [base_path, self.gist_access_id])))
+
+
+class DbMigrateVersion(Base, BaseModel):
+    __tablename__ = &#39;db_migrate_version&#39;
+    __table_args__ = (
+        {&#39;extend_existing&#39;: True, &#39;mysql_engine&#39;: &#39;InnoDB&#39;,
+         &#39;mysql_charset&#39;: &#39;utf8&#39;, &#39;sqlite_autoincrement&#39;: True},
+    )
+    repository_id = Column(String(250), nullable=False, unique=True, primary_key=True)
+    repository_path = Column(Text)
+    version = Column(Integer)
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div style="text-align:center;margin:30px 0;">
+  <img src="../../../_static/kallithea-logo.svg" width="200px"/>
+</div>
+<h3>Support Kallithea development</h3>
+<div style="text-align:center">
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EYXFS3SQPHYUL">
+<input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" alt="PayPal &ndash; The safer, easier way to pay online!">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1">
+</form>
+    <div style="padding:5px">
+     <a href="https://flattr.com/thing/922714/Donate-to-Software-Freedom-Conservancy" target="_blank">
+     <img src="http://api.flattr.com/button/flattr-badge-large.png" alt="Flattr this" title="Flattr this" border="0" /></a>
+    </div>
+</div>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">Kallithea 0.3.4 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li>
+          <li class="nav-item nav-item-2"><a href="../model.html" >kallithea.model</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010-2016 by various authors, licensed as GPLv3..
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.7.2.
+    </div>
+  </body>
+</html>
