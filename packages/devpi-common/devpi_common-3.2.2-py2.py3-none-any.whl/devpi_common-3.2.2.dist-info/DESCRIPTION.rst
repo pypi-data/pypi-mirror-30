@@ -1,0 +1,69 @@
+
+This package contains utility functions used by devpi-server and devpi-client.
+
+See http://doc.devpi.net for more information.
+
+
+=========
+Changelog
+=========
+
+
+
+.. towncrier release notes start
+
+3.2.2 (2018-04-11)
+==================
+
+Other Changes
+-------------
+
+- fix deprecation warning from pkg_resources.
+
+
+3.2.1 (2018-01-18)
+==================
+
+Bug Fixes
+---------
+
+- fix issue496: PyPy 5.10 wheel upload failed because the version in the
+  filename is longer again, the check for it is now removed, because it's
+  pointless.
+
+
+3.2.0 (2017-11-23)
+==================
+
+No significant changes.
+
+
+3.2.0rc1 (2017-09-08)
+=====================
+
+Bug Fixes
+---------
+
+- fix issue343: enhanced ``splitbasename`` to split the name and version
+  correctly in more cases.
+
+- fix for url decoding issue with mirrors. When package filenames contain
+  characters such as `!` or `+`, these get URL encoded to `%21` and `%2B` in
+  the remote simple index. This fix ensures that in the filename saved to the
+  disk cache these are decoded back to `!` or `+`.
+
+
+3.1.0 (2017-04-18)
+==================
+
+- add ``username``, ``password``, ``hostname`` and ``port`` properties to
+  URL objects
+
+- expose SSLError on Session object to allow checking for verification errors
+
+- add ``max_retries`` keyword option to ``new_requests_session``.
+
+- fix ``get_latest_version`` when there are no versions.
+
+
+
