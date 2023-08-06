@@ -1,0 +1,752 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.assemblers.cyjs_assembler &mdash; INDRA 1.7.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../search.html"/>
+    <link rel="top" title="INDRA 1.7.0 documentation" href="../../../index.html"/>
+        <link rel="up" title="Module code" href="../../index.html"/> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.7
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.assemblers.cyjs_assembler</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.assemblers.cyjs_assembler</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">from</span> <span class="nn">copy</span> <span class="k">import</span> <span class="n">deepcopy</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">import</span> <span class="nn">collections</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">hgnc_client</span>
+<span class="kn">from</span> <span class="nn">indra.databases</span> <span class="k">import</span> <span class="n">context_client</span><span class="p">,</span> <span class="n">get_identifiers_url</span>
+<span class="kn">from</span> <span class="nn">indra.preassembler</span> <span class="k">import</span> <span class="n">Preassembler</span>
+<span class="kn">from</span> <span class="nn">indra.tools.expand_families</span> <span class="k">import</span> <span class="n">Expander</span>
+<span class="kn">from</span> <span class="nn">indra.preassembler.hierarchy_manager</span> <span class="k">import</span> <span class="n">hierarchies</span>
+
+<span class="n">expander</span> <span class="o">=</span> <span class="n">Expander</span><span class="p">(</span><span class="n">hierarchies</span><span class="p">)</span>
+
+<span class="c1"># Python 2</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">basestring</span>
+<span class="c1"># Python 3</span>
+<span class="k">except</span><span class="p">:</span>
+    <span class="n">basestring</span> <span class="o">=</span> <span class="nb">str</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;cyjs_assembler&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="CyJSAssembler"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler">[docs]</a><span class="k">class</span> <span class="nc">CyJSAssembler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;This class assembles a CytoscapeJS graph from a set of INDRA Statements.</span>
+
+<span class="sd">    CytoscapeJS is a web-based network library for analysis and</span>
+<span class="sd">    visualisation: http://js.cytoscape.org/</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    statements : Optional[list[indra.statements.Statement]]</span>
+<span class="sd">        A list of INDRA Statements to be assembled.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    statements : list[indra.statements.Statement]</span>
+<span class="sd">        A list of INDRA Statements to be assembled.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmts</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">stmts</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="n">stmts</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_existing_nodes</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_id_counter</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_exp_colorscale</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mut_colorscale</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_gene_names</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_context</span> <span class="o">=</span> <span class="p">{}</span>
+
+<div class="viewcode-block" id="CyJSAssembler.add_statements"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.add_statements">[docs]</a>    <span class="k">def</span> <span class="nf">add_statements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmts</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add INDRA Statements to the assembler&#39;s list of statements.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        stmts : list[indra.statements.Statement]</span>
+<span class="sd">            A list of :py:class:`indra.statements.Statement`</span>
+<span class="sd">            to be added to the statement list of the assembler.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">stmts</span> <span class="o">=</span> <span class="n">Preassembler</span><span class="o">.</span><span class="n">combine_duplicate_stmts</span><span class="p">(</span><span class="n">stmts</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="n">stmts</span><span class="p">:</span></div>
+            <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+
+<div class="viewcode-block" id="CyJSAssembler.make_model"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.make_model">[docs]</a>    <span class="k">def</span> <span class="nf">make_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Assemble a Cytoscape JS network from INDRA Statements.</span>
+
+<span class="sd">        This method assembles a Cytoscape JS network from the set of INDRA</span>
+<span class="sd">        Statements added to the assembler.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        grouping : bool</span>
+<span class="sd">            If True, the nodes with identical incoming and outgoing edges</span>
+<span class="sd">            are grouped and the corresponding edges are merged.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        cyjs_str : str</span>
+<span class="sd">            The json serialized Cytoscape JS model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">stmt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">RegulateActivity</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_regulate_activity</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">RegulateAmount</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_regulate_amount</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Modification</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_modification</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">SelfModification</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_selfmodification</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gef</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_gef</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gap</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_gap</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Complex</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_complex</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Unhandled statement type: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span>
+                               <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;grouping&#39;</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_group_nodes</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_group_edges</span><span class="p">()</span></div>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">print_cyjs_graph</span><span class="p">()</span>
+
+<div class="viewcode-block" id="CyJSAssembler.get_gene_names"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.get_gene_names">[docs]</a>    <span class="k">def</span> <span class="nf">get_gene_names</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Gather gene names of all nodes and node members&quot;&quot;&quot;</span>
+        <span class="c1"># Collect all gene names in network</span>
+        <span class="n">gene_names</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="p">:</span>
+            <span class="n">members</span> <span class="o">=</span> <span class="n">node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;members&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">members</span><span class="p">:</span>
+                <span class="n">gene_names</span> <span class="o">+=</span> <span class="nb">list</span><span class="p">(</span><span class="n">members</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;Group&#39;</span><span class="p">):</span>
+                    <span class="k">continue</span>
+                <span class="n">gene_names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;name&#39;</span><span class="p">])</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_gene_names</span> <span class="o">=</span> <span class="n">gene_names</span>
+
+<div class="viewcode-block" id="CyJSAssembler.set_CCLE_context"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.set_CCLE_context">[docs]</a>    <span class="k">def</span> <span class="nf">set_CCLE_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cell_types</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set context of all nodes and node members from CCLE.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_gene_names</span><span class="p">()</span>
+
+        <span class="c1"># Get expression and mutations from context client</span>
+        <span class="n">exp_values</span> <span class="o">=</span> \
+            <span class="n">context_client</span><span class="o">.</span><span class="n">get_protein_expression</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_gene_names</span><span class="p">,</span> <span class="n">cell_types</span><span class="p">)</span>
+        <span class="n">mut_values</span> <span class="o">=</span> \
+            <span class="n">context_client</span><span class="o">.</span><span class="n">get_mutations</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_gene_names</span><span class="p">,</span> <span class="n">cell_types</span><span class="p">)</span>
+
+        <span class="c1"># Make a dict of presence/absence of mutations</span>
+        <span class="n">muts</span> <span class="o">=</span> <span class="p">{</span><span class="n">cell_line</span><span class="p">:</span> <span class="p">{}</span> <span class="k">for</span> <span class="n">cell_line</span> <span class="ow">in</span> <span class="n">cell_types</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">cell_line</span><span class="p">,</span> <span class="n">entries</span> <span class="ow">in</span> <span class="n">mut_values</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">entries</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">gene</span><span class="p">,</span> <span class="n">mutations</span> <span class="ow">in</span> <span class="n">entries</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="k">if</span> <span class="n">mutations</span><span class="p">:</span>
+                        <span class="n">muts</span><span class="p">[</span><span class="n">cell_line</span><span class="p">][</span><span class="n">gene</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">muts</span><span class="p">[</span><span class="n">cell_line</span><span class="p">][</span><span class="n">gene</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># Create bins for the exp values</span>
+        <span class="c1"># because colorbrewer only does 3-9 bins and I don&#39;t feel like</span>
+        <span class="c1"># reinventing color scheme theory, this will only bin 3-9 bins</span>
+        <span class="k">def</span> <span class="nf">bin_exp</span><span class="p">(</span><span class="n">expression_dict</span><span class="p">):</span>
+            <span class="n">d</span> <span class="o">=</span> <span class="n">expression_dict</span>
+            <span class="n">exp_values</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">d</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">gene</span> <span class="ow">in</span> <span class="n">d</span><span class="p">[</span><span class="n">line</span><span class="p">]:</span>
+                    <span class="n">val</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="n">line</span><span class="p">][</span><span class="n">gene</span><span class="p">]</span>
+                    <span class="k">if</span> <span class="n">val</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">exp_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+            <span class="n">thr_dict</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">n_bins</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">10</span><span class="p">):</span>
+                <span class="n">bin_thr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">exp_values</span><span class="p">),</span> <span class="n">n_bins</span><span class="p">)[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">:]</span>
+                <span class="n">thr_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">]</span> <span class="o">=</span> <span class="n">bin_thr</span>
+            <span class="c1"># this dict isn&#39;t yet binned, that happens in the loop</span>
+            <span class="n">binned_dict</span> <span class="o">=</span> <span class="p">{</span><span class="n">x</span><span class="p">:</span> <span class="n">deepcopy</span><span class="p">(</span><span class="n">expression_dict</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">10</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="n">n_bins</span> <span class="ow">in</span> <span class="n">binned_dict</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">binned_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">]:</span>
+                    <span class="k">for</span> <span class="n">gene</span> <span class="ow">in</span> <span class="n">binned_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">][</span><span class="n">line</span><span class="p">]:</span>
+                        <span class="c1"># last bin is reserved for None</span>
+                        <span class="k">if</span> <span class="n">binned_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">][</span><span class="n">line</span><span class="p">][</span><span class="n">gene</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                            <span class="n">binned_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">][</span><span class="n">line</span><span class="p">][</span><span class="n">gene</span><span class="p">]</span> <span class="o">=</span> <span class="n">n_bins</span>
+                        <span class="k">else</span><span class="p">:</span>
+                            <span class="n">val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">binned_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">][</span><span class="n">line</span><span class="p">][</span><span class="n">gene</span><span class="p">])</span>
+                            <span class="k">for</span> <span class="n">thr_idx</span><span class="p">,</span> <span class="n">thr</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">thr_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">]):</span>
+                                <span class="k">if</span> <span class="n">val</span> <span class="o">&lt;=</span> <span class="n">thr</span><span class="p">:</span>
+                                    <span class="n">binned_dict</span><span class="p">[</span><span class="n">n_bins</span><span class="p">][</span><span class="n">line</span><span class="p">][</span><span class="n">gene</span><span class="p">]</span> <span class="o">=</span> <span class="n">thr_idx</span>
+                                    <span class="k">break</span>
+            <span class="k">return</span> <span class="n">binned_dict</span>
+        <span class="n">binned_exp</span> <span class="o">=</span> <span class="n">bin_exp</span><span class="p">(</span><span class="n">exp_values</span><span class="p">)</span>
+
+        <span class="n">context</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;bin_expression&#39;</span><span class="p">:</span> <span class="n">binned_exp</span><span class="p">,</span>
+                   <span class="s1">&#39;mutation&#39;</span><span class="p">:</span> <span class="n">muts</span><span class="p">}</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_context</span><span class="p">[</span><span class="s1">&#39;CCLE&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">context</span>
+
+<div class="viewcode-block" id="CyJSAssembler.print_cyjs_graph"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.print_cyjs_graph">[docs]</a>    <span class="k">def</span> <span class="nf">print_cyjs_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the assembled Cytoscape JS network as a json string.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        cyjs_str : str</span>
+<span class="sd">            A json string representation of the Cytoscape JS network.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">cyjs_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;edges&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="p">,</span> <span class="s1">&#39;nodes&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="p">}</span>
+        <span class="n">cyjs_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">cyjs_dict</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">sort_keys</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">cyjs_str</span>
+
+<div class="viewcode-block" id="CyJSAssembler.print_cyjs_context"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.print_cyjs_context">[docs]</a>    <span class="k">def</span> <span class="nf">print_cyjs_context</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a list of node names and their respective context.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        cyjs_str_context : str</span>
+<span class="sd">            A json string of the context dictionary. e.g. -</span>
+<span class="sd">            {&#39;CCLE&#39; : {&#39;bin_expression&#39; : {&#39;cell_line1&#39; : {&#39;gene1&#39;:&#39;val1&#39;} },</span>
+<span class="sd">            &#39;bin_expression&#39; : {&#39;cell_line&#39; : {&#39;gene1&#39;:&#39;val1&#39;} }</span>
+<span class="sd">            }}</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">context</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context</span>
+        <span class="n">context_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">sort_keys</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">context_str</span>
+
+<div class="viewcode-block" id="CyJSAssembler.save_json"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.save_json">[docs]</a>    <span class="k">def</span> <span class="nf">save_json</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fname_prefix</span><span class="o">=</span><span class="s1">&#39;model&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Save the assembled Cytoscape JS network in a json file.</span>
+
+<span class="sd">        This method saves two files based on the file name prefix given.</span>
+<span class="sd">        It saves one json file with the graph itself, and another json</span>
+<span class="sd">        file with the context.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        fname_prefix : Optional[str]</span>
+<span class="sd">            The prefix of the files to save the Cytoscape JS network and</span>
+<span class="sd">            context to.</span>
+<span class="sd">            Default: model</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">cyjs_str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">print_cyjs_graph</span><span class="p">()</span>
+        <span class="c1"># outputs the graph</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">fname_prefix</span> <span class="o">+</span> <span class="s1">&#39;.json&#39;</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">cyjs_str</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span>
+        <span class="c1"># outputs the context of graph nodes</span>
+        <span class="n">context_str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">print_cyjs_context</span><span class="p">()</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">fname_prefix</span> <span class="o">+</span> <span class="s1">&#39;_context.json&#39;</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span></div>
+            <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">context_str</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span>
+
+<div class="viewcode-block" id="CyJSAssembler.save_model"><a class="viewcode-back" href="../../../modules/assemblers/cyjs_assembler.html#indra.assemblers.cyjs_assembler.CyJSAssembler.save_model">[docs]</a>    <span class="k">def</span> <span class="nf">save_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fname</span><span class="o">=</span><span class="s1">&#39;model.js&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Save the assembled Cytoscape JS network in a js file.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        file_name : Optional[str]</span>
+<span class="sd">            The name of the file to save the Cytoscape JS network to.</span>
+<span class="sd">            Default: model.js</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">exp_colorscale_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_exp_colorscale</span><span class="p">)</span>
+        <span class="n">mut_colorscale_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mut_colorscale</span><span class="p">)</span>
+        <span class="n">cyjs_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;edges&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="p">,</span> <span class="s1">&#39;nodes&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="p">}</span>
+        <span class="n">model_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">cyjs_dict</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">sort_keys</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">model_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;exp_colorscale_str&#39;</span><span class="p">:</span> <span class="n">exp_colorscale_str</span><span class="p">,</span>
+                      <span class="s1">&#39;mut_colorscale_str&#39;</span><span class="p">:</span> <span class="n">mut_colorscale_str</span><span class="p">,</span>
+                      <span class="s1">&#39;model_elements_str&#39;</span><span class="p">:</span> <span class="n">model_str</span><span class="p">}</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+        <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;var exp_colorscale = </span><span class="si">%s</span><span class="s1">;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">model_dict</span><span class="p">[</span><span class="s1">&#39;exp_colorscale_str&#39;</span><span class="p">]</span>
+        <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;var mut_colorscale = </span><span class="si">%s</span><span class="s1">;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">model_dict</span><span class="p">[</span><span class="s1">&#39;mut_colorscale_str&#39;</span><span class="p">]</span>
+        <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;var model_elements = </span><span class="si">%s</span><span class="s1">;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">model_dict</span><span class="p">[</span><span class="s1">&#39;model_elements_str&#39;</span><span class="p">]</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span></div>
+            <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">_add_binary_regulation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="n">subj</span><span class="p">,</span> <span class="n">obj</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="n">agent_list</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">subj</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">edge_type</span><span class="p">,</span> <span class="n">edge_polarity</span> <span class="o">=</span> <span class="n">_get_stmt_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="n">source_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">subj</span><span class="p">,</span> <span class="n">uuid</span><span class="o">=</span><span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+        <span class="n">target_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">uuid</span><span class="o">=</span><span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">edge_type</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">target_id</span><span class="p">,</span> <span class="n">edge_polarity</span><span class="p">,</span>
+                       <span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+
+    <span class="n">_add_regulate_activity</span> <span class="o">=</span> <span class="n">_add_binary_regulation</span>
+    <span class="n">_add_regulate_amount</span> <span class="o">=</span> <span class="n">_add_binary_regulation</span>
+    <span class="n">_add_modification</span> <span class="o">=</span> <span class="n">_add_binary_regulation</span>
+    <span class="n">_add_gef</span> <span class="o">=</span> <span class="n">_add_binary_regulation</span>
+    <span class="n">_add_gap</span> <span class="o">=</span> <span class="n">_add_binary_regulation</span>
+
+    <span class="k">def</span> <span class="nf">_add_selfmodification</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="n">edge_type</span><span class="p">,</span> <span class="n">edge_polarity</span> <span class="o">=</span> <span class="n">_get_stmt_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="n">source_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">enz</span><span class="p">,</span> <span class="n">uuid</span><span class="o">=</span><span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">edge_type</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">edge_polarity</span><span class="p">,</span>
+                       <span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_complex</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stmt</span><span class="p">):</span>
+        <span class="n">edge_type</span><span class="p">,</span> <span class="n">edge_polarity</span> <span class="o">=</span> <span class="n">_get_stmt_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">m1</span><span class="p">,</span> <span class="n">m2</span> <span class="ow">in</span> <span class="n">itertools</span><span class="o">.</span><span class="n">combinations</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">members</span><span class="p">,</span> <span class="mi">2</span><span class="p">):</span>
+            <span class="n">m1_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">m1</span><span class="p">,</span> <span class="n">uuid</span><span class="o">=</span><span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+            <span class="n">m2_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_node</span><span class="p">(</span><span class="n">m2</span><span class="p">,</span> <span class="n">uuid</span><span class="o">=</span><span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_add_edge</span><span class="p">(</span><span class="n">edge_type</span><span class="p">,</span> <span class="n">m1_id</span><span class="p">,</span> <span class="n">m2_id</span><span class="p">,</span> <span class="n">edge_polarity</span><span class="p">,</span>
+                           <span class="n">stmt</span><span class="o">.</span><span class="n">uuid</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_edge_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a dict of edges.</span>
+
+<span class="sd">        Keyed tuples of (i, source, target, polarity)</span>
+<span class="sd">        with lists of edge ids [id1, id2, ...]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">edge_dict</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="p">:</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">]</span>
+                <span class="n">key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">([</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;source&#39;</span><span class="p">],</span>
+                            <span class="n">data</span><span class="p">[</span><span class="s1">&#39;target&#39;</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;polarity&#39;</span><span class="p">]])</span>
+                <span class="n">edge_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">edge_dict</span>
+
+    <span class="k">def</span> <span class="nf">_add_edge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">edge_type</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">edge_polarity</span><span class="p">,</span> <span class="n">uuid</span><span class="p">):</span>
+        <span class="n">edge_dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_edge_dict</span><span class="p">()</span>
+        <span class="n">uuids</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+        <span class="n">edge</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;i&#39;</span><span class="p">:</span> <span class="n">edge_type</span><span class="p">,</span>
+                         <span class="s1">&#39;source&#39;</span><span class="p">:</span> <span class="n">source</span><span class="p">,</span> <span class="s1">&#39;target&#39;</span><span class="p">:</span> <span class="n">target</span><span class="p">,</span>
+                         <span class="s1">&#39;polarity&#39;</span><span class="p">:</span> <span class="n">edge_polarity</span><span class="p">}}</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">]</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">([</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;source&#39;</span><span class="p">],</span>
+                    <span class="n">data</span><span class="p">[</span><span class="s1">&#39;target&#39;</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;polarity&#39;</span><span class="p">]])</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">edge_dict</span><span class="p">:</span>
+            <span class="n">val</span> <span class="o">=</span> <span class="n">edge_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+            <span class="n">edge</span> <span class="o">=</span> <span class="p">[</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">val</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">uuid</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="nb">list</span><span class="p">:</span>
+            <span class="n">uuid</span> <span class="o">=</span> <span class="p">[</span><span class="n">uuid</span><span class="p">]</span>
+        <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">,</span> <span class="p">[])</span>
+        <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">uuid</span>
+        <span class="k">return</span>
+
+    <span class="k">def</span> <span class="nf">_add_node</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent</span><span class="p">,</span> <span class="n">uuid</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">node_key</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">name</span>
+        <span class="n">node_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_existing_nodes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">node_key</span><span class="p">)</span>
+        <span class="c1"># if the node already exists we do not want to add it again</span>
+        <span class="c1"># we must however add its uuid</span>
+        <span class="k">if</span> <span class="n">node_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># fetch the appropriate node</span>
+            <span class="n">n</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span> <span class="k">if</span> <span class="n">x</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">node_id</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">uuid_list</span> <span class="o">=</span> <span class="n">n</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">uuid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">uuid_list</span><span class="p">:</span>
+                <span class="n">uuid_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">uuid</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">node_id</span>
+        <span class="n">db_refs</span> <span class="o">=</span> <span class="n">_get_db_refs</span><span class="p">(</span><span class="n">agent</span><span class="p">)</span>
+        <span class="n">node_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_existing_nodes</span><span class="p">[</span><span class="n">node_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">node_id</span>
+        <span class="n">node_name</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">name</span>
+        <span class="n">node_name</span> <span class="o">=</span> <span class="n">node_name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span> <span class="s1">&#39; &#39;</span><span class="p">)</span>
+        <span class="n">expanded_families</span> <span class="o">=</span> <span class="n">expander</span><span class="o">.</span><span class="n">get_children</span><span class="p">(</span><span class="n">agent</span><span class="p">,</span> <span class="n">ns_filter</span><span class="o">=</span><span class="s1">&#39;HGNC&#39;</span><span class="p">)</span>
+        <span class="n">members</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">member</span> <span class="ow">in</span> <span class="n">expanded_families</span><span class="p">:</span>
+            <span class="n">hgnc_symbol</span> <span class="o">=</span> <span class="n">member</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">hgnc_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_hgnc_id</span><span class="p">(</span><span class="n">hgnc_symbol</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">hgnc_id</span><span class="p">:</span>
+                <span class="n">up_id</span> <span class="o">=</span> <span class="n">hgnc_client</span><span class="o">.</span><span class="n">get_uniprot_id</span><span class="p">(</span><span class="n">hgnc_id</span><span class="p">)</span>
+                <span class="n">member_agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">hgnc_symbol</span><span class="p">,</span>
+                                     <span class="n">db_refs</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;HGNC&#39;</span><span class="p">:</span> <span class="n">hgnc_id</span><span class="p">,</span>
+                                              <span class="s1">&#39;UP&#39;</span><span class="p">:</span> <span class="n">up_id</span><span class="p">})</span>
+                <span class="n">member_db_refs</span> <span class="o">=</span> <span class="n">_get_db_refs</span><span class="p">(</span><span class="n">member_agent</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">member_db_refs</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">members</span><span class="p">[</span><span class="n">member</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;db_refs&#39;</span><span class="p">:</span> <span class="n">member_db_refs</span><span class="p">}</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">node_id</span><span class="p">,</span> <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="n">node_name</span><span class="p">,</span>
+                         <span class="s1">&#39;db_refs&#39;</span><span class="p">:</span> <span class="n">db_refs</span><span class="p">,</span> <span class="s1">&#39;parent&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+                         <span class="s1">&#39;members&#39;</span><span class="p">:</span> <span class="n">members</span><span class="p">,</span> <span class="s1">&#39;uuid_list&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">uuid</span><span class="p">]}}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">node_id</span>
+
+    <span class="k">def</span> <span class="nf">_get_new_id</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_id_counter</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_id_counter</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">ret</span>
+
+    <span class="k">def</span> <span class="nf">_get_node_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node_dict_item</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a tuple of sorted sources and targets given a node dict.&quot;&quot;&quot;</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">node_dict_item</span><span class="p">[</span><span class="s1">&#39;sources&#39;</span><span class="p">]))</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">node_dict_item</span><span class="p">[</span><span class="s1">&#39;targets&#39;</span><span class="p">]))</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_node_groups</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return a list of node id lists that are topologically identical.</span>
+
+<span class="sd">        First construct a node_dict which is keyed to the node id and</span>
+<span class="sd">        has a value which is a dict with keys &#39;sources&#39; and &#39;targets&#39;.</span>
+<span class="sd">        The &#39;sources&#39; and &#39;targets&#39; each contain a list of tuples</span>
+<span class="sd">        (i, polarity, source) edge of the node. node_dict is then processed</span>
+<span class="sd">        by _get_node_key() which returns a tuple of (s,t) where s,t are</span>
+<span class="sd">        sorted tuples of the ids for the source and target nodes. (s,t) is</span>
+<span class="sd">        then used as a key in node_key_dict where the values are the node</span>
+<span class="sd">        ids. node_groups is restricted to groups greater than 1 node.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">node_dict</span> <span class="o">=</span> <span class="p">{</span><span class="n">node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]:</span> <span class="p">{</span><span class="s1">&#39;sources&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;targets&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+                     <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">edge</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="p">:</span>
+            <span class="c1"># Add edge as a source for its target node</span>
+            <span class="n">edge_data</span> <span class="o">=</span> <span class="p">(</span><span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;i&#39;</span><span class="p">],</span> <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;polarity&#39;</span><span class="p">],</span>
+                         <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;source&#39;</span><span class="p">])</span>
+            <span class="n">node_dict</span><span class="p">[</span><span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;target&#39;</span><span class="p">]][</span><span class="s1">&#39;sources&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_data</span><span class="p">)</span>
+            <span class="c1"># Add edge as target for its source node</span>
+            <span class="n">edge_data</span> <span class="o">=</span> <span class="p">(</span><span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;i&#39;</span><span class="p">],</span> <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;polarity&#39;</span><span class="p">],</span>
+                         <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;target&#39;</span><span class="p">])</span>
+            <span class="n">node_dict</span><span class="p">[</span><span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;source&#39;</span><span class="p">]][</span><span class="s1">&#39;targets&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge_data</span><span class="p">)</span>
+        <span class="c1"># Make a dictionary of nodes based on source/target as a key</span>
+        <span class="n">node_key_dict</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[])</span>
+        <span class="k">for</span> <span class="n">node_id</span><span class="p">,</span> <span class="n">node_d</span> <span class="ow">in</span> <span class="n">node_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_node_key</span><span class="p">(</span><span class="n">node_d</span><span class="p">)</span>
+            <span class="n">node_key_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node_id</span><span class="p">)</span>
+        <span class="c1"># Constrain the groups to ones that have more than 1 member</span>
+        <span class="n">node_groups</span> <span class="o">=</span> <span class="p">[</span><span class="n">g</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">node_key_dict</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">g</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)]</span>
+        <span class="k">return</span> <span class="n">node_groups</span>
+
+    <span class="k">def</span> <span class="nf">_group_edges</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Group all edges that are topologically identical.</span>
+
+<span class="sd">        This means that (i, source, target, polarity) are the same, then sets</span>
+<span class="sd">        edges on parent (i.e. - group) nodes to &#39;Virtual&#39; and creates a new</span>
+<span class="sd">        edge to represent all of them.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># edit edges on parent nodes and make new edges for them</span>
+        <span class="n">edges_to_add</span> <span class="o">=</span> <span class="p">[[],</span> <span class="p">[]]</span>  <span class="c1"># [group_edges, uuid_lists]</span>
+        <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="p">:</span>
+            <span class="n">new_edge</span> <span class="o">=</span> <span class="n">deepcopy</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+            <span class="n">new_edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;id&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="n">uuid_list</span> <span class="o">=</span> <span class="n">new_edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">,</span> <span class="p">[])</span>
+            <span class="c1"># Check if edge source or target are contained in a parent</span>
+            <span class="c1"># If source or target in parent edit edge</span>
+            <span class="c1"># Nodes may only point within their container</span>
+            <span class="n">source</span> <span class="o">=</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;source&#39;</span><span class="p">]</span>
+            <span class="n">target</span> <span class="o">=</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;target&#39;</span><span class="p">]</span>
+            <span class="n">source_node</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span> <span class="k">if</span>
+                           <span class="n">x</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">source</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">target_node</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span> <span class="k">if</span>
+                           <span class="n">x</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">target</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="c1"># If the source node is in a group, we change the source of this</span>
+            <span class="c1"># edge to the group</span>
+            <span class="k">if</span> <span class="n">source_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;parent&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
+                <span class="n">new_edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;source&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">source_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;parent&#39;</span><span class="p">]</span>
+                <span class="n">e</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;i&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Virtual&#39;</span>
+            <span class="c1"># If the targete node is in a group, we change the target of this</span>
+            <span class="c1"># edge to the group</span>
+            <span class="k">if</span> <span class="n">target_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;parent&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
+                <span class="n">new_edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;target&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">target_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;parent&#39;</span><span class="p">]</span>
+                <span class="n">e</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;i&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Virtual&#39;</span>
+            <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;i&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;Virtual&#39;</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">new_edge</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">edges_to_add</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+                    <span class="n">edges_to_add</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_edge</span><span class="p">)</span>
+                    <span class="n">edges_to_add</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">uuid_list</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">idx</span> <span class="o">=</span> <span class="n">edges_to_add</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">new_edge</span><span class="p">)</span>
+                    <span class="n">edges_to_add</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="n">idx</span><span class="p">]</span> <span class="o">+=</span> <span class="n">uuid_list</span>
+                    <span class="n">edges_to_add</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="n">idx</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">edges_to_add</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="n">idx</span><span class="p">]))</span>
+        <span class="k">for</span> <span class="n">ze</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="o">*</span><span class="n">edges_to_add</span><span class="p">):</span>
+            <span class="n">edge</span> <span class="o">=</span> <span class="n">ze</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()</span>
+            <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ze</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_edges</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">edge</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_group_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">node_groups</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_node_groups</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">node_groups</span><span class="p">:</span>
+            <span class="c1"># Make new group node</span>
+            <span class="n">new_group_node</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_new_id</span><span class="p">()),</span>
+                                       <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;Group&#39;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">group</span><span class="p">)),</span>
+                                       <span class="s1">&#39;parent&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;uuid_list&#39;</span><span class="p">:</span> <span class="p">[]}}</span>
+            <span class="n">member_nodes</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span> <span class="k">if</span> <span class="n">x</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="n">group</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">m_node</span> <span class="ow">in</span> <span class="n">member_nodes</span><span class="p">:</span>
+                <span class="n">new_group_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]</span> <span class="o">+=</span> \
+                    <span class="n">m_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]</span>
+                <span class="n">new_group_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]</span> <span class="o">=</span> \
+                    <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">new_group_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;uuid_list&#39;</span><span class="p">]))</span>
+            <span class="c1"># Point the node to its parent</span>
+            <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="n">group</span><span class="p">:</span>
+                    <span class="n">node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;parent&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_group_node</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span></div>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_group_node</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_get_db_refs</span><span class="p">(</span><span class="n">agent</span><span class="p">):</span>
+    <span class="n">cyjs_db_refs</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">db_name</span><span class="p">,</span> <span class="n">db_ids</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">db_refs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">db_name</span> <span class="o">==</span> <span class="s1">&#39;TEXT&#39;</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">db_ids</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="n">db_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">db_ids</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">db_ids</span><span class="p">,</span> <span class="n">basestring</span><span class="p">):</span>
+            <span class="n">db_id</span> <span class="o">=</span> <span class="n">db_ids</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">db_id</span> <span class="o">=</span> <span class="n">db_ids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="n">get_identifiers_url</span><span class="p">(</span><span class="n">db_name</span><span class="p">,</span> <span class="n">db_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">url</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">db_name_map</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;UP&#39;</span><span class="p">:</span> <span class="s1">&#39;UniProt&#39;</span><span class="p">,</span> <span class="s1">&#39;PUBCHEM&#39;</span><span class="p">:</span> <span class="s1">&#39;PubChem&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;IP&#39;</span><span class="p">:</span> <span class="s1">&#39;InterPro&#39;</span><span class="p">,</span> <span class="s1">&#39;NXPFA&#39;</span><span class="p">:</span> <span class="s1">&#39;NextProtFamily&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;PF&#39;</span><span class="p">:</span> <span class="s1">&#39;Pfam&#39;</span><span class="p">,</span> <span class="s1">&#39;CHEBI&#39;</span><span class="p">:</span> <span class="s1">&#39;ChEBI&#39;</span><span class="p">}</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">db_name_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">db_name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span><span class="p">:</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">db_name</span>
+        <span class="n">cyjs_db_refs</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">url</span>
+    <span class="k">return</span> <span class="n">cyjs_db_refs</span>
+
+
+<span class="k">def</span> <span class="nf">_get_stmt_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">AddModification</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">RemoveModification</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">SelfModification</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;SelfModification&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Complex</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Complex&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;none&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Activation</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Activation&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Inhibition</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Inhibition&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">DecreaseAmount</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;DecreaseAmount&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">IncreaseAmount</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;IncreaseAmount&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gef</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Gef&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;positive&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">Gap</span><span class="p">):</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="s1">&#39;Gap&#39;</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;negative&#39;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">edge_type</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="fm">__str__</span><span class="p">()</span>
+        <span class="n">edge_polarity</span> <span class="o">=</span> <span class="s1">&#39;none&#39;</span>
+    <span class="k">return</span> <span class="n">edge_type</span><span class="p">,</span> <span class="n">edge_polarity</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../',
+            VERSION:'1.7.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>

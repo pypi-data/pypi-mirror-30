@@ -1,0 +1,428 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>indra.sources.cwms.processor &mdash; INDRA 1.7.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="../../../../genindex.html"/>
+        <link rel="search" title="Search" href="../../../../search.html"/>
+    <link rel="top" title="INDRA 1.7.0 documentation" href="../../../../index.html"/>
+        <link rel="up" title="Module code" href="../../../index.html"/> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../../../index.html" class="icon icon-home"> INDRA
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.7
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../license.html">License and funding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../getting_started.html">Getting started with INDRA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules/index.html">INDRA modules reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rest_api.html">REST API</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">INDRA</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../../../index.html">Module code</a> &raquo;</li>
+        
+      <li>indra.sources.cwms.processor</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for indra.sources.cwms.processor</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">absolute_import</span><span class="p">,</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">unicode_literals</span>
+<span class="kn">from</span> <span class="nn">builtins</span> <span class="k">import</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">str</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">operator</span>
+<span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">import</span> <span class="nn">collections</span>
+<span class="kn">import</span> <span class="nn">xml.etree.ElementTree</span> <span class="k">as</span> <span class="nn">ET</span>
+<span class="kn">from</span> <span class="nn">indra.util</span> <span class="k">import</span> <span class="n">read_unicode_csv</span>
+<span class="kn">from</span> <span class="nn">indra.statements</span> <span class="k">import</span> <span class="o">*</span>
+<span class="kn">import</span> <span class="nn">indra.databases.hgnc_client</span> <span class="k">as</span> <span class="nn">hgnc_client</span>
+<span class="kn">import</span> <span class="nn">indra.databases.uniprot_client</span> <span class="k">as</span> <span class="nn">up_client</span>
+<span class="kn">from</span> <span class="nn">indra.util</span> <span class="k">import</span> <span class="n">UnicodeXMLTreeBuilder</span> <span class="k">as</span> <span class="n">UTB</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;cwms&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="CWMSProcessor"><a class="viewcode-back" href="../../../../modules/sources/cwms/index.html#indra.sources.cwms.processor.CWMSProcessor">[docs]</a><span class="k">class</span> <span class="nc">CWMSProcessor</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The CWMSProcessor currently extracts causal relationships between</span>
+<span class="sd">    terms (nouns) in EKB. In the future, this processor can be extended to</span>
+<span class="sd">    extract other types of relations, or to extract relations involving</span>
+<span class="sd">    events.</span>
+
+<span class="sd">    For more details on the TRIPS EKB XML format, see</span>
+<span class="sd">    http://trips.ihmc.us/parser/cgi/drum</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    xml_string : str</span>
+<span class="sd">        A TRIPS extraction knowledge base (EKB) in XML format as a string.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    tree : xml.etree.ElementTree.Element</span>
+<span class="sd">        An ElementTree object representation of the TRIPS EKB XML.</span>
+<span class="sd">    doc_id: str</span>
+<span class="sd">        Document ID</span>
+<span class="sd">    statements : list[indra.statements.Statement]</span>
+<span class="sd">        A list of INDRA Statements that were extracted from the EKB.</span>
+<span class="sd">    sentences : dict[str: str]</span>
+<span class="sd">        The list of all sentences in the EKB with their IDs</span>
+<span class="sd">    paragraphs : dict[str: str]</span>
+<span class="sd">        The list of all paragraphs in the EKB with their IDs</span>
+<span class="sd">    par_to_sec : dict[str: str]</span>
+<span class="sd">        A map from paragraph IDs to their associated section types</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xml_string</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="c1"># Parse XML</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tree</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">XML</span><span class="p">(</span><span class="n">xml_string</span><span class="p">,</span> <span class="n">parser</span><span class="o">=</span><span class="n">UTB</span><span class="p">())</span>
+        <span class="k">except</span> <span class="n">ET</span><span class="o">.</span><span class="n">ParseError</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Could not parse XML string&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tree</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span>
+
+        <span class="c1"># Get the document ID from the EKB tag.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">doc_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;id&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Store all paragraphs and store all sentences in a data structure</span>
+        <span class="n">paragraph_tags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;input/paragraphs/paragraph&#39;</span><span class="p">)</span>
+        <span class="n">sentence_tags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s1">&#39;input/sentences/sentence&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">paragraphs</span> <span class="o">=</span> <span class="p">{</span><span class="n">p</span><span class="o">.</span><span class="n">attrib</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]:</span> <span class="n">p</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">paragraph_tags</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sentences</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">attrib</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]:</span> <span class="n">s</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sentence_tags</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">par_to_sec</span> <span class="o">=</span> <span class="p">{</span><span class="n">p</span><span class="o">.</span><span class="n">attrib</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]:</span> <span class="n">p</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;sec-type&#39;</span><span class="p">)</span>
+                           <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">paragraph_tags</span><span class="p">}</span>
+
+        <span class="c1"># Extract statements</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">extract_noun_causal_relations</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">extract_noun_inhibit_relations</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">extract_noun_influence_relations</span><span class="p">()</span>
+
+<div class="viewcode-block" id="CWMSProcessor.extract_noun_causal_relations"><a class="viewcode-back" href="../../../../modules/sources/cwms/index.html#indra.sources.cwms.processor.CWMSProcessor.extract_noun_causal_relations">[docs]</a>    <span class="k">def</span> <span class="nf">extract_noun_causal_relations</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extracts causal relationships between two nouns/terms (as opposed to</span>
+<span class="sd">        events)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Search for causal connectives of type ONT::CAUSE</span>
+        <span class="n">ccs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;CC/[type=&#39;ONT::CAUSE&#39;]&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">cc</span> <span class="ow">in</span> <span class="n">ccs</span><span class="p">:</span>
+            <span class="c1"># Each cause should involve a factor term and an outcome term</span>
+            <span class="n">factor</span> <span class="o">=</span> <span class="n">cc</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;arg/[@role=&#39;:FACTOR&#39;]&quot;</span><span class="p">)</span>
+            <span class="n">outcome</span> <span class="o">=</span> <span class="n">cc</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;arg/[@role=&#39;:OUTCOME&#39;]&quot;</span><span class="p">)</span>
+            <span class="n">polarity</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">make_statement_noun_cause_effect</span><span class="p">(</span><span class="n">cc</span><span class="p">,</span> <span class="n">factor</span><span class="p">,</span> <span class="n">outcome</span><span class="p">,</span></div>
+                                                  <span class="n">polarity</span><span class="p">)</span>
+
+<div class="viewcode-block" id="CWMSProcessor.extract_noun_inhibit_relations"><a class="viewcode-back" href="../../../../modules/sources/cwms/index.html#indra.sources.cwms.processor.CWMSProcessor.extract_noun_inhibit_relations">[docs]</a>    <span class="k">def</span> <span class="nf">extract_noun_inhibit_relations</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extracts relationships involving one term/noun inhibiting another</span>
+<span class="sd">        term/noun&quot;&quot;&quot;</span>
+        <span class="n">events</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;EVENT/[type=&#39;ONT::INHIBIT&#39;]&quot;</span><span class="p">)</span>
+        <span class="n">events</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;EVENT/[type=&#39;ONT::DECREASE&#39;]&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="n">events</span><span class="p">:</span>
+            <span class="c1"># Each inhibit event should involve an agent and an affected</span>
+            <span class="n">agent</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;*[@role=&#39;:AGENT&#39;]&quot;</span><span class="p">)</span>
+            <span class="n">affected</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;*[@role=&#39;:AFFECTED&#39;]&quot;</span><span class="p">)</span>
+            <span class="n">polarity</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">make_statement_noun_cause_effect</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">agent</span><span class="p">,</span> <span class="n">affected</span><span class="p">,</span></div>
+                                                  <span class="n">polarity</span><span class="p">)</span>
+
+<div class="viewcode-block" id="CWMSProcessor.extract_noun_influence_relations"><a class="viewcode-back" href="../../../../modules/sources/cwms/index.html#indra.sources.cwms.processor.CWMSProcessor.extract_noun_influence_relations">[docs]</a>    <span class="k">def</span> <span class="nf">extract_noun_influence_relations</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extracts relationships with one term influencing another term.&quot;&quot;&quot;</span>
+        <span class="n">ccs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;CC/[type=&#39;ONT::INFLUENCE&#39;]&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">cc</span> <span class="ow">in</span> <span class="n">ccs</span><span class="p">:</span>
+            <span class="c1"># Each cause should involve a factor term and an outcome term</span>
+            <span class="n">factor</span> <span class="o">=</span> <span class="n">cc</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;arg/[@role=&#39;:FACTOR&#39;]&quot;</span><span class="p">)</span>
+            <span class="n">outcome</span> <span class="o">=</span> <span class="n">cc</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;arg/[@role=&#39;:OUTCOME&#39;]&quot;</span><span class="p">)</span>
+            <span class="n">polarity</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">make_statement_noun_cause_effect</span><span class="p">(</span><span class="n">cc</span><span class="p">,</span> <span class="n">factor</span><span class="p">,</span> <span class="n">outcome</span><span class="p">,</span></div>
+                                                  <span class="n">polarity</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">make_statement_noun_cause_effect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event_element</span><span class="p">,</span>
+                                         <span class="n">cause</span><span class="p">,</span> <span class="n">affected</span><span class="p">,</span> <span class="n">polarity</span><span class="p">):</span>
+        <span class="c1"># Only process if both the cause and affected are present</span>
+        <span class="k">if</span> <span class="n">cause</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">affected</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="c1"># Get the term with the given cause id</span>
+        <span class="n">cause_id</span> <span class="o">=</span> <span class="n">cause</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;id&#39;</span><span class="p">)</span>
+        <span class="n">cause_term</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;TERM/[@id=&#39;</span><span class="si">%s</span><span class="s2">&#39;]&quot;</span> <span class="o">%</span> <span class="n">cause_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cause_term</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="c1"># Get the cause&#39;s text and use it to construct a Concept</span>
+        <span class="n">cause_text_element</span> <span class="o">=</span> <span class="n">cause_term</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cause_text_element</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">cause_text</span> <span class="o">=</span> <span class="n">cause_text_element</span><span class="o">.</span><span class="n">text</span>
+        <span class="n">cause_db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;TEXT&#39;</span><span class="p">:</span> <span class="n">cause_text</span><span class="p">}</span>
+        <span class="c1">#</span>
+        <span class="n">cause_type_element</span> <span class="o">=</span> <span class="n">cause_term</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cause_type_element</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">cause_db_refs</span><span class="p">[</span><span class="s1">&#39;CWMS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cause_type_element</span><span class="o">.</span><span class="n">text</span>
+        <span class="c1">#</span>
+        <span class="n">cause_concept</span> <span class="o">=</span> <span class="n">Concept</span><span class="p">(</span><span class="n">cause_text</span><span class="p">,</span> <span class="n">db_refs</span><span class="o">=</span><span class="n">cause_db_refs</span><span class="p">)</span>
+
+        <span class="c1"># Get the term with the given affected id</span>
+        <span class="n">affected_id</span> <span class="o">=</span> <span class="n">affected</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;id&#39;</span><span class="p">)</span>
+        <span class="n">affected_term</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;TERM/[@id=&#39;</span><span class="si">%s</span><span class="s2">&#39;]&quot;</span> <span class="o">%</span> <span class="n">affected_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">affected_term</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="c1"># Get the affected&#39;s text and type and use them to construct a Concept</span>
+        <span class="n">affected_text_element</span> <span class="o">=</span> <span class="n">affected_term</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">affected_text_element</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">affected_text</span> <span class="o">=</span> <span class="n">affected_text_element</span><span class="o">.</span><span class="n">text</span>
+        <span class="n">affected_db_refs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;TEXT&#39;</span><span class="p">:</span> <span class="n">affected_text</span><span class="p">}</span>
+        <span class="c1">#</span>
+        <span class="n">affected_type_element</span> <span class="o">=</span> <span class="n">affected_term</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">affected_type_element</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">affected_db_refs</span><span class="p">[</span><span class="s1">&#39;CWMS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">affected_type_element</span><span class="o">.</span><span class="n">text</span>
+        <span class="c1">#</span>
+        <span class="n">affected_concept</span> <span class="o">=</span> <span class="n">Concept</span><span class="p">(</span><span class="n">affected_text</span><span class="p">,</span> <span class="n">db_refs</span><span class="o">=</span><span class="n">affected_db_refs</span><span class="p">)</span>
+
+        <span class="c1"># Construct evidence</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_evidence</span><span class="p">(</span><span class="n">event_element</span><span class="p">)</span>
+        <span class="n">ev</span><span class="o">.</span><span class="n">epistemics</span><span class="p">[</span><span class="s1">&#39;direct&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="c1"># Make statement</span>
+        <span class="k">if</span> <span class="n">polarity</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+            <span class="n">obj_delta</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;polarity&#39;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;adjectives&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">obj_delta</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">st</span> <span class="o">=</span> <span class="n">Influence</span><span class="p">(</span><span class="n">cause_concept</span><span class="p">,</span> <span class="n">affected_concept</span><span class="p">,</span> <span class="n">obj_delta</span><span class="o">=</span><span class="n">obj_delta</span><span class="p">,</span>
+                       <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="n">ev</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">statements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">st</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_evidence</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event_tag</span><span class="p">):</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_evidence_text</span><span class="p">(</span><span class="n">event_tag</span><span class="p">)</span>
+        <span class="n">sec</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_section</span><span class="p">(</span><span class="n">event_tag</span><span class="p">)</span>
+        <span class="n">epi</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">sec</span><span class="p">:</span>
+            <span class="n">epi</span><span class="p">[</span><span class="s1">&#39;section_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sec</span>
+        <span class="n">ev</span> <span class="o">=</span> <span class="n">Evidence</span><span class="p">(</span><span class="n">source_api</span><span class="o">=</span><span class="s1">&#39;cwms&#39;</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">text</span><span class="p">,</span> <span class="n">pmid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">doc_id</span><span class="p">,</span>
+                      <span class="n">epistemics</span><span class="o">=</span><span class="n">epi</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ev</span>
+
+    <span class="k">def</span> <span class="nf">_get_evidence_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event_tag</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract the evidence for an event.</span>
+
+<span class="sd">        Pieces of text linked to an EVENT are fragments of a sentence. The</span>
+<span class="sd">        EVENT refers to the paragraph ID and the &quot;uttnum&quot;, which corresponds</span>
+<span class="sd">        to a sentence ID. Here we find and return the full sentence from which</span>
+<span class="sd">        the event was taken.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">par_id</span> <span class="o">=</span> <span class="n">event_tag</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;paragraph&#39;</span><span class="p">)</span>
+        <span class="n">uttnum</span> <span class="o">=</span> <span class="n">event_tag</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;uttnum&#39;</span><span class="p">)</span>
+        <span class="n">event_text</span> <span class="o">=</span> <span class="n">event_tag</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">sentences</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">uttnum</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">sentence</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sentences</span><span class="p">[</span><span class="n">uttnum</span><span class="p">]</span>
+        <span class="k">elif</span> <span class="n">event_text</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">sentence</span> <span class="o">=</span> <span class="n">event_text</span><span class="o">.</span><span class="n">text</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">sentence</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">sentence</span>
+
+    <span class="k">def</span> <span class="nf">_get_section</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event_tag</span><span class="p">):</span>
+        <span class="n">par_id</span> <span class="o">=</span> <span class="n">event_tag</span><span class="o">.</span><span class="n">attrib</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;paragraph&#39;</span><span class="p">)</span>
+        <span class="n">sec</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">par_to_sec</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">par_id</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">sec</span>
+</pre></div>
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017, B. M. Gyori, J. A. Bachman.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../../../',
+            VERSION:'1.7.0',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>
