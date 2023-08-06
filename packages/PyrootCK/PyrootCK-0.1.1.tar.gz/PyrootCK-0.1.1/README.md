@@ -1,0 +1,53 @@
+PyrootCK
+========
+
+Improving ``PyROOT`` for better productivity.
+
+Collection of utilities are organized into subpackages::
+
+- `mathutils`:
+  - `asymvar`: class for variable with asymmetric-error, inspired from `uncertainties.ufloat`.
+  - `Eff`, `EffU`, `EffU_unguard`: functions to compute efficiencies with Clopper-Pearson uncertainty.
+  - `weighted_average`, `weighted_harmonic_average`: when a simple average is not enough.
+  - `combine_fully_correlated`, `combine_uncorrelated`, `combine_BLUE`: for combining multiple observables with uncertainty into one, given choices of correlation. For BLUE (Best Linear Unbiased Estimator), see Valassi, 2013.
+
+- `iouils`
+  - `import_tree` to quickly load `TTree` from (multiple) `TFile` overloaded for different source types (local, ganga, eos, xrootd, ...).
+
+- `tmvautils`
+  - `TMVA_Adapter` to help setup `TMVA.Reader` variables, and return `TTree` of mva-response weights.
+
+As well as miscellaneous monkey-patching on `ROOT` and `uncertainties`
+for more methods::
+
+- `ROOT`: 
+  - Misc conversion to/from `ROOT` (`TH`,`TGraph`,`RooWorkspace`,`RooFitResult`,...) and `pandas` (`Series`, `DataFrame`).
+  - `TFile.slice_tree` to extract `TTree` into smaller one.
+  - `TTree.drop` to make index-unique TTree.
+  - `TH1.vlookup`, `TH2.vlookup`: like in Microsoft Excel, to retrive value in a bin given point(s) on the axis.
+  - `TMultiGraph.brazillian`: for the upper limits plot.
+
+- `uncertainties`:
+  - class `var`, based on ufloat but ready-made for statistical (Poisson) error.
+  - Additional methods on `ufloat`: `rerr`, `upperlim`, `low`, `high`, `interval`, `rounding_PDG`
+  - More methods involving error tag: `tags`, `get_error`, `get_rerr`
+
+See the docstring from module index for more details.
+
+
+Installation
+------------
+
+It's available on pip: `pip install pyrootck`
+
+Dependency: `uncertainties`, `pandas`, `root_numpy`, `pyroot_zen`, `PythonCK`
+
+
+Disclaimer
+----------
+
+This packacge was written and used during my PhD in 2013-2017 at EPFL (Lausanne) 
+and LHCb collaboration (CERN), for the work in *Z->tau tau* cross-section measurement 
+and *H->mu tau* searches at LHCb (8TeV).
+
+I hope it can be of a good use for future analysis...
