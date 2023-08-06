@@ -1,0 +1,70 @@
+---
+{{ tile_metadata.base | yaml }}
+
+releases:
+{% for release in releases.values() %}
+{% if release.file %}
+- file: {{ release.file }}
+  name: {{ release.release_name }}
+  version: '{{ release.version }}'
+{% endif %}
+{% endfor %}
+
+{{ tile_metadata.stemcell_criteria | yaml }}
+
+property_blueprints:
+{{ tile_metadata.property_blueprints | yaml }}
+
+form_types:
+{{ tile_metadata.form_types | yaml }}
+
+job_types:
+{{ tile_metadata.job_types | yaml }}
+
+{% if tile_metadata.runtime_configs %}
+runtime_configs:
+{% for cfg in tile_metadata.runtime_configs %}
+- name: {{ cfg.name }}
+  runtime_config: {{ cfg.runtime_config | yaml_literal | indent }}
+{% endfor %}
+{% endif %}
+
+{% set post_deploy_errands = [] %}
+{% for release in releases.values() %}
+{% for job in release.jobs %}
+{% if job.lifecycle and job.lifecycle == 'errand' and job.post_deploy %}
+{% do post_deploy_errands.append(job.name) %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+post_deploy_errands: {% if not post_deploy_errands %}[]{% else %}
+
+{% for job_name in post_deploy_errands %}
+- name: {{ job_name }}
+{% endfor %}
+{% endif %}
+
+{% set pre_delete_errands = [] %}
+{% for release in releases.values() %}
+{% for job in release.jobs %}
+{% if job.lifecycle and job.lifecycle == 'errand' and job.pre_delete %}
+{% do pre_delete_errands.append(job.name) %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+pre_delete_errands: {% if not pre_delete_errands %}[]{% else %}
+
+{% for job_name in pre_delete_errands %}
+- name: {{ job_name }}
+{% endfor %}
+{% endif %}
+
+update:
+  canaries: {{ ( update and update.canaries ) or 1 }}
+  canary_watch_time: {{ ( update and update.canary_watch_time ) or '10000-100000' }}
+  max_in_flight: {{ ( update and update.max_in_flight ) or 1 }}
+  update_watch_time: {{ ( update and update.update_watch_time ) or '10000-100000' }}
+
+provides_product_versions:
+- name: {{ tile_metadata.base.name }}
+  version: '{{ tile_metadata.base.product_version }}'
