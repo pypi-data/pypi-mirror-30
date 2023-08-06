@@ -1,0 +1,93 @@
+Python Bash Utils
+=================
+
+Author: Tim Santor tsantor@xstudios.agency
+
+Overview
+========
+
+Bash color management and log system for Python users.
+
+Requirements
+============
+
+-  Python 2.7.x, 3.6.x
+
+Installation
+============
+
+You can install directly via pip:
+
+::
+
+    pip install python-bash-utils
+
+Usage
+=====
+
+logmsg
+------
+
+Import:
+
+::
+
+    from bashutils import logmsg
+
+Functions:
+
+::
+
+    logmsg.divline()             # ----------
+    logmsg.header('header')      # ==> header
+    logmsg.success('success')    # [+] success
+    logmsg.error('error')        # [-] error
+    logmsg.warning('warning')    # [!] warning
+    logmsg.info('info')          # [i] info
+    logmsg.note('note')          # note
+
+    logmsg.prompt('What is your name?)  # [?] What is your name?
+    lomgsg.confirm('Confirm this')  # [?] Confirm this? (y/n)
+
+bashutils
+---------
+
+Import:
+
+::
+
+    from bashutils import bashutils
+
+Functions:
+
+::
+
+    bashutils.get_os() # OSX, 'Fedora', 'CentOS', 'Debian', 'Ubuntu'
+
+    status, stdout, stderr = bashutils.exec_cmd('git -h')
+
+    bashutils.cmd_exists('git') # True or False
+
+Version History
+===============
+
+-  **0.1.0** - Initial release
+-  **0.1.1** - Added some new methods
+-  **0.1.2** - Refactor
+-  **0.1.3** - Added Python 3.4.x support
+-  **0.1.4** - Added ability to pass logger instance to log message as
+   well
+-  **0.1.5** - Added Windows output workaround
+-  **0.1.6** - Removed needless ``declined`` method, was being overly
+   verbose in output
+-  **0.2.0** - Updated for Python 3
+-  **0.3.0** - Simplified code base and now rely on ``colorama`` for
+   cross-platform terminal color support
+-  **0.3.1** - Added cooler icons for success/error for Linux/Mac
+
+Issues
+======
+
+If you experience any issues, please create an
+`issue <https://bitbucket.org/tsantor/python-bash-utils/issues>`__ on
+Bitbucket.
