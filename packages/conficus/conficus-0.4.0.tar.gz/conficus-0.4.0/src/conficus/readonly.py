@@ -1,0 +1,28 @@
+# pylint: disable=unused-argument
+from .parse import ConfigDict
+
+
+class ReadOnlyDict(ConfigDict):
+
+    def __init__(self, src):
+        super(ReadOnlyDict, self).__init__(src)
+        self.readonly = True
+
+    def __setitem__(self, key, item):
+        if hasattr(self, 'readonly'):
+            raise TypeError('Key `{}` is read only!'.format(key))
+        if isinstance(item, ConfigDict):
+            item = ReadOnlyDict(item)
+        return super(ReadOnlyDict, self).__setitem__(key, item)
+
+    def __delitem__(self, key):
+        raise TypeError
+
+    def clear(self):
+        raise TypeError
+
+    def pop(self, key, *args):
+        raise TypeError
+
+    def popitem(self):
+        raise TypeError
