@@ -1,0 +1,602 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>modeltrans.manager &mdash; django-modeltrans 0.2.1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+    <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+
+  
+  <script src="../../_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="../../index.html" class="icon icon-home"> django-modeltrans
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                0.2
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Documentation</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/performance.html">Database performance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/inner-workings.html">Inner workings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/known-issues.html">Known issues</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/related-packages.html">Related packages</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/management.html">Management commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/admin.html">Admin support</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/reference.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/settings.html">Settings Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/migration.html">Migrating from django-modeltranslation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../pages/CHANGELOG.html">django-modeltrans change log</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">django-modeltrans</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../index.html">Module code</a> &raquo;</li>
+        
+      <li>modeltrans.manager</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for modeltrans.manager</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+
+<span class="kn">from</span> <span class="nn">django.core.exceptions</span> <span class="k">import</span> <span class="n">FieldDoesNotExist</span>
+<span class="kn">from</span> <span class="nn">django.db.models</span> <span class="k">import</span> <span class="n">Count</span><span class="p">,</span> <span class="n">Func</span><span class="p">,</span> <span class="n">Manager</span><span class="p">,</span> <span class="n">Q</span><span class="p">,</span> <span class="n">QuerySet</span>
+<span class="kn">from</span> <span class="nn">django.db.models.constants</span> <span class="k">import</span> <span class="n">LOOKUP_SEP</span>
+<span class="kn">from</span> <span class="nn">django.db.models.expressions</span> <span class="k">import</span> <span class="n">CombinedExpression</span><span class="p">,</span> <span class="n">F</span><span class="p">,</span> <span class="n">OrderBy</span>
+<span class="kn">from</span> <span class="nn">django.db.models.functions</span> <span class="k">import</span> <span class="n">Cast</span>
+<span class="kn">from</span> <span class="nn">django.utils</span> <span class="k">import</span> <span class="n">six</span>
+
+<span class="kn">from</span> <span class="nn">.conf</span> <span class="k">import</span> <span class="n">get_default_language</span>
+<span class="kn">from</span> <span class="nn">.fields</span> <span class="k">import</span> <span class="n">TranslatedVirtualField</span>
+
+
+<span class="k">def</span> <span class="nf">transform_translatable_fields</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">fields</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Transform the kwargs for a &lt;Model&gt;.objects.create() or &lt;Model&gt;()</span>
+<span class="sd">    to allow passing translated field names.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        fields (dict): kwargs to a model __init__ or Model.objects.create() method</span>
+<span class="sd">            for which the field names need to be translated to values in the i18n field</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="c1"># If the current model does have the TranslationField, we must not apply</span>
+    <span class="c1"># any transformation for it will result in a:</span>
+    <span class="c1"># TypeError: &#39;i18n&#39; is an invalid keyword argument for this function</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="s1">&#39;i18n&#39;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fields</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;i18n&#39;</span><span class="p">:</span> <span class="n">fields</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;i18n&#39;</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="p">}</span>
+
+    <span class="c1"># keep track of translated fields, and do not return an `i18n` key if no</span>
+    <span class="c1"># translated fields are found.</span>
+    <span class="n">has_translated_fields</span> <span class="o">=</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ret</span><span class="p">[</span><span class="s1">&#39;i18n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">())</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">field_name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">fields</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">field</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">_meta</span><span class="o">.</span><span class="n">get_field</span><span class="p">(</span><span class="n">field_name</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">FieldDoesNotExist</span><span class="p">:</span>
+            <span class="n">ret</span><span class="p">[</span><span class="n">field_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+            <span class="k">continue</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="n">TranslatedVirtualField</span><span class="p">):</span>
+            <span class="n">has_translated_fields</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">if</span> <span class="n">field</span><span class="o">.</span><span class="n">get_language</span><span class="p">()</span> <span class="o">==</span> <span class="n">get_default_language</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">field</span><span class="o">.</span><span class="n">original_name</span> <span class="ow">in</span> <span class="n">fields</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="s1">&#39;Attempted override of &quot;</span><span class="si">{}</span><span class="s1">&quot; with &quot;</span><span class="si">{}</span><span class="s1">&quot;. &#39;</span>
+                        <span class="s1">&#39;Only one of the two is allowed.&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">field</span><span class="o">.</span><span class="n">original_name</span><span class="p">,</span> <span class="n">field_name</span><span class="p">)</span>
+                    <span class="p">)</span>
+                <span class="n">ret</span><span class="p">[</span><span class="n">field</span><span class="o">.</span><span class="n">original_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">ret</span><span class="p">[</span><span class="s1">&#39;i18n&#39;</span><span class="p">][</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ret</span><span class="p">[</span><span class="n">field_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">has_translated_fields</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">fields</span>
+
+    <span class="k">return</span> <span class="n">ret</span>
+
+
+<div class="viewcode-block" id="MultilingualQuerySet"><a class="viewcode-back" href="../../pages/reference.html#modeltrans.manager.MultilingualQuerySet">[docs]</a><span class="k">class</span> <span class="nc">MultilingualQuerySet</span><span class="p">(</span><span class="n">QuerySet</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Extends `~django.db.models.query.Queryset` and makes the translated versions of fields</span>
+<span class="sd">    accessible through the normal queryset methods, analogous to the virtual fields added</span>
+<span class="sd">    to a translated model:</span>
+
+<span class="sd">     - `&lt;field&gt;` allow getting/setting the default language</span>
+<span class="sd">     - ``&lt;field&gt;_&lt;lang&gt;`` (for example, `&lt;field&gt;_de`) allows getting/setting a specific language.</span>
+<span class="sd">       Note that if `LANGUAGE_CODE == &#39;en&#39;`, `&lt;field&gt;_en` is mapped to `&lt;field&gt;`.</span>
+<span class="sd">     - `&lt;field&gt;_i18n` follows the currently active translation in Django, and falls back to the default language.</span>
+
+<span class="sd">    When adding the `modeltrans.fields.TranslationField` to a model, MultilingualManager is automatically</span>
+<span class="sd">    mixed in to the manager class of that model.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="k">def</span> <span class="nf">_add_i18n_annotation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">virtual_field</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fallback</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">bare_lookup</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">annotation_name</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Private method to add an annotation to the query to extract the translated</span>
+<span class="sd">        version of a field from the jsonb field to allow filtering and ordering.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            field (TranslatedVirtualField): the virtual field to create an annotation for.</span>
+<span class="sd">            annotation_name (str): name of the annotation, if None the default</span>
+<span class="sd">                `&lt;original_field&gt;_&lt;lang&gt;_annotation` will be used</span>
+
+<span class="sd">            fallback (bool): If `True`, `COALESCE` will be used to get the value</span>
+<span class="sd">                of the original field if the requested translation is not in the</span>
+<span class="sd">                `i18n` dict.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            the name of the annotation created.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">expression</span> <span class="o">=</span> <span class="n">virtual_field</span><span class="o">.</span><span class="n">as_expression</span><span class="p">(</span><span class="n">fallback</span><span class="o">=</span><span class="n">fallback</span><span class="p">,</span> <span class="n">bare_lookup</span><span class="o">=</span><span class="n">bare_lookup</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expression</span><span class="p">,</span> <span class="n">F</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">expression</span><span class="o">.</span><span class="n">name</span>
+
+        <span class="k">if</span> <span class="n">annotation_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">annotation_name</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_annotation&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">virtual_field</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">add_annotation</span><span class="p">(</span><span class="n">expression</span><span class="p">,</span> <span class="n">annotation_name</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">annotation_name</span>
+
+    <span class="k">def</span> <span class="nf">_get_field</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lookup</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Return the Django model field for a lookup plus the remainder of the lookup,</span>
+<span class="sd">        which should be the lookup type.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span>
+        <span class="n">lookup_type</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># pk is not an actual field, but an alias for the implicit id field.</span>
+        <span class="k">if</span> <span class="n">lookup</span> <span class="o">==</span> <span class="s1">&#39;pk&#39;</span><span class="p">:</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">_meta</span><span class="o">.</span><span class="n">get_fields</span><span class="p">():</span>
+                <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="s1">&#39;primary_key&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+                    <span class="n">key</span> <span class="o">=</span> <span class="n">field</span>
+            <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="kc">None</span>
+
+        <span class="n">field</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">bits</span> <span class="o">=</span> <span class="n">lookup</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">LOOKUP_SEP</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">bit</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">bits</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">field</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">_meta</span><span class="o">.</span><span class="n">get_field</span><span class="p">(</span><span class="n">bit</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">FieldDoesNotExist</span><span class="p">:</span>
+                <span class="n">lookup_type</span> <span class="o">=</span> <span class="n">LOOKUP_SEP</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">bits</span><span class="p">[</span><span class="n">i</span><span class="p">:])</span>
+                <span class="k">break</span>
+
+            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="s1">&#39;remote_field&#39;</span><span class="p">):</span>
+                <span class="n">rel</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="s1">&#39;remote_field&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="n">model</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">rel</span><span class="p">,</span> <span class="s1">&#39;model&#39;</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">field</span><span class="p">,</span> <span class="n">lookup_type</span>
+
+    <span class="k">def</span> <span class="nf">_rewrite_filter_clause</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lookup</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        private method which rewrites a filter clause passed to filter()/exclude()</span>
+<span class="sd">        etc., for example:</span>
+
+<span class="sd">        for title_nl__like=&#39;va&#39;</span>
+<span class="sd">        _rewrite_filter_clause(&#39;title_nl__like&#39;, &#39;va&#39;) would be called.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="n">field</span><span class="p">,</span> <span class="n">lookup_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_field</span><span class="p">(</span><span class="n">lookup</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="n">TranslatedVirtualField</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">lookup</span><span class="p">,</span> <span class="n">value</span>
+
+        <span class="k">if</span> <span class="n">lookup_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">bare_lookup</span> <span class="o">=</span> <span class="n">lookup</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="o">-</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">LOOKUP_SEP</span> <span class="o">+</span> <span class="n">lookup_type</span><span class="p">))]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">bare_lookup</span> <span class="o">=</span> <span class="n">lookup</span>
+
+        <span class="n">filter_field_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_add_i18n_annotation</span><span class="p">(</span>
+            <span class="n">virtual_field</span><span class="o">=</span><span class="n">field</span><span class="p">,</span>
+            <span class="n">bare_lookup</span><span class="o">=</span><span class="n">bare_lookup</span><span class="p">,</span>
+            <span class="n">fallback</span><span class="o">=</span><span class="n">field</span><span class="o">.</span><span class="n">language</span> <span class="ow">is</span> <span class="kc">None</span>
+        <span class="p">)</span>
+
+        <span class="c1"># re-add lookup type</span>
+        <span class="k">if</span> <span class="n">lookup_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">filter_field_name</span> <span class="o">+=</span> <span class="n">LOOKUP_SEP</span> <span class="o">+</span> <span class="n">lookup_type</span>
+
+        <span class="k">return</span> <span class="n">filter_field_name</span><span class="p">,</span> <span class="n">value</span>
+
+    <span class="k">def</span> <span class="nf">_rewrite_expression</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">expr</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Rewrite expressions.</span>
+
+<span class="sd">        https://docs.djangoproject.com/en/2.0/ref/models/expressions/</span>
+
+<span class="sd">        This current way of doing this is bound to lag behind any new things implemented in Django.</span>
+<span class="sd">        It would be really nice to have a better/more generic way of doing this.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expr</span><span class="p">,</span> <span class="n">F</span><span class="p">):</span>
+            <span class="n">field</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_field</span><span class="p">(</span><span class="n">expr</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="n">TranslatedVirtualField</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">expr</span>
+
+            <span class="k">return</span> <span class="n">field</span><span class="o">.</span><span class="n">as_expression</span><span class="p">(</span><span class="n">fallback</span><span class="o">=</span><span class="n">field</span><span class="o">.</span><span class="n">language</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span> <span class="n">bare_lookup</span><span class="o">=</span><span class="n">expr</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expr</span><span class="p">,</span> <span class="n">CombinedExpression</span><span class="p">):</span>
+            <span class="n">expr</span><span class="o">.</span><span class="n">lhs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">expr</span><span class="o">.</span><span class="n">lhs</span><span class="p">)</span>
+            <span class="n">expr</span><span class="o">.</span><span class="n">rhs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">expr</span><span class="o">.</span><span class="n">rhs</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expr</span><span class="p">,</span> <span class="n">Count</span><span class="p">):</span>
+            <span class="n">expr</span><span class="o">.</span><span class="n">source_expressions</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">expr</span><span class="o">.</span><span class="n">source_expressions</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expr</span><span class="p">,</span> <span class="n">Func</span><span class="p">):</span>
+            <span class="n">expr</span><span class="o">.</span><span class="n">source_expressions</span> <span class="o">=</span> <span class="nb">list</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">expr</span><span class="o">.</span><span class="n">source_expressions</span><span class="p">])</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">expr</span><span class="p">,</span> <span class="n">OrderBy</span><span class="p">):</span>
+            <span class="n">expr</span><span class="o">.</span><span class="n">expression</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">expr</span><span class="o">.</span><span class="n">expression</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">expr</span>
+
+    <span class="k">def</span> <span class="nf">_rewrite_Q</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">q</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">Q</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">Q</span><span class="o">.</span><span class="n">_new_instance</span><span class="p">(</span>
+                <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_Q</span><span class="p">(</span><span class="n">child</span><span class="p">)</span> <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">q</span><span class="o">.</span><span class="n">children</span><span class="p">),</span>
+                <span class="n">connector</span><span class="o">=</span><span class="n">q</span><span class="o">.</span><span class="n">connector</span><span class="p">,</span>
+                <span class="n">negated</span><span class="o">=</span><span class="n">q</span><span class="o">.</span><span class="n">negated</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_filter_clause</span><span class="p">(</span><span class="o">*</span><span class="n">q</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_rewrite_ordering</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">field_names</span><span class="p">):</span>
+        <span class="n">new_field_names</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">field_name</span> <span class="ow">in</span> <span class="n">field_names</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">field_name</span><span class="p">,</span> <span class="n">six</span><span class="o">.</span><span class="n">string_types</span><span class="p">):</span>
+                <span class="n">new_field_names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">field_name</span><span class="p">))</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># remove descending prefix, not relevant for the annotation</span>
+            <span class="n">sort_order</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+            <span class="k">if</span> <span class="n">field_name</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;-&#39;</span><span class="p">:</span>
+                <span class="n">field_name</span> <span class="o">=</span> <span class="n">field_name</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+                <span class="n">sort_order</span> <span class="o">=</span> <span class="s1">&#39;-&#39;</span>
+
+            <span class="k">if</span> <span class="n">field_name</span> <span class="o">==</span> <span class="s1">&#39;pk&#39;</span><span class="p">:</span>
+                <span class="n">new_field_names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">sort_order</span> <span class="o">+</span> <span class="s1">&#39;pk&#39;</span><span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="n">field</span><span class="p">,</span> <span class="n">lookup_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_field</span><span class="p">(</span><span class="n">field_name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">field</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="n">TranslatedVirtualField</span><span class="p">):</span>
+                <span class="c1"># if the field is just a normal field or not a field</span>
+                <span class="c1"># no rewriting needed</span>
+                <span class="n">new_field_names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">sort_order</span> <span class="o">+</span> <span class="n">field_name</span><span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="k">assert</span> <span class="n">lookup_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1"> is not a valid order_by lookup&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">field_name</span><span class="p">)</span>
+
+            <span class="n">sort_field</span> <span class="o">=</span> <span class="n">field</span><span class="o">.</span><span class="n">as_expression</span><span class="p">(</span><span class="n">bare_lookup</span><span class="o">=</span><span class="n">field_name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">sort_order</span> <span class="o">==</span> <span class="s1">&#39;-&#39;</span><span class="p">:</span>
+                <span class="n">sort_field</span> <span class="o">=</span> <span class="n">sort_field</span><span class="o">.</span><span class="n">desc</span><span class="p">()</span>
+
+            <span class="n">new_field_names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">sort_field</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">new_field_names</span>
+
+    <span class="k">def</span> <span class="nf">annotate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Patch annotate to allow the use of translated field names in annotations.</span>
+
+<span class="sd">        https://docs.djangoproject.com/en/stable/ref/models/querysets/#annotate</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">]</span>
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span><span class="n">alias</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_expression</span><span class="p">(</span><span class="n">expr</span><span class="p">)</span> <span class="k">for</span> <span class="n">alias</span><span class="p">,</span> <span class="n">expr</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">MultilingualQuerySet</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">create</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Patch the create method to allow adding the value for a translated field</span>
+<span class="sd">        using `Model.objects.create(..., title_nl=&#39;...&#39;)`.</span>
+
+<span class="sd">        https://docs.djangoproject.com/en/stable/ref/models/querysets/#create</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">MultilingualQuerySet</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="o">**</span><span class="n">transform_translatable_fields</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">order_by</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">field_names</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Annotate translated fields before sorting.</span>
+
+<span class="sd">        Examples:</span>
+<span class="sd">         - sort on `-title_nl` will add an annotation for `title_nl`</span>
+<span class="sd">         - sort on `title_i18n` will add an annotation for the current language</span>
+
+<span class="sd">        The field names pointing to translated fields in the `field_names`</span>
+<span class="sd">        argument will be replaced by their annotated versions.</span>
+
+<span class="sd">        https://docs.djangoproject.com/en/1.11/ref/models/querysets/#order_by</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+
+        <span class="n">new_field_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_ordering</span><span class="p">(</span><span class="n">field_names</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">MultilingualQuerySet</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">order_by</span><span class="p">(</span><span class="o">*</span><span class="n">new_field_names</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_filter_or_exclude</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">negate</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Annotate lookups for `filter()` and `exclude()`.</span>
+
+<span class="sd">        Examples:</span>
+<span class="sd">            - `title_nl__contains=&#39;foo&#39;` will add an annotation for `title_nl`</span>
+<span class="sd">            - `title_nl=&#39;bar&#39;` will add an annotation for `title_nl`</span>
+<span class="sd">            - `title_i18n=&#39;foo&#39;` will add an annotation for a coalesce of the</span>
+<span class="sd">               current active language, and all items of the fallback chain.</span>
+<span class="sd">            - `Q(title_nl__contains=&#39;foo&#39;) will add an annotation for `title_nl`</span>
+
+<span class="sd">        In all cases, the field part of the field lookup will be changed to use</span>
+<span class="sd">        the annotated verion.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="c1"># handle Q expressions / args</span>
+        <span class="n">new_args</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+            <span class="n">new_args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Q</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_Q</span><span class="p">(</span><span class="n">arg</span><span class="p">)))</span>
+
+        <span class="c1"># handle the kwargs</span>
+        <span class="n">new_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">field</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">new_kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">dict</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">_rewrite_filter_clause</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="p">)))</span>
+
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">MultilingualQuerySet</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">_filter_or_exclude</span><span class="p">(</span><span class="n">negate</span><span class="p">,</span> <span class="o">*</span><span class="n">new_args</span><span class="p">,</span> <span class="o">**</span><span class="n">new_kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_values</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">fields</span><span class="p">,</span> <span class="o">**</span><span class="n">expressions</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Annotate lookups for `values()` and `values_list()`</span>
+
+<span class="sd">        It must be possible to use:</span>
+<span class="sd">        `Blogs.objects.all().values_list(&#39;title_i18n&#39;, &#39;title_nl&#39;, &#39;title_en&#39;)`</span>
+
+<span class="sd">        But also spanning relations:</span>
+<span class="sd">        `Blogs.objects.all().values_list(&#39;title_i18n&#39;, &#39;category__name__i18n&#39;)`</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">_fields</span> <span class="o">=</span> <span class="n">fields</span> <span class="o">+</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">expressions</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">field_name</span> <span class="ow">in</span> <span class="n">_fields</span><span class="p">:</span>
+            <span class="n">field</span><span class="p">,</span> <span class="n">lookup_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_field</span><span class="p">(</span><span class="n">field_name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="n">TranslatedVirtualField</span><span class="p">):</span>
+                <span class="k">continue</span>
+
+            <span class="n">fallback</span> <span class="o">=</span> <span class="n">field</span><span class="o">.</span><span class="n">language</span> <span class="ow">is</span> <span class="kc">None</span>
+
+            <span class="k">if</span> <span class="n">field</span><span class="o">.</span><span class="n">get_language</span><span class="p">()</span> <span class="o">==</span> <span class="n">get_default_language</span><span class="p">():</span>
+                <span class="n">original_field</span> <span class="o">=</span> <span class="n">field_name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">field</span><span class="o">.</span><span class="n">original_field</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">add_annotation</span><span class="p">(</span><span class="n">Cast</span><span class="p">(</span><span class="n">original_field</span><span class="p">,</span> <span class="n">field</span><span class="o">.</span><span class="n">output_field</span><span class="p">()),</span> <span class="n">field_name</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_i18n_annotation</span><span class="p">(</span>
+                    <span class="n">virtual_field</span><span class="o">=</span><span class="n">field</span><span class="p">,</span>
+                    <span class="n">fallback</span><span class="o">=</span><span class="n">fallback</span><span class="p">,</span>
+                    <span class="n">bare_lookup</span><span class="o">=</span><span class="n">field_name</span><span class="p">,</span>
+                    <span class="n">annotation_name</span><span class="o">=</span><span class="n">field_name</span>
+                <span class="p">)</span>
+
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">MultilingualQuerySet</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">_values</span><span class="p">(</span><span class="o">*</span><span class="n">fields</span><span class="p">,</span> <span class="o">**</span><span class="n">expressions</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__reduce__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Make sure a dynamic version of this class can be pickled</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="k">return</span> <span class="n">multilingual_queryset_factory</span><span class="p">,</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__bases__</span><span class="p">[</span><span class="mi">0</span><span class="p">],),</span> <span class="bp">self</span><span class="o">.</span><span class="n">__getstate__</span><span class="p">()</span></div>
+
+
+<span class="k">def</span> <span class="nf">multilingual_queryset_factory</span><span class="p">(</span><span class="n">old_cls</span><span class="p">,</span> <span class="n">instantiate</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;Return a MultilingualQuerySet, or mix MultilingualQuerySet in custom QuerySets.&#39;&#39;&#39;</span>
+    <span class="k">if</span> <span class="n">old_cls</span> <span class="o">==</span> <span class="n">QuerySet</span><span class="p">:</span>
+        <span class="n">NewClass</span> <span class="o">=</span> <span class="n">MultilingualQuerySet</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">class</span> <span class="nc">NewClass</span><span class="p">(</span><span class="n">old_cls</span><span class="p">,</span> <span class="n">MultilingualQuerySet</span><span class="p">):</span>
+            <span class="k">pass</span>
+        <span class="n">NewClass</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="s1">&#39;Multilingual</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">old_cls</span><span class="o">.</span><span class="vm">__name__</span>
+    <span class="k">return</span> <span class="n">NewClass</span><span class="p">()</span> <span class="k">if</span> <span class="n">instantiate</span> <span class="k">else</span> <span class="n">NewClass</span>
+
+
+<div class="viewcode-block" id="MultilingualManager"><a class="viewcode-back" href="../../pages/reference.html#modeltrans.manager.MultilingualManager">[docs]</a><span class="k">class</span> <span class="nc">MultilingualManager</span><span class="p">(</span><span class="n">Manager</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    When adding the `modeltrans.fields.TranslationField` to a model, MultilingualManager is automatically</span>
+<span class="sd">    mixed in to the manager class of that model.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="n">use_for_related_fields</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="k">def</span> <span class="nf">_patch_queryset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">qs</span><span class="p">):</span>
+        <span class="n">qs</span><span class="o">.</span><span class="vm">__class__</span> <span class="o">=</span> <span class="n">multilingual_queryset_factory</span><span class="p">(</span><span class="n">qs</span><span class="o">.</span><span class="vm">__class__</span><span class="p">,</span> <span class="n">instantiate</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">qs</span>
+
+    <span class="k">def</span> <span class="nf">get_queryset</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        This method is repeated because some managers that don&#39;t use super() or alter queryset class</span>
+<span class="sd">        may return queryset that is not subclass of MultilingualQuerySet.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">qs</span> <span class="o">=</span> <span class="nb">super</span><span class="p">(</span><span class="n">MultilingualManager</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">get_queryset</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">qs</span><span class="p">,</span> <span class="n">MultilingualQuerySet</span><span class="p">):</span>
+            <span class="c1"># Is already patched</span>
+            <span class="k">return</span> <span class="n">qs</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_patch_queryset</span><span class="p">(</span><span class="n">qs</span><span class="p">)</span></div>
+</pre></div>
+
+           </div>
+           
+          </div>
+          <footer>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright .
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'../../',
+            VERSION:'0.2.1',
+            LANGUAGE:'None',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="../../_static/jquery.js"></script>
+      <script type="text/javascript" src="../../_static/underscore.js"></script>
+      <script type="text/javascript" src="../../_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="../../_static/js/theme.js"></script>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          
+          SphinxRtdTheme.Navigation.enableSticky();
+          
+      });
+  </script> 
+
+</body>
+</html>
