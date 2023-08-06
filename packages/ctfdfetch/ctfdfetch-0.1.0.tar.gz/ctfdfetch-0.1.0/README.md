@@ -1,0 +1,53 @@
+# CTFd Fetch
+
+Often it would be nice to download all the challenges (descriptions/files/etc)
+from a CTF so that you have them for future reference, or to have offline, or to
+share with a team.
+
+That's all this script does.
+
+Since many CTFs have standardized around [CTFd][] as a platform, we use that as
+a starting point.
+
+[ctfd]:https://github.com/CTFd/CTFd
+
+## Caveats
+- **Use this tool considerately**. It makes every attempt to respond sanely, and
+  only download things not already downloaded, but make sure you are not abusing
+  the good will of a CTF Host/Organizer.
+- This tool primarily uses the JSON response from a CTFd endpoint (`/challs`).
+  Any changes to CTFd have the potential to break this tool.
+
+## Quick Start
+
+Install.
+```
+pip3 install ctfdfetch
+```
+
+Download all the challenges from a CTF into the current folder.
+```
+ctfdfetch --server https://ctf.example.com --user hacker
+```
+
+For more options such as out directory, nested categories, verbosity, etc).
+```
+ctfdfetch -h
+```
+
+## Development
+
+Development occurs on `master`. The `release` branch has the version currently
+pushed to pypi.
+```
+# get code
+git clone https://gitlab.com/royragsdale/ctfdfetch.git
+cd ctfdfetch
+
+# setup virtualenv
+python3 -m venv venv3
+. venv3/bin/activate
+
+# install in dev mode
+pip install -e .
+```
