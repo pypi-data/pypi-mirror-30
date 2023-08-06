@@ -1,0 +1,126 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""News to mail gateway script. Copyright 2000 Cosimo Alfarano
+
+Author: Cosimo Alfarano
+Date: June 11 2000
+
+pygs - Copyright 2000 by Cosimo Alfarano <Alfarano@Students.CS.UniBo.It>
+You can use this software under the terms of the GPL. If we meet some day,
+and you think this stuff is worth it, you can buy me a beer in return.
+
+Thanks to md for this useful formula. Beer is beer.
+
+Gets news article from stdin and sends it via SMTP.
+"""
+from __future__ import print_function
+
+import argparse
+from mail2news import VERSION, DESC
+import news2mail
+import os
+import sys
+import whitelist
+
+
+def parse_cmdline():
+    """
+    set a dictionary with smtp new header in gw parameter (gw.smtpheads)
+    return (test,verbose) boolean tuple
+    """
+    parser = argparse.ArgumentParser(
+        description='pyg version %s - Copyright 2000 Cosimo Alfarano\n%s' %
+        (VERSION, DESC))
+
+    parser.add_argument('-H', '--smtpserver', default='')
+    parser.add_argument('-s', '--sender', required=True, default='')
+    parser.add_argument('-e', '--envelope', default='')
+    parser.add_argument('-t', '--to', dest='rcpt', required=True)
+    parser.add_argument('-w', '--wlfile')
+    parser.add_argument('-l', '--logfile')
+
+    parser.add_argument('-T', '--test',
+                        help='test mode (not send article via SMTP)',
+                        action='store_true')
+    parser.add_argument('-v', '--verbose', help='verbose output',
+                        action='store_true')
+
+    opts = parser.parse_args()
+
+#  By rfc822 [Resent-]Sender: should be ever set, unless == From:
+# (not this case). Should be a human, while [Resent-]From: may be a program.
+
+    if opts.rcpt == '' or opts.sender == '':
+        raise argparse.ArgumentError('missing command line option')
+
+    if opts.envelope == '' and opts.sender != '':
+        opts.envelope = opts.sender
+
+    return opts
+
+
+"""main is structured in 4 phases:
+    1) check and set pyg's internal variables
+    2) check whitelist for users' permission
+    3) format rfc 822 headers from input article
+    4) open smtp connection and send e-mail
+"""
+
+"""phase 1:
+check and set pyg's internal variables
+"""
+
+# it returns only test, other parms are set directly in the actual
+# parameter
+args = parse_cmdline()
+
+n2m = news2mail.news2mail(verbose=args.verbose)
+owner = None
+
+# check if n2m has some file prefercences set on commandline
+if args.wlfile is None:
+    wl = os.path.expanduser(os.path.join(os.path.dirname(__file__), 'pyg.whitelist'))
+else:
+    wl = args.wlfile
+
+if args.logfile is None:
+    log = os.path.expanduser(os.path.join(os.path.dirname(__file__), 'pyg.log'))
+else:
+    log = args.logfile
+
+wl = whitelist.whitelist(wl, log)
+
+"""phase 2:
+check whitelist for user's permission
+"""
+
+# make a first check of From: address
+owner = wl.checkfrom(n2m.message['From'])
+if owner is None:
+    if sys.stdin.isatty() == 1 or args.test:
+        print ('"%s" is not in whitelist!' % (n2m.message['From'][:-1]))
+    else:
+        wl.logmsg(n2m.nntpheads, wl.DENY)
+
+    # if verbose, I want to print out headers, so I can't
+    # exit now.
+    if not args.verbose:
+        sys.exit(1)
+
+# Reformat the message
+n2m.process_message()
+
+# prints formatted email message only (without send) if user wants
+if args.verbose:
+    print(n2m.message.as_string())
+
+if owner is None:
+    sys.exit(1)
+
+"""phase 4:
+open smtp connection and send e-mail
+"""
+
+wl.logmsg(n2m.heads_dict, wl.ACCEPT, owner)
+if not args.test:
+    n2m.sendarticle()
