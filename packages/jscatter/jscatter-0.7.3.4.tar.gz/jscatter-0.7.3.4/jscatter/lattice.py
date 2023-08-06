@@ -1,0 +1,743 @@
+# -*- coding: utf-8 -*-
+# written by Ralf Biehl at the Forschungszentrum Jülich ,
+# Jülich Center for Neutron Science 1 and Institute of Complex Systems 1
+#    jscatter is a program to read, analyse and plot data
+#    Copyright (C) 2015  Ralf Biehl
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+"""
+---
+Lattice objects describing a lattice of points.
+
+Included are methods to select sublattices as cubes, sphere or side of planes.
+
+The small angle scattering can is calculated by js.ff.cloudScattering.
+
+The same method can be used to calculate the wide angle scattering with bragg peaks
+using larger scattering vectors.
+
+
+**Examples**
+
+A hollow sphere cut to a wedge.
+::
+
+ import jscatter as js
+ import numpy as np
+ grid= js.lattice.scLattice(1/2.,2*8)
+ grid.inSphere(6)
+ grid.inSphere(-4)
+ grid.limit2Cube(6,6,6)
+ grid.planeSide([1,1,1])
+ grid.planeSide([1,-1,-1])
+ grid.show()
+
+ q=js.loglist(0.01,5,300)
+ ffe=js.ff.cloudScattering(q,grid.points,relError=50,rms=0.1)
+ p=js.grace()
+ p.plot(ffe)
+
+A comparison of sc, bcc and fcc nanoparticles (takes a while )
+::
+
+ import jscatter as js
+ import numpy as np
+ q=js.loglist(0.01,35,1500)
+ q=np.r_[js.loglist(0.01,3,200),3:40:800j]
+ unitcelllength=1.5
+ N=8
+
+ scgrid= js.lattice.scLattice(unitcelllength,N)
+ sc=js.ff.cloudScattering(q,scgrid.points,relError=50,rms=0.05)
+ bccgrid= js.lattice.bccLattice(unitcelllength,N)
+ bcc=js.ff.cloudScattering(q,bccgrid.points,relError=50,rms=0.05)
+ fccgrid= js.lattice.fccLattice(unitcelllength,N)
+ fcc=js.ff.cloudScattering(q,fccgrid.points,relError=50,rms=0.05)
+
+ p=js.grace(1.5,1)
+ # smooth with Gaussian to include instrument resolution
+ p.plot(sc.X,js.formel.smooth(sc,10, window='gaussian'),legend='sc')
+ p.plot(bcc.X,js.formel.smooth(bcc,10, window='gaussian'),legend='bcc')
+ p.plot(fcc.X,js.formel.smooth(fcc,10, window='gaussian'),legend='fcc')
+
+ q=q=js.loglist(1,35,100)
+ p.plot(q,(1-np.exp(-q*q*0.05**2))/scgrid.shape[0],li=1,sy=0,le='sc diffusive')
+ p.plot(q,(1-np.exp(-q*q*0.05**2))/bccgrid.shape[0],li=2,sy=0,le='bcc diffusive')
+ p.plot(q,(1-np.exp(-q*q*0.05**2))/fccgrid.shape[0],li=3,sy=0,le='fcc diffusive')
+
+ p.title('Comparison sc, bcc, fcc lattice for a nano cube')
+ p.yaxis(scale='l',label='I(Q)')
+ p.xaxis(scale='l',label='Q / A\S-1')
+ p.legend(x=0.03,y=0.001,charsize=1.5)
+ p.text('cube formfactor',x=0.02,y=0.05,charsize=1.4)
+ p.text('Bragg peaks',x=4,y=0.05,charsize=1.4)
+ p.text('diffusive scattering',x=4,y=1e-6,charsize=1.4)
+
+END
+"""
+from __future__ import division
+from __future__ import print_function
+
+import numpy as np
+try:
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+except:
+    pass
+try:
+    from . import fscatter
+    useFortran=True
+except:
+    useFortran = False
+
+
+class lattice(object):
+
+    def __init__(self, latticeVectors, size, primitive=None,b=None):
+        """
+        Create an arbitrary lattice
+
+        """
+        pass
+
+    def __getitem__(self, item):
+        return self.points[item]
+
+    def __setitem__(self, item, value):
+        if self[item].shape==np.shape(value):
+            self.points[item] = value
+        else:
+            raise TypeError('Wrong shape of given value')
+
+    @property
+    def dimension(self):
+        return self.points.shape[1]-1
+
+    @property
+    def X(self):
+        """X coordinates"""
+        return self.points[:,0]
+
+    @property
+    def Y(self):
+        """Y coordinates"""
+        return self.points[:, 1]
+
+    @property
+    def Z(self):
+        """Z coordinates"""
+        return self.points[:, 2]
+
+    @property
+    def b(self):
+        """Scattering length"""
+        return self.points[:, 3]
+
+    @property
+    def shape(self):
+        return self.array.shape
+
+    @property
+    def type(self):
+        return self._type
+
+    @property
+    def array(self):
+        """Coordinates and scattering length as array"""
+        return np.array(self.points)
+
+    def filter(self,funktion):
+        """
+        Filter lattice points according to a function.
+
+        The existing points in the lattice size are tested.
+
+        Parameters
+        ----------
+        funktion : function returning bool
+            Function to select lattice points.
+            The function is applied with the point coordinates (array) as input.
+            This corresponds to .points[:,:3]
+
+        Returns
+        -------
+            array
+
+        Examples
+        --------
+        To select points inside of a sphere with radius 50 around [0,0,0]:
+        ::
+
+         grid.filter(lambda xyz: np.sum(xyz**2)<50**2)
+
+
+        """
+        return self.points[[funktion(point) for point in self.points[:,:3]]]
+
+    def centerOfMass(self):
+        """
+        CenterOf mass
+        """
+        return self.points[:,:3].mean(axis=0)
+
+    def numberOfAtoms(self):
+        """
+        Number of Atoms
+        """
+        return self.points.shape[0]
+
+    def limit2Cube(self,a,b,c):
+        """
+        Cut at cube with edges at
+
+        Parameters
+        ----------
+        a,b,c : float
+            Cut at +-[a,0,0],+-[0,b,0],+-[0,0,c]
+
+        Returns
+        -------
+
+        """
+        choose=(abs(self.X)<a) & (abs(self.Y)<b) & (abs(self.Z)<c)
+        self.points=self.points[choose]
+
+    def planeSide(self,vector,invert=False):
+        """
+        Select points on one side of a plane.
+
+        Parameters
+        ----------
+        vector : list 3x float
+            Vector from origin to plane, perpendicular to plane.
+        invert : bool
+            False choose points at origin side. True other side.
+
+        """
+        v=np.array(vector)
+        vv=(v ** 2).sum() ** 0.5
+        v=v/vv
+        if invert:
+            choose = np.dot(self.points[:,:3] , v) >= vv
+        else:
+            choose = np.dot(self.points[:,:3] , v) <= vv
+        self.points = self.points[choose]
+
+    def move(self,vector):
+        """
+        Move all points by vector.
+
+        Parameters
+        ----------
+        vector : list of 3 float or array
+            Vector to shift the points.
+
+        """
+        self.points[:,:3]=self.points[:,:3]+np.array(vector)
+
+    def inSphere(self,R):
+        """
+        Choose lattice points in sphere
+
+        Parameters
+        ----------
+        R: float
+            Radius of sphere around origin.
+            If negative the points outside are choosen
+
+        """
+        if R>0:
+            choose=np.sum((self.points[:,:3]**2),axis=1)<R**2
+        else:
+            choose = np.sum((self.points[:,:3]**2), axis=1) > R**2
+        self.points=self.points[choose]
+
+    def show(self,R=None):
+        """
+        Show the lattice in matplotlib.
+
+        Parameters
+        ----------
+        R : float,None
+            Radius around origin to show.
+
+        """
+        if R is None:
+            points=self.points
+        else:
+            choose=np.sum((self.points[:,:3]**2),axis=1)<R**2
+            points=self.points[choose]
+        ff=0.2
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(points[:,0],points[:,1],points[:,2],color="k",s=20)
+        try:
+            for v in self.latticeVectors:
+                ax.plot([0,v[0]],[0,v[1]],[0,v[2]],color='g')
+            for v in self.primitive:
+                if (v**2).sum()==0:
+                    pass
+                ax.plot([0,v[0]],[0,v[1]],[0,v[2]],color='b')
+        except:
+            pass
+
+        # set size of plot
+        #ax.set_xlim([points[:,0].min()*(1-ff),points[:,0].max()*(1+ff)])
+        #ax.set_ylim([points[:,1].min()*(1-ff),points[:,1].max()*(1+ff)])
+        #ax.set_zlim([points[:,2].min()*(1-ff),points[:,2].max()*(1+ff)])
+        ax.set_aspect("equal")
+        plt.tight_layout()
+        plt.show(block=False)
+        return fig
+
+
+class pseudoRandomLattice(lattice):
+
+    def __init__(self,size,numberOfPoints,b=None,seed=None):
+        """
+        Create a  lattice with a pseudo random distribution of points.
+
+        Allows to create 1D, 2D or 3D pseudo random latices.
+        The Halton sequence is used with skiping the first seed elements of the Halton sequence.
+
+        Parameters
+        ----------
+        size :3x float
+            Size of the lattice for each dimension relative to origin.
+        numberOfPoints : int
+            Number of points.
+        b : float,array
+            Scattering length of atoms. If arary the sequence is repeated to fill N atoms.
+        seed : None, int
+            Seed for the Halton sequence by skiping the first seed elements of the sequence.
+            If None an random integer between 10 and 1e6 is choosen.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points as numpy array
+
+        Examples
+        --------
+        ::
+
+         import jscatter as js
+         import matplotlib.pyplot as plt
+         from mpl_toolkits.mplot3d import Axes3D
+
+         grid=js.sf.pseudoRandomLattice([5,5,5],3000)
+         #
+         fig = plt.figure()
+         ax = fig.add_subplot(111, projection='3d')
+         #
+         ax.scatter(grid.X,grid.Y,grid.Z,color="k",s=20)
+         ax.set_aspect("equal")
+         plt.tight_layout()
+         plt.show(block=False)
+
+        """
+        self._makeLattice(size, numberOfPoints,b,seed)
+        self._type='pseudorandom'
+
+    def _makeLattice(self, size, N ,pb=None ,skip=None ):
+        if pb is None:
+            pb=1
+        dim=np.shape(size)[0]
+        if skip is None:
+            skip=np.random.randint(10,1000000)
+        seq=fscatter.pseudorandom.halton_sequence(skip,skip+N-1,dim).T
+        seq=seq*np.array(size)
+        if dim in [1,2]:
+            seq=np.c_[seq,np.zeros((N,3-dim))]
+        self.points=np.c_[seq,np.tile(pb,N)[:N]]
+
+
+class rhombicLattice(lattice):
+
+    def __init__(self, latticeVectors, size, primitive=None,b=None):
+        """
+        Create a rhombic lattice.
+
+        Allows to create 1D, 2D or 3D latices by using 1, 2 or 3 latticeVectors.
+
+        Parameters
+        ----------
+        latticeVectors : list of array 3x1
+            Lattice primitive vectors defining the translation of the unit cell along its principal axes.
+        size :3x integer or integer
+            A list of integers describing the size in direction of the respective latticeVectors.
+            Size is symmetric around zero in interval [-i,..,i] with length 2i+1.
+            If one integer is given it is used for all 3 dimensions.
+        primitive : list of 3x1 array, None=[0,0,0]
+            Position vectors of atoms in the primitive cell.
+        b : list of float
+            Corresponding scattering length of atoms in the primitive cell.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points as numpy array
+            .primitiveVolume         V = a1*a2 x a3 with latticeVectors a1, a2, a3;  if existing.
+
+        Examples
+        --------
+        ::
+
+         import jscatter as js
+         import matplotlib.pyplot as plt
+         from mpl_toolkits.mplot3d import Axes3D
+         # cubic lattice with diatomic base
+         grid=js.sf.rhombicLattice([[1,0,0],[0,1,0],[0,0,1]],[3,3,3],[[-0.1,-0.1,-0.1],[0.1,0.1,0.1]],[1,2])
+         #
+         fig = plt.figure()
+         ax = fig.add_subplot(111, projection='3d')
+         #
+         ax.scatter(grid.X,grid.Y,grid.Z,color="k",s=20)
+         ax.set_xlim([-5,5])
+         ax.set_ylim([-5,5])
+         ax.set_zlim([-5,5])
+         ax.set_aspect("equal")
+         plt.tight_layout()
+         plt.show(block=False)
+
+        """
+        if len(latticeVectors) != len(size):
+            raise TypeError('size and latticeVectors not compatible. Check dimension!')
+        if primitive is None:
+            primitive = [np.r_[0, 0, 0]]
+        if b is None:
+            b=[1]*len(primitive)
+        self.primitive_b=b
+        try:
+            V=np.dot(latticeVectors[0],np.cross(latticeVectors[1],latticeVectors[2]))
+            self.primitiveVolume=V
+            #self.reciprocalVectors = []
+            #self.append(2 * np.pi/V *np.cross(latticeVectors[2],latticeVectors[3]))
+            #self.append(2 * np.pi / V * np.cross(latticeVectors[3], latticeVectors[1]))
+            #self.append(2 * np.pi / V * np.cross(latticeVectors[1], latticeVectors[2]))
+        except:pass
+        self.latticeVectors=latticeVectors
+        self.size=size
+        self._makeLattice( self.latticeVectors, size, primitive, self.primitive_b)
+        self._type='rhombic'
+
+    def _makeLattice(self, latticeVectors, size, primitive=None,pb=None):
+        abc=latticeVectors[0]*np.r_[-size[0]:size[0]+1][:,None]
+        if len(size)>1:
+            abc = abc+(latticeVectors[1]*np.r_[-size[1]:size[1]+1][:,None])[:,None]
+        if len(size) > 2:
+            abc = abc + (latticeVectors[2]*np.r_[-size[2]:size[2]+1][:,None,None])[:,None,None]
+        abc=abc.reshape(-1,3)
+        abc=np.c_[(abc,np.zeros(abc.shape[0]))]
+        self.points=np.vstack([abc + np.r_[ev,b] for ev,b in zip(primitive,pb)])
+        self.primitive=primitive
+
+class bravaisLattice(rhombicLattice):
+
+    def __init__(self, latticeVectors, size):
+        """
+        Create a bravais lattice. Lattice with one atom in the primitive cell.
+
+        See rhombicLattice for methods and attributes.
+
+        Parameters
+        ----------
+        latticeVectors : list of array 1x3
+            Lattice primitive vectors defining the translation of the unit cell along its principal axes.
+        size :3x integer, integer
+            A list of integers describing the size in direction of the respective latticeVectors.
+            Size is symmetric around zero in interval [-i,..,i] with length 2i+1.
+            If one integer is given it is used for all 3 dimensions.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points asnumpy array
+
+        """
+        rhombicLattice.__init__(self, latticeVectors, size, primitive=None)
+        self._type = 'bravais'
+
+class scLattice(bravaisLattice):
+
+    def __init__(self, abc, size):
+        """
+        Simple Cubic lattice.
+
+        See rhombicLattice for methods.
+
+        Parameters
+        ----------
+        abc : float
+            Point distance.
+        size : 3x integer, integer
+            A list of integers describing the size in direction of the respective latticeVectors.
+            Size is symmetric around zero in interval [-i,..,i] with length 2i+1.
+            If one integer is given it is used for all 3 dimensions.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points as numpy array
+
+        Examples
+        --------
+        ::
+
+         import jscatter as js
+         import matplotlib.pyplot as plt
+         from mpl_toolkits.mplot3d import Axes3D
+         grid=js.sf.bccLattice(1.2,1).array
+         #
+         fig = plt.figure()
+         ax = fig.add_subplot(111, projection='3d')
+         #
+         ax.scatter(grid[:,0],grid[:,1],grid[:,2],color="k",s=20)
+         ax.set_xlim([-5,5])
+         ax.set_ylim([-5,5])
+         ax.set_zlim([-5,5])
+         ax.set_aspect("equal")
+         plt.tight_layout()
+         plt.show(block=False)
+
+        """
+        latticeVectors = [abc * np.r_[1., 0., 0.],
+                          abc * np.r_[0., 1., 0.],
+                          abc * np.r_[0., 0., 1.]]
+        if isinstance(size,(int,float)):
+            size = [size]*3
+        bravaisLattice.__init__(self, latticeVectors, size)
+        self._type = 'sc'
+
+class bccLattice(rhombicLattice):
+
+    def __init__(self, abc, size,b=None):
+        """
+        Body centered cubic lattice.
+
+        See rhombicLattice for methods.
+
+        Parameters
+        ----------
+        abc : float
+            Point distance.
+        size : 3x integer, integer
+            A list of integers describing the size in direction of the respective latticeVectors.
+            Size is symmetric around zero in interval [-i,..,i] with length 2i+1.
+            If one integer is given it is used for all 3 dimensions.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points as numpy array
+
+        Examples
+        --------
+        ::
+
+         import jscatter as js
+         import matplotlib.pyplot as plt
+         from mpl_toolkits.mplot3d import Axes3D
+         grid=js.sf.bccLattice(1.2,1).array
+         #
+         fig = plt.figure()
+         ax = fig.add_subplot(111, projection='3d')
+         #
+         ax.scatter(grid[:,0],grid[:,1],grid[:,2],color="k",s=20)
+         ax.set_xlim([-5,5])
+         ax.set_ylim([-5,5])
+         ax.set_zlim([-5,5])
+         ax.set_aspect("equal")
+         plt.tight_layout()
+         plt.show(block=False)
+
+        """
+        primitive = [np.r_[0, 0, 0], abc * np.r_[0.5, 0.5, 0.5]]
+        latticeVectors = [abc * np.r_[1., 0., 0.],
+                          abc * np.r_[0., 1., 0.],
+                          abc * np.r_[0., 0., 1.]]
+        if isinstance(size,(int,float)):
+            size = [size]*3
+        rhombicLattice.__init__(self, latticeVectors, size, primitive,b)
+        self._type = 'bcc'
+
+class fccLattice(rhombicLattice):
+
+    def __init__(self, abc, size):
+        """
+        Face centered cubic lattice.
+
+        See rhombicLattice for methods.
+
+        Parameters
+        ----------
+        abc : float
+            Point distance.
+        size : 3x integer, integer
+            A list of integers describing the size in direction of the respective latticeVectors.
+            Size is symmetric around zero in interval [-i,..,i] with length 2i+1.
+            If one integer is given it is used for all 3 dimensions.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points as numpy array
+
+        Examples
+        --------
+        ::
+
+         import jscatter as js
+         import matplotlib.pyplot as plt
+         from mpl_toolkits.mplot3d import Axes3D
+         grid=js.sf.fccLattice(1.2,1).array
+         #
+         fig = plt.figure()
+         ax = fig.add_subplot(111, projection='3d')
+         #
+         ax.scatter(grid[:,0],grid[:,1],grid[:,2],color="k",s=20)
+         ax.set_xlim([-5,5])
+         ax.set_ylim([-5,5])
+         ax.set_zlim([-5,5])
+         ax.set_aspect("equal")
+         plt.tight_layout()
+         plt.show(block=False)
+
+        """
+        primitive = [      np.r_[0, 0, 0],
+                     abc * np.r_[0, 0.5, 0.5],
+                     abc * np.r_[0.5, 0, 0.5],
+                     abc * np.r_[0.5, 0.5, 0]]
+        latticeVectors = [abc *np.r_[1., 0., 0.],
+                          abc *np.r_[0., 1., 0.],
+                          abc *np.r_[0., 0., 1.]]
+        if isinstance(size,(int,float)):
+            size = [size]*3
+        rhombicLattice.__init__(self, latticeVectors, size, primitive)
+        self._type = 'fcc'
+
+class hexLattice(rhombicLattice):
+
+    def __init__(self, ab,c, size):
+        """
+        Hexagonal lattice.
+
+        See rhombicLattice for methods.
+
+        Parameters
+        ----------
+        ab,c : float
+            Point distance.
+            ab is distance in hexagonal plane, c perpendicular.
+            For c/a = (8/3)**0.5 the hcp structure
+        size : 3x integer, integer
+            A list of integers describing the size in direction of the respective latticeVectors.
+            Size is symmetric around zero in interval [-i,..,i] with length 2i+1.
+            If one integer is given it is used for all 3 dimensions.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points as numpy array
+
+        Examples
+        --------
+        ::
+
+         import jscatter as js
+         import matplotlib.pyplot as plt
+         from mpl_toolkits.mplot3d import Axes3D
+         grid=js.sf.hexLattice(1.,2,[2,2,2]).array
+         #
+         fig = plt.figure()
+         ax = fig.add_subplot(111, projection='3d')
+         ax.scatter(grid[:,0],grid[:,1],grid[:,2],color="k",s=20)
+         ax.set_xlim([-5,5])
+         ax.set_ylim([-5,5])
+         ax.set_zlim([-5,5])
+         ax.set_aspect("equal")
+         plt.tight_layout()
+         plt.show(block=False)
+
+        """
+
+        latticeVectors = [np.r_[ab, 0., 0.],
+                          np.r_[0.5*ab, 3**0.5/2*ab, 0.],
+                          np.r_[0., 0., c]]
+        primitive = [      np.r_[0, 0, 0] ]
+        if isinstance(size,(int,float)):
+            size = [size]*3
+        rhombicLattice.__init__(self, latticeVectors, size, primitive)
+        self._type = 'hex'
+
+class hcpLattice(rhombicLattice):
+
+    def __init__(self, ab, size):
+        """
+        Hexagonal closed packed lattice.
+
+        See rhombicLattice for methods.
+
+        Parameters
+        ----------
+        ab : float
+            Point distance.
+            ab is distance in hexagonal plane, c = ab* (8/3)**0.5
+        size : 3x integer, integer
+            A list of integers describing the size in direction of the respective latticeVectors.
+            Size is symmetric around zero in interval [-i,..,i] with length 2i+1.
+            If one integer is given it is used for all 3 dimensions.
+
+        Returns
+        -------
+        lattice object
+            .array  grid points as numpy array
+
+        Examples
+        --------
+        ::
+
+         import jscatter as js
+         import matplotlib.pyplot as plt
+         from mpl_toolkits.mplot3d import Axes3D
+         grid=js.sf.hcpLattice(1.2,[3,3,1]).array
+         #
+         fig = plt.figure()
+         ax = fig.add_subplot(111, projection='3d')
+         #
+         ax.scatter(grid[:,0],grid[:,1],grid[:,2],color="k",s=20)
+         ax.set_xlim([-5,5])
+         ax.set_ylim([-5,5])
+         ax.set_zlim([-5,5])
+         ax.set_aspect("equal")
+         plt.tight_layout()
+         plt.show(block=False)
+
+        """
+        c = ab* (8/3.)**0.5
+        latticeVectors = [np.r_[ab, 0., 0.],
+                          np.r_[0.5*ab, 3**0.5/2*ab, 0.],
+                          np.r_[0., 0., c]]
+        primitive = [      np.r_[0, 0, 0],
+                     1/3.*latticeVectors[0] + 1/3.*latticeVectors[1] + 0.5*latticeVectors[2] ]
+
+        if isinstance(size,(int,float)):
+            size = [size]*3
+        rhombicLattice.__init__(self, latticeVectors, size, primitive)
+        self._type = 'hcp'
+
+
+
+
