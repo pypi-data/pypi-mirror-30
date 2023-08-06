@@ -1,0 +1,197 @@
+{% macro viewer3d(loop, uuid, molecule) %}
+    <div id="viewport{{ loop.index }}" class="ngl-viewport"></div>
+    <script>
+        document.addEventListener("DOMContentLoaded", AddNGLWidget(
+            "{{ loop.index }}", "{{ url_for('get_image', filename='{}/{}.pdb'.format(uuid, molecule.name)) }}", "{{molecule.name}}").autoView());
+    </script>
+{% endmacro %}
+<!DOCTYPE html>
+<html>
+<head>
+<title>ESIgen - Supporting Information Generator</title>
+<link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/{}'.format(css)) }}">
+<link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" />
+</head>
+<body>
+<script src="{{ url_for('static', filename='js/jquery-2.1.4.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/xepOnline.jqPlugin.js') }}"></script>
+<script src="{{ url_for('static', filename='js/clipboard.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/jszip.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/FileSaver.min.js') }}"></script>
+{% if ngl %}
+<script src="{{ url_for('static', filename='js/ngl.ts2.js') }}"></script>
+<script>
+document.NGLStages = {};
+NGL.setMeasurementDefaultParams({
+  color: 'green',
+  labelColor: '#222222',
+  labelAttachment: 'bottom-center',
+  labelSize: 1.0,
+  labelZOffset: 0.5,
+  labelYOffset: 0.1,
+  labelBorder: true,
+  labelBorderColor: 'white',
+  labelBorderWidth: 0.25,
+  lineOpacity: 0.8,
+  linewidth: 5.0,
+  opacity: 0.6,
+
+  labelUnit: 'angstrom',
+  arcVisible: true,
+  planeVisible: false
+})
+function AddNGLWidget(index, moleculeUrl, basename) {
+    if (index in document.NGLStages) return document.NGLStages[index];
+    var stage = new NGL.Stage("viewport"+index,
+        {fogNear: 100, fogFar: 100, backgroundColor: 'white'});
+    document.NGLStages[index] = stage;
+    stage.moleculeName = basename;
+    stage.loadFile(moleculeUrl, {ext: 'pdb'}).then(function (component) {
+        var sele = 'not (_C or _H or _N or _O)';
+        component.addRepresentation("cartoon");  // for proteins
+        component.addRepresentation("licorice", {multipleBond: "symmetric"}); // for ligands
+        component.addRepresentation("ball+stick", {sele: sele, aspectRatio: 3.0}); // for metals
+        // add labels to non-CHON atoms
+        var labelText = {}
+        var selectionObject = new NGL.Selection(sele);
+        component.structure.eachAtom(function(AtomProxy) {
+            var elem = AtomProxy.element
+            labelText[AtomProxy.index] = elem.charAt(0).toUpperCase() + elem.slice(1).toLowerCase();
+        }, selectionObject);
+        component.addRepresentation(
+            'label', {  sele: sele,
+                        color: '#222222',
+                        name: 'non-CHON element',
+                        labelType: 'text',
+                        labelText: labelText,
+                        xOffset: 0.5,
+                        showBorder: true,
+                        borderColor: '#FFFFFF',
+                        borderWidth: 0.05,
+                        sdf: true
+                        }
+        );
+        // provide a "good" view of the structure
+        component.autoView();
+    });
+    return stage;
+};
+</script>
+{% endif %}
+<div id="main" class="container">
+    <div id="markup">
+        <h2>Supporting Information</h2>
+        {% for molecule, report in reports %}
+            <article id="content" class="markdown-body">
+                {# Not proud of this part, but it works... #}
+                {{ report|safe|replace("{{ viewer3d }}", viewer3d(loop, uuid, molecule) ) }}
+            </article>
+        {% endfor %}
+
+        <div id="footer">
+            <div id="loader" class="loader" style="display:none;"></div>
+            <div class="do-not-print">
+                <ul class="export-options">
+                    <li class="export-submenu">
+                        <a href="javascript:;">Download</a>
+                        <ul class="export-submenu-content">
+                            <li><a href="zip">All files in a ZIP</a></li>
+                            <li><a href="javascript:;" onclick="return renderCanvasZip();">Rendered Images</a></li>
+                            <li><a href="md?template={{template}}" target="_blank">Plain text report</a></li>
+                            <li><a href="xyz">XYZ coordinates</a></li>
+                            <li><a href="cml">CML coordinates</a></li>
+                            <li><a href="json" target="_blank">Raw JSON data</a></li>
+                            <li><a href="cjson" target="_blank">Chemical JSON data</a></li>
+                        </ul>
+                    </li>
+                    {% if GITHUB or FIGSHARE or ZENODO %}
+                    <li class="export-submenu">
+                        <a href="javascript:;">DOI-citable exports</a>
+                        <ul class="export-submenu-content">
+                            {% if FIGSHARE %}
+                            <li><a href="figshare?template={{template}}" target="_blank">FigShare</a></li>
+                            {% endif %}
+                            {% if GITHUB %}
+                            <li><a href="gist?template={{template}}" target="_blank">GitHub Gist</a></li>
+                            {% endif %}
+                            {% if FIGSHARE %}
+                            <li><a href="zenodo?template={{template}}" target="_blank">Zenodo</a></li>
+                            {% endif %}
+                        </ul>
+                    </li>
+                    {% endif %}
+                    <li class="export-submenu">
+                        <a href="javascript:;">More options</a>
+                        <ul class="export-submenu-content">
+                            <li><a href="javascript:;" onclick="return generatePDF();">Save as PDF</a></li>
+                            <li><a href="javascript:;" id='copy-btn' data-clipboard-target="#markup" onclick="return copyToClipboard();">Copy to clipboard</a></li>
+                            <li><a href="javascript:;" onclick="window.print()" target="_blank">Print</a></li>
+                            <li><a href="{{ url_for('index') }}">Back to homepage</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+            <p align="center">
+                Generated automatically with <a href="https://github.com/insilichem/esigen" target="_blank">insilichem/esigen</a> &middot; <a href="{{ url_for('privacy_policy') }}" target="_blank">Privacy policy</a>
+            </p>
+        </div>
+    </div>
+</div>
+<script>
+    function generatePDF() {
+        var ok = confirm("Generating PDF reports is not recommended! PDF is a format designed for human-readable, ready-to-print documents, but it is terrible for science reproducibility! If you are going to use it as part of your ESI, please only do that if you are also including raw, machine-readable files like your original input and output files, plain-text summaries, XYZ files, or CJSON dumps. You will find them in the Download options.")
+        if (!ok) {
+            return false;
+        }
+        var response = xepOnline.Formatter.Format('main',  {
+            //render: 'download',
+            filename: '{{ "esigen-report-{}".format(uuid) }}',
+            embedLocalImages: true,
+            resolution: 300,
+            pageWidth: '216mm',
+            pageHeight: '279mm'
+        });
+        return false;
+    };
+    document.addEventListener('DOMContentLoaded', function () {
+        jQuery(document).on("xepOnlineStatus", function (event, state) {
+            if (state == "Started") {
+                jQuery('#loader').toggle('show');
+            }
+            else if (state == "Finished") {
+                jQuery('#loader').toggle('hide');
+            }
+            else if (state == "Errored") {
+                setTimeout(generatePDF, 500);
+            }
+        });
+    });
+    function renderCanvasZip(){
+        jQuery('#loader').toggle('show');
+        var zip = new JSZip();
+        for (var stageId in document.NGLStages) {
+            var stage = document.NGLStages[stageId];
+            var viewer = stage.viewer;
+            var canvas = viewer.renderer.domElement;
+            var container = canvas.parentElement;
+            var fr = new FileReader();
+            params = {trim: false, antialias: true, transparent: false}
+            zip.file(stage.moleculeName + '.png', stage.makeImage(params));
+        }
+        zip.generateAsync({ type: "blob" }).then(function(data) {
+            saveAs(data, "{{uuid}}-images.zip");
+            setTimeout(function () { jQuery('#loader').toggle('hide'); }, 1000);
+        });
+    }
+    function copyToClipboard() {
+        jQuery('#loader').toggle('show');
+        var clipboard = new Clipboard('#copy-btn');
+        document.clipboard = clipboard;
+        clipboard.on('success', function (e) {
+            e.clearSelection();
+            setTimeout(function () { jQuery('#loader').toggle('hide'); }, 1000);
+        });
+    }
+</script>
+</body>
+</html>
