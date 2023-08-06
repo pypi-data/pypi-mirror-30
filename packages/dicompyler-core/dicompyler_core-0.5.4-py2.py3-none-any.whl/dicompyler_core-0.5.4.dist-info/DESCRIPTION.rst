@@ -1,0 +1,156 @@
+dicompyler-core
+===============
+
+|Binder| |pypi| |travis-ci| |coveralls| |Codacy| |Codecov| |Documentation Status|
+
+Core functionality of `dicompyler <http://www.dicompyler.com>`__. This
+package includes:
+
+-  ``dicomparser``: parse DICOM objects in an easy-to-use manner
+-  ``dvh``: Pythonic access to dose volume histogram (DVH) data
+-  ``dvhcalc``: Independent DVH calculation using DICOM RT Dose & RT Structure Set
+
+Other information
+-----------------
+
+-  Free software: `BSD license <https://github.com/dicompyler/dicompyler-core/blob/master/LICENSE>`__
+-  Documentation: `Read the docs <https://dicompyler-core.readthedocs.io>`__
+-  Tested on Python 2.7, 3.4, 3.5, 3.6
+
+Dependencies
+------------
+
+-  `numpy <http://www.numpy.org>`__ 1.2 or higher
+-  `pydicom <https://pydicom.github.io>`__ 0.9.9 or higher (pydicom 1.0 compatible)
+-  `matplotlib <http://matplotlib.org>`__ 1.3.0 or higher (for DVH calculation)
+-  `six <https://pythonhosted.org/six/>`__ 1.5 or higher
+-  Optional:
+
+   -  `Pillow <https://pillow.readthedocs.io>`__ (for image display)
+   -  `Shapely <https://github.com/Toblerity/Shapely>`__ (for structure volume calculation)
+   -  `scikit-image <http://scikit-image.org/>`__ (for DVH interpolation)
+
+Basic Usage
+------------
+
+.. code-block:: python
+
+    from dicompylercore import dicomparser, dvh, dvhcalc
+    dp = dicomparser.DicomParser("rtss.dcm")
+
+    # i.e. Get a dict of structure information
+    structures = dp.GetStructures()
+
+    >>> structures[5]
+    {'color': array([255, 128, 0]), 'type': 'ORGAN', 'id': 5, 'empty': False, 'name': 'Heart'}
+
+    # Access DVH data
+    rtdose = dicomparser.DicomParser("rtdose.dcm")
+    heartdvh = dvh.DVH.from_dicom_dvh(rtdose.ds, 5)
+
+    >>> heartdvh.describe()
+    Structure: Heart
+    DVH Type:  cumulative, abs dose: Gy, abs volume: cm3
+    Volume:    437.46 cm3
+    Max Dose:  3.10 Gy
+    Min Dose:  0.02 Gy
+    Mean Dose: 0.64 Gy
+    D100:      0.00 Gy
+    D98:       0.03 Gy
+    D95:       0.03 Gy
+    D2cc:      2.93 Gy
+
+    # Calculate a DVH from DICOM RT data
+    calcdvh = dvhcalc.get_dvh("rtss.dcm", "rtdose.dcm", 5)
+
+    >>> calcdvh.max, calcdvh.min, calcdvh.D2cc
+    (3.0899999999999999, 0.029999999999999999, dvh.DVHValue(2.96, 'Gy'))
+
+Advanced Usage and Examples can be found in Binder: |Binder|
+
+Credits
+-------
+
+This package was created with
+`Cookiecutter <https://github.com/audreyr/cookiecutter>`__ and the
+`audreyr/cookiecutter-pypackage <https://github.com/audreyr/cookiecutter-pypackage>`__ project template.
+
+.. |Binder| image:: http://mybinder.org/badge.svg
+   :target: http://mybinder.org/repo/bastula/dicom-notebooks
+.. |pypi| image:: https://img.shields.io/pypi/v/dicompyler-core.svg
+   :target: https://pypi.python.org/pypi/dicompyler-core
+.. |travis-ci| image:: https://img.shields.io/travis/dicompyler/dicompyler-core.svg
+   :target: https://travis-ci.org/dicompyler/dicompyler-core
+.. |coveralls| image:: https://coveralls.io/repos/github/dicompyler/dicompyler-core/badge.svg?branch=master
+   :target: https://coveralls.io/github/dicompyler/dicompyler-core?branch=master
+.. |Codacy| image:: https://api.codacy.com/project/badge/Grade/d8e948ed96914dc19293e34060847d3f
+   :target: https://www.codacy.com/app/bastula/dicompyler-core?utm_campaign=Badge_Coverage
+.. |Codecov| image:: https://codecov.io/gh/dicompyler/dicompyler-core/branch/master/graph/badge.svg
+   :target: https://codecov.io/gh/dicompyler/dicompyler-core
+.. |Documentation Status| image:: https://readthedocs.org/projects/dicompyler-core/badge/?version=latest
+   :target: https://dicompyler-core.readthedocs.io/en/latest/
+
+
+=======
+History
+=======
+
+0.5.4 (2018-04-02)
+------------------
+
+dvhcalc
+~~~~~~~
+- Implemented DVH interpolation. (#39)
+- Implemented optional user-specified structure thickness
+  for DVH calculation.
+
+
+dvh
+~~~
+- Fix a bug in absolute_volume if a DVH instance's volume units
+  don't use default of Gy.
+- Fix a bug in absolute_dose if a DVH instance's dose units don't
+  use default of Gy. (#19)
+- Support decimal values for volume constraints (i.e.V71.6).
+- Support decimal values for dose constraints (i.e. D0.03cc).
+
+dicomparser
+~~~~~~~~~~~
+- Ensure that Rx Dose from RT Plan is rounded instead of
+  truncated.
+- Account for holes and bifurcated structures for structure
+  volume calculation.
+- Implement structure volume calculation using Shapely. (#28)
+
+
+0.5.3 (2017-08-03)
+------------------
+* Added support for plotting structure colors.
+* Support Python 2 unicode filenames in dicomparser.
+* Support DVH calculation of structures partially covered by the dose grid.
+
+
+0.5.2 (2016-07-25)
+------------------
+
+* Added ``DVH`` class for Pythonic access to dose volume histogram data.
+* Refactored and added unit tests for dvhcalc.
+* Added examples and usage for ``dvh`` and ``dvhcalc`` modules.
+* Jupyter notebook of examples can be found in Binder: |dicom-notebooks|
+
+
+0.5.1 (2016-02-17)
+------------------
+
+* Added support for pydicom 0.9.9 so releases from PyPI can be built.
+
+
+0.5.0 (2016-02-11)
+------------------
+
+* First release on PyPI.
+
+.. |dicom-notebooks| image:: http://mybinder.org/badge.svg
+   :target: http://mybinder.org/repo/bastula/dicom-notebooks
+
+
