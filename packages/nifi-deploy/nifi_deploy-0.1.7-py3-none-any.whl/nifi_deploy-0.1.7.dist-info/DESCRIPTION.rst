@@ -1,0 +1,3 @@
+Easy CLI tool for exporting and importing Nifi templates to and from XML files.
+
+
