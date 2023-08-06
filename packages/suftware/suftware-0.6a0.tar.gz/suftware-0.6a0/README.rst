@@ -1,0 +1,25 @@
+SUFTware is a lightweight Python package that provides provides fast and robust implementations of Bayesian Field Theory (BFT) methods for low-dimensional statistical inference. BFT is a grid-based approach to Bayesian nonparametric inference. By using a grid in lieu of specific stochastic processes (such as Dirichlet processes or Gaussian processes), BFT allows certain types of problems to be solved in a fully Bayesian manner without requiring any large-data approximations.
+
+Currently, SUFTware supports a one-dimensional density estimation called DEFT. DEFT has substantial advantages over standard density estimation methods, including, including kernel density estimation and Dirichlet process mixture modeling. See [Chen et al., 2018; Kinney 2015; Kinney 2014].
+
+Installation¶
+pip install suftware
+Requirements
+
+Python >= 3.6.3
+or Python = 2.7.10
+numpy >= 1.13.3
+scipy >= 1.0.0
+matplotlib >= 2.1.0
+Quick Start
+import numpy as np
+import suftware as sw
+
+# Generate random data
+data = np.random.randn(100)
+
+# Perform one-dimensional density estimation using SUFTware
+density = sw.Density(data)
+
+# Visualize results
+density.plot()
