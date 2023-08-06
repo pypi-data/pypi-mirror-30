@@ -1,0 +1,11 @@
+pyneovi is a wrapper around the API provided by Intrepid Control Systems for communicating with their NeoVI range of devices.
+
+The focus of the library is on communicating with the ECU in the context of a diagnostic session. Currently, authentication via Security Access commands is not handled and must be performed by a separate tool.
+
+The project homepage is http://kempj.co.uk/projects/pyneovi/
+
+The project sourcecode repository is at https://bitbucket.org/Kemp_J/pyneovi
+
+Documentation can be found at http://pyneovi.readthedocs.org/en/latest/
+
+This library is available under the MIT license, as provided in LICENSE.txt.
