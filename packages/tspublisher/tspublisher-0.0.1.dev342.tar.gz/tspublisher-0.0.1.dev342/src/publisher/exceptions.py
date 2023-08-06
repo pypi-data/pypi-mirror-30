@@ -1,0 +1,4 @@
+
+
+class ContentMissingError(Exception):
+    pass
