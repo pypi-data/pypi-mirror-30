@@ -1,0 +1,202 @@
+
+======
+Oujago
+======
+
+Coding makes life easier. This is a factory contains commonly used
+algorithms.
+
+
+Installation
+============
+
+Install ``oujago`` using pip:
+
+.. code-block:: bash
+
+    $> pip install oujago
+
+Install from source code:
+
+.. code-block:: bash
+
+    $> python setup.py clean --all install
+
+
+Download data from `BaiDuYun <https://pan.baidu.com/s/1i57RVLj>`_:
+
+.. code-block::
+
+    https://pan.baidu.com/s/1i57RVLj
+
+
+
+Documentation
+=============
+
+Available online documents: `latest <http://oujago.readthedocs.io/en/latest/>`_,
+`stable <http://oujago.readthedocs.io/en/stable/>`_,
+and `stable <http://oujago.readthedocs.io/en/develop/>`_.
+
+
+NLP Part
+========
+
+Hanzi Converter
+---------------
+
+繁简转换器.
+
+.. code-block:: shell
+
+    >>> from oujago.nlp import FJConvert
+    >>> FJConvert.to_tradition('繁简转换器')
+    '繁簡轉換器'
+    >>> FJConvert.to_simplify('繁簡轉換器')
+    '繁简转换器'
+    >>> FJConvert.same('繁简转换器', '繁簡轉換器')
+    >>> True
+    >>> FJConvert.same('繁简转换器', '繁簡轉換')
+    >>> False
+
+
+Chinese Segment
+---------------
+
+Support ``jieba``, ``LTP``, ``thulac``, ``pynlpir`` etc. public segmentation methods.
+
+.. code-block:: shell
+
+    >>> from oujago.nlp import seg
+    >>>
+    >>> sentence = "这是一个伸手不见五指的黑夜。我叫孙悟空，我爱北京，我爱Python和C++。"
+    >>> seg(sentence, mode='ltp')
+    ['这', '是', '一个', '伸手', '不', '见', '五', '指', '的', '黑夜', '。', '我', '叫', '孙悟空',
+    '，', '我', '爱', '北京', '，', '我', '爱', 'Python', '和', 'C', '+', '+', '。']
+    >>> seg(sentence, mode='jieba')
+    ['这是', '一个', '伸手不见五指', '的', '黑夜', '。', '我', '叫', '孙悟空', '，', '我', '爱',
+    '北京', '，', '我', '爱', 'Python', '和', 'C++', '。']
+    >>> seg(sentence, mode='thulac')
+    ['这', '是', '一个', '伸手不见五指', '的', '黑夜', '。', '我', '叫', '孙悟空', '，',
+    '我', '爱', '北京', '，', '我', '爱', 'Python', '和', 'C', '+', '+', '。']
+    >>> seg(sentence, mode='nlpir')
+    ['这', '是', '一个', '伸手', '不见', '五指', '的', '黑夜', '。', '我', '叫', '孙悟空',
+    '，', '我', '爱', '北京', '，', '我', '爱', 'Python', '和', 'C++', '。']
+    >>>
+    >>> seg("这是一个伸手不见五指的黑夜。")
+    ['这是', '一个', '伸手不见五指', '的', '黑夜', '。']
+    >>> seg("这是一个伸手不见五指的黑夜。", mode='ltp')
+    ['这', '是', '一个', '伸手', '不', '见', '五', '指', '的', '黑夜', '。']
+    >>> seg('我不喜欢日本和服', mode='jieba')
+    ['我', '不', '喜欢', '日本', '和服']
+    >>> seg('我不喜欢日本和服', mode='ltp')
+    ['我', '不', '喜欢', '日本', '和服']
+
+
+Part-of-Speech
+--------------
+
+.. code-block:: shell
+
+    >>> from oujago.nlp.postag import pos
+    >>> pos('我不喜欢日本和服', mode='jieba')
+    ['r', 'd', 'v', 'ns', 'nz']
+    >>> pos('我不喜欢日本和服', mode='ltp')
+    ['r', 'd', 'v', 'ns', 'n']
+
+
+NN Part
+=======
+
+SRU (PyTorch)
+-------------
+
+Require packages: ``cupy``, ``pynvrtc``, ``pytorch``.
+Comes from `<Training RNNs as Fast as CNNs> <https://arxiv.org/abs/1709.02755>`_ .
+
+The usage of SRU is similar to ``torch.nn.LSTM``.
+
+.. code-block:: python
+
+    import torch
+    from torch.autograd import Variable
+    from oujago.nn.sru import SRU, SRUCell
+
+    # input has length 20, batch size 32 and dimension 128
+    x = Variable(torch.FloatTensor(20, 32, 128).cuda())
+
+    input_size, hidden_size = 128, 128
+
+    rnn = SRU(input_size, hidden_size,
+        num_layers = 2,          # number of stacking RNN layers
+        dropout = 0.0,           # dropout applied between RNN layers
+        rnn_dropout = 0.0,       # variational dropout applied on linear transformation
+        use_tanh = 1,            # use tanh?
+        use_relu = 0,            # use ReLU?
+        bidirectional = False    # bidirectional RNN ?
+    )
+    rnn.cuda()
+
+    output, hidden = rnn(x)      # forward pass
+
+    # output is (length, batch size, hidden size * number of directions)
+    # hidden is (layers, batch size, hidden size * number of directions)
+
+
+See Language Modeling example: `sru_language_modeling.py <apps/sru_language_modeling>`_
+
+
+Utils Part
+==========
+
+Common Utils
+------------
+
+
+Check weather this ``object`` is an iterable.
+
+.. code-block:: shell
+
+    >>> from oujago.utils.common import is_iterable
+    >>> is_iterable([1, 2])
+    True
+    >>> is_iterable((1, 2))
+    True
+    >>> is_iterable("123")
+    True
+    >>> is_iterable(123)
+    False
+
+
+Time Utils
+----------
+
+Get current time.
+
+.. code-block:: shell
+
+    >>> from oujago.utils.time import now
+    >>> now()
+    "2017-04-26-16-44-56"
+    >>>
+    >>> from oujago.utils.time import today
+    >>> today()
+    "2017-04-26"
+
+Change the total time into the normal time format.
+
+.. code-block:: shell
+
+    >>> from oujago.utils.time import time_format
+    >>> time_format(36)
+    "36 s"
+    >>> time_format(90)
+    "1 min 30 s "
+    >>> time_format(5420)
+    "1 h 30 min 20 s"
+    >>> time_format(20.5)
+    "20 s 500 ms"
+    >>> time_format(864023)
+    '10 d 23 s'
+
+
