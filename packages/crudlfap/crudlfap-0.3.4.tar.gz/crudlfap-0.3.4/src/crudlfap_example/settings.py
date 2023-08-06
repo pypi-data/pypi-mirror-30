@@ -1,0 +1,11 @@
+from crudlfap.settings import *  # noqa
+
+INSTALLED_APPS += [  # noqa
+    # CRUDLFA+ examples
+    'crudlfap_example.artist',
+    'crudlfap_example.song',
+    'crudlfap_example.nondb',
+]
+
+install_optional(OPTIONAL_APPS, INSTALLED_APPS)  # noqa
+install_optional(OPTIONAL_MIDDLEWARE, MIDDLEWARE)  # noqa
