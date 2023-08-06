@@ -1,0 +1,339 @@
+======================================
+z3c.insist -- Persistence to ini files
+======================================
+
+Suppose we have an object with some schema:
+
+    >>> import zope.interface
+    >>> import zope.schema
+
+    >>> class Person(object):
+    ...     firstname = u"Albertas"
+    ...     lastname = u"Agejevas"
+    ...     weight = 42
+    ...     yacht = None
+
+    >>> p = Person()
+
+    >>> class IPerson(zope.interface.Interface):
+    ...     firstname = zope.schema.TextLine(title=u"First Name")
+    ...     lastname = zope.schema.TextLine(title=u"Last Name")
+    ...     weight = zope.schema.Int(title=u"Weight")
+    ...     yacht = zope.schema.TextLine(title=u"Yacht Name")
+
+Now we can create a store that will dump and restore the state of an
+object in an .ini file:
+
+    >>> from z3c.insist import insist
+    >>> store = insist.ConfigurationStore.makeStore(p, IPerson, 'person')
+    >>> state = store.dumps()
+    >>> print(state)
+    [person]
+    firstname = Albertas
+    lastname = Agejevas
+    weight = 42
+    yacht = !None
+
+Similarly, the store can load the object state from a config file:
+
+    >>> p.firstname = p.lastname = p.weight = p.yacht = None
+    >>> store.loads(state)
+    >>> print(p.firstname)
+    Albertas
+    >>> print(p.lastname)
+    Agejevas
+    >>> print(p.weight)
+    42
+    >>> print(p.yacht)
+    None
+
+
+Fields
+~~~~~~
+
+The store can provide an attribute with a list of fields to process:
+
+    >>> store.fields = ('firstname', 'lastname')
+    >>> print(store.dumps())
+    [person]
+    firstname = Albertas
+    lastname = Agejevas
+
+It works for loading, too:
+
+    >>> store.loads("""\
+    ... [person]
+    ... firstname = Albertas
+    ... lastname = Agejevas
+    ... yacht = Titanic
+    ... """)
+    >>> p.yacht
+
+
+Custom field serialization
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The store can have custom methods to load and dump particular fields:
+
+    >>> def dump_lastname(value):
+    ...     return value.upper()
+    >>> store.dump_lastname = dump_lastname
+    >>> print(store.dumps())
+    [person]
+    firstname = Albertas
+    lastname = AGEJEVAS
+
+    >>> def load_lastname(value):
+    ...     return value.title()
+    >>> store.load_lastname = load_lastname
+    >>> store.loads("""\
+    ... [person]
+    ... firstname = Albertas
+    ... lastname = AGEJEVAS
+    ... """)
+    >>> print(p.lastname)
+    Agejevas
+
+
+Choice fields
+~~~~~~~~~~~~~
+
+Choice fields are serialized to their token and restored to their
+value.
+
+Let's set up a vocabulary and a schema using it:
+
+    >>> from zope.schema import vocabulary
+    >>> colors = vocabulary.SimpleVocabulary([
+    ...     vocabulary.SimpleTerm("#FF0000", token="red"),
+    ...     vocabulary.SimpleTerm("#00FF00", token="green"),
+    ...     vocabulary.SimpleTerm("#0000FF", token="blue"),
+    ...     ])
+    >>> class IApple(zope.interface.Interface):
+    ...    color = zope.schema.Choice(vocabulary=colors)
+
+    >>> class Apple(object):
+    ...    color = "#00FF00"
+
+    >>> papple = Apple()
+
+    >>> store = insist.ConfigurationStore.makeStore(papple, IApple)
+    >>> print(store.dumps())
+    [IApple]
+    color = green
+
+    >>> store.loads("""\
+    ... [IApple]
+    ... color = red
+    ... """)
+    >>> papple.color
+    '#FF0000'
+
+When the value or the term is not in the vocabulary, the value converted to a
+string is used as the token:
+
+    >>> papple.color = '#FFFF00'
+    >>> print(store.dumps())
+    [IApple]
+    color = #FFFF00
+
+    >>> store.loads("""\
+    ... [IApple]
+    ... color = lime
+    ... """)
+    >>> print(papple.color)
+    lime
+
+
+Decimal fields
+~~~~~~~~~~~~~~
+
+Decimal fields are serialized to/from strings pretty trivially
+
+    >>> import decimal
+
+    >>> class IProduct(zope.interface.Interface):
+    ...    price = zope.schema.Decimal()
+
+    >>> class Product(object):
+    ...    price = decimal.Decimal('23.06')
+    >>> product = Product
+    >>> store = insist.ConfigurationStore.makeStore(product, IProduct)
+    >>> ini = store.dumps()
+    >>> print(ini)
+    [IProduct]
+    price = 23.06
+
+Now load the configuration
+
+    >>> loaded = store.loads("""
+    ... [IProduct]
+    ... price = 0.05
+    ... """)
+    >>> product.price
+    Decimal('0.05')
+
+
+Sequence fields
+~~~~~~~~~~~~~~~
+
+Tuple and list fields are serialized as multiline values.
+
+    >>> class ICrayons(zope.interface.Interface):
+    ...     colors = zope.schema.List(
+    ...         value_type=zope.schema.Choice(vocabulary=colors))
+
+    >>> class Crayons(object):
+    ...     colors = None
+
+    >>> cr = Crayons()
+    >>> cr.colors = ['#0000FF', '#00FF00']
+    >>> store = insist.ConfigurationStore.makeStore(cr, ICrayons, 'crayons')
+    >>> print(store.dumps())
+    [crayons]
+    colors = blue, green
+
+    >>> store.loads("""\
+    ... [crayons]
+    ... colors = red, green
+    ... """)
+    >>> cr.colors
+    ['#FF0000', '#00FF00']
+
+    >>> store.loads("""\
+    ... [crayons]
+    ... colors =
+    ... """)
+    >>> cr.colors
+    []
+
+Date fields
+~~~~~~~~~~~
+
+Date fields get stringified.
+
+    >>> class IPerson(zope.interface.Interface):
+    ...     birthdate = zope.schema.Date()
+
+    >>> class Person(object):
+    ...     birthdate = None
+
+    >>> import datetime
+    >>> p = Person()
+    >>> p.birthdate = datetime.date(1974, 12, 30)
+
+    >>> store = insist.ConfigurationStore.makeStore(p, IPerson, 'person')
+    >>> print(store.dumps())
+    [person]
+    birthdate = 1974-12-30
+
+    >>> store.loads("""\
+    ... [person]
+    ... birthdate = 2014-01-31
+    ... """)
+    >>> p.birthdate
+    datetime.date(2014, 1, 31)
+
+
+Datetime fields
+~~~~~~~~~~~~~~~
+
+Datetime fields get stringified.
+
+    >>> class IFoo(zope.interface.Interface):
+    ...     timestamp = zope.schema.Datetime()
+
+    >>> class Foo(object):
+    ...     timestamp = None
+
+    >>> foo = Foo()
+    >>> foo.timestamp = datetime.datetime(2014, 4, 9, 9, 54, 42, 132)
+
+    >>> store = insist.ConfigurationStore.makeStore(foo, IFoo, 'foo')
+    >>> print(store.dumps())
+    [foo]
+    timestamp = 2014-04-09T09:54:42.000132
+
+  We need to take care about timezones too.
+
+    >>> from pytz import UTC, timezone
+
+    >>> foo.timestamp = datetime.datetime(2014, 4, 9, 9, 54, 42, 132, tzinfo=UTC)
+    >>> print(store.dumps())
+    [foo]
+    timestamp = 2014-04-09T09:54:42.000132+00:00
+
+    >>> foo.timestamp = datetime.datetime(2014, 4, 9, 9, 54, 42, 132,
+    ...     tzinfo=timezone('CET'))
+    >>> print(store.dumps())
+    [foo]
+    timestamp = 2014-04-09T09:54:42.000132+01:00
+
+    >>> store.loads("""\
+    ... [foo]
+    ... timestamp = 2014-04-09T09:54:42.000132
+    ... """)
+    >>> foo.timestamp.isoformat()
+    '2014-04-09T09:54:42.000132+00:00'
+
+    >>> store.loads("""\
+    ... [foo]
+    ... timestamp = 2014-04-09T09:54:42.000132+00:00
+    ... """)
+    >>> foo.timestamp.isoformat()
+    '2014-04-09T09:54:42.000132+00:00'
+
+    >>> store.loads("""\
+    ... [foo]
+    ... timestamp = 2014-04-09T09:54:42.000132+01:00
+    ... """)
+    >>> foo.timestamp.isoformat()
+    '2014-04-09T09:54:42.000132+01:00'
+
+Dict fields
+~~~~~~~~~~~
+
+Dict fields are serialized as multiline values.
+
+    >>> from collections import OrderedDict
+
+    >>> class IPerson(zope.interface.Interface):
+    ...     somedata = zope.schema.Dict(
+    ...         key_type=zope.schema.TextLine(),
+    ...         value_type=zope.schema.Int())
+
+    >>> class Person(object):
+    ...     somedata = None
+
+    >>> p = Person()
+    >>> store = insist.ConfigurationStore.makeStore(p, IPerson, 'person')
+
+    >>> p.somedata = {}
+    >>> print(store.dumps())
+    [person]
+    somedata =
+
+    >>> p.somedata = OrderedDict((
+    ...     (u'foo', 42),
+    ...     (u'bar', 555)))
+    >>> print(store.dumps())
+    [person]
+    somedata = foo::42
+      bar::555
+
+    >>> store.loads("""\
+    ... [person]
+    ... somedata =
+    ... """)
+    >>> p.somedata
+    {}
+
+    >>> store.loads("""\
+    ... [person]
+    ... somedata = bar::15
+    ...     foo::999
+    ... """)
+    >>> p.somedata['bar']
+    15
+    >>> p.somedata['foo']
+    999
