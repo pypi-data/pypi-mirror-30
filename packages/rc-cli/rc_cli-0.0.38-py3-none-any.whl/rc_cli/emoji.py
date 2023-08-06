@@ -1,0 +1,8 @@
+CHECK = '✅'
+CROSS = '❌'
+RC = '🏎️'
+PENCIL = '✏️'
+MEMO = '📝'
+KEYBOARD = '⌨️'
+HAZARD = '⚠️'
+INFO = 'ℹ️'
