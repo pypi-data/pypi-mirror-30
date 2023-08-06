@@ -1,0 +1,13 @@
+MAX_ORDER_LEN = 20
+MAX_ITEMDESC_LEN = 50
+MAX_URI_LEN = 50
+MAX_ORDERCOMMENT_LEN = 300
+MAX_CVS_AMT = 20000
+MIN_CVS_AMT = 30
+MAX_BARCODE_AMT = 20000
+MIN_BARCODE_AMT = 20
+MPG_VERSION = '1.4'
+MPG_TEST_URL = 'https://ccore.spgateway.com/MPG/mpg_gateway'
+# MPG_URL = 'https://core.spgateway.com/MPG/mpg_gateway'
+CREDIT_CLOSE_TEST_URL = 'https://ccore.spgateway.com/API/CreditCard/Close'
+CREDIT_CLOSE_URL = 'https://core.spgateway.com/API/CreditCard/Close'
