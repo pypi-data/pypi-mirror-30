@@ -1,0 +1,42 @@
+- hosts: localhost
+
+  vars:
+    # `droplet_name` need to be passed as `--extra-var` !!
+    do_token: "{{ lookup('file', '{{ digitalocean_token_location }}') }}"
+
+  tasks:
+    # `droplet_name` need to be passed as `--extra-var` !!
+    - name: "Ensure 'droplet_name' is passed as parameter"
+      assert:
+        that: droplet_name != ""
+
+    - name: "Delete droplet"
+      block:
+      - name: Get Droplet info
+        digital_ocean:
+          unique_name: yes
+          api_token: "{{ do_token }}"
+          name: "{{ droplet_name }}"
+        register: droplet_data
+
+      - name: Remove droplet
+        digital_ocean:
+          api_token: "{{ do_token }}"
+          id: "{{ droplet_data.droplet.id }}"
+          state: deleted
+
+      rescue:
+      - debug: 
+          msg: "Error!! Are you sure Droplet '{{ droplet_name}}' exist?"
+
+    - name: "Remove Host Quick-Access from `.ssh/config`"
+      blockinfile:
+        path: "{{ ansible_env.HOME }}/.ssh/config"
+        state: absent
+        marker: "### ANSIBLE MANAGED - DigitalOcean Droplet: '{{ droplet_name }}' - {mark} #######################"
+
+    - name: "Remove Droplet from Ansible Host in `~/.ansible-droplet-inventory`"
+      blockinfile:
+        path: "{{ ansible_env.HOME }}/.ansible-droplet-inventory"
+        state: absent
+        marker: "### ANSIBLE MANAGED - DigitalOcean Droplet: '{{ droplet_name }}' - {mark} #######################"
