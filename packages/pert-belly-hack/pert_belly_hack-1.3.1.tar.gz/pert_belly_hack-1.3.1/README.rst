@@ -1,0 +1,46 @@
+pert_belly_hack
+===============
+
+Packaging helper for preparing the contents of an OPKG file containing
+a web interface for enigma2 devices. Also generates contents for github
+pages.
+
+Source Code
+-----------
+
+https://github.com/doubleO8/pert_belly_hack/
+
+Documentation
+-------------
+
+https://doubleo8.github.io/e2openplugin-OpenWebif/backend/documentation/packaging.html
+
+Project Page
+------------
+
+https://doubleo8.github.io/e2openplugin-OpenWebif/
+
+Usage
+=====
+
+.. code-block:: sh
+
+    # remove (temporary) build, cache and artefact files and folders
+    pbh-clean
+
+.. code-block:: sh
+
+    # create OPKG contents in subfolder `./pack/`
+    pbh-prepare
+    # example call for generating `.opk` file:
+    ./opkg-utils/opkg-build -O -o 0 -g 0 -Z gzip pack/
+
+.. code-block:: sh
+
+    # create github pages content in `./pages_out/`
+    pbh-harvest
+
+.. code-block:: sh
+
+    # create github pages index of content in `./pages_out/`
+    pbh-umbrella
