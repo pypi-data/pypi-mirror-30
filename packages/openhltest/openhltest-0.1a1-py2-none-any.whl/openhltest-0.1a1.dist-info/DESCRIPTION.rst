@@ -1,0 +1,87 @@
+# Python client auto generated from OpenHlTest yang models
+The intent of this folder is to act as a repository for the OpenHlTest python client module.
+
+## Proposal
+Base infrastructure that is not auto-generated:
+1) Single https transport class HttpTransport
+2) All yang list, container keywords derive from YangBase
+3) Top levelmodule class OpenHlTest
+
+
+Features:
+1) Every container and list in the yang models is its own separate class.
+2) All - chars will be replaced with _ char.
+3) The top level module will be a class called OpenHlTest.
+4) The OpenHlTest will use the RestConfTransport.py class.
+5) All yang description keywords will be inlined as documentation.
+6) Built in _get method will allow for depth retrieval, the default depth is 1  
+	6.1 list with key will generate a <yang_key> named value, sample usage sessions._get(name='demo') will return the sessions object
+7) Python objects based on Yang read-write, keyed list will have a create and delete method
+7) Python objects based on Yang list will have a get
+7) All leaf objects will be accessible as properties on the parent container
+8) 
+
+|Python Objects | Get    | Update | Create | Delete |
+|---------------|:------:|:------:|:------:|:------:|
+|container      | x      | x      |        |        |
+|list(ro)       | x      | x      |        |        |
+|list(rw)       | x      | x      | x      | x      |
+
+```python
+import OpenHlTest
+
+# create the top level datastore object, internally creates the http transport
+# waf proxies 10443 -> restconf controller |openhltest ws| -> |waf ws| -> |ixn ws|
+openhltest = OpenHlTest('127.0.0.1', port=10443)
+
+# auth and get an api-key - yang rpc in openhltest-session module
+# internally hold the api key for use in all other requests
+# api-key will be submitted as a cookie
+# 	Cookie: OpenHLTest-Api-Key=<cookie value returned by server>
+openhltest.authenticate('admin', 'admin')
+print(openhltest.api_key)
+
+# create a session instance
+# 
+# has a create, read, update, delete
+session = openhltest.sessions._create(name='demo', session_type='L2L3')
+session.config.description = 'Vendor prototype demo configuration'
+session.config.update(description = 'Vendor prototype demo configuration')
+port = session.config.ports.create('Ethernet - 001')
+session.connect_ports
+	.add(port_name='Ethernet - 001', chassis='1.1.1.1', card=1, port=1)
+	.execute()
+
+# get the config (yang container), needs a refresh
+config = session.config
+config.update(description='test')
+
+# get a port (yang rw list)
+port = config.ports_get('Ethernet - 001')
+print(port.name)
+
+# get a list of ports (yang rw list)
+for port in config.ports_get():
+	print(port.name)
+
+# create a port
+# key is mandatory
+# named args for the remainder of params
+port = config.ports_create('Ethernet - 002',  description='abc')
+
+# update a port, named args / json object / dict?
+port.update(description='xyz')
+
+# delete a port, uses the internal restconf_path
+port.delete()
+
+# execute an action, optionally produce a connect_ports_input class
+config.connect_ports([{name: 'Ethernet - 001', chassis: '1.1.1.1', card: 1, port: 1}])
+
+# print the restconf of the object, informational, used internally
+print(port.restconf_path) 
+# print output: 'openhltest-session:sessions=demo/config/ports=Ethernet - 001'
+```
+
+
+
