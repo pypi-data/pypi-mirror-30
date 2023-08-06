@@ -1,0 +1,32 @@
+Microsoft Azure CLI 'servicebus' Command Module
+=======================================================
+
+This package is for the 'servicebus' module.
+i.e. 'az servicebus'
+
+
+
+
+.. :changelog:
+
+Release History
+===============
+
+0.1.2
+++++++
+
+* Fix package wheel
+* `sdist` is now compatible with wheel 0.31.0
+
+0.1.1
++++++
+* Suppress the service bus extension from being loaded now.
+
+
+0.1.0
++++++
+
+* Initial release.
+
+
+
