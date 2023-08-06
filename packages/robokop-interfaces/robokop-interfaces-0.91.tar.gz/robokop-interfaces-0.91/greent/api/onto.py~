@@ -1,0 +1,95 @@
+import argparse
+import json
+import os
+import requests
+import yaml
+import shutil
+from greent import node_types
+from greent.graph_components import KNode,KEdge,elements_to_json
+from greent.ontologies.go import GO
+from greent.ontologies.mondo import Mondo
+from greent.ontologies.hpo import HPO
+from greent.servies import Service, ServiceContext
+from flask import Flask, jsonify, g, Response
+from flasgger import Swagger
+app = Flask(__name__)
+
+template = {
+  "swagger": "2.0",
+  "info": {
+    "title": "X-API",
+    "description": "API for X data",
+    "contact": {
+      "responsibleOrganization": "x-org",
+      "responsibleDeveloper": "x-dev",
+      "email": "x@x.org",
+      "url": "www.x.org",
+    },
+    "termsOfService": "http://x.org/terms",
+    "version": "0.0.1"
+  },
+  "basePath": "/onto/api",
+  "schemes": [
+    "http",
+    "https"
+  ]
+}
+app.config['SWAGGER'] = {
+   'title': 'Ontology Service'
+}
+
+swagger = Swagger(app, template=template)
+
+class Core:
+    def __init__(self):
+        self.go = GO2(ServiceContext.create_context ())
+        
+core = None
+def get_core ():
+    global core
+    if not core:
+        core = Core ()
+    return core
+     
+@app.route('/is_a/<id>/<ancestors>/')
+def is_a (i, ancestors):
+   """ Determine ancestry.
+   ---
+   parameters:
+     - name: id
+       in: path
+       type: string
+       required: true
+       description: An identifier from an ontology. eg: GO:2001317
+       x-valueType:
+         - http://schema.org/string
+       x-requestTemplate:
+         - valueType: http://schema.org/string
+           template: /is_a/{{ input }}/{{ input2 }}
+     - name: ancestors
+       in: path
+       type: array
+       items:
+         type: string
+       description: A comma separated list of identifiers: eg: GO:1901362
+       x-valueType:
+         - http://schema.org/string
+       x-requestTemplate:
+         - valueType: http://schema.org/string
+           template: /is_a/{{ input }}/{{ input2 }}
+   responses:
+     200:
+       description: ...
+   """
+   core = get_core ()
+   return jsonify (core.go.is_a(i, ancestors))
+
+if __name__ == "__main__":
+   parser = argparse.ArgumentParser(description='Rosetta Server')
+   parser.add_argument('-s', '--bag-source', help='Filesystem path or URL serving bags.', default='.')
+   parser.add_argument('-p', '--port', type=int, help='Port to run service on.', default=None)
+   parser.add_argument('-c', '--conf', help='GreenT config file to use.', default=None)
+   args = parser.parse_args ()
+   app.config['SWAGGER']['go'] =     
+   app.config['SWAGGER']['greent_conf'] = args.greent_conf = args.conf
+   app.run(host='0.0.0.0', port=args.port, debug=True, threaded=True)

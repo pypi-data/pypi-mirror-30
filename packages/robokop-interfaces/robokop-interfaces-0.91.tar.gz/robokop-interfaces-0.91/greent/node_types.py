@@ -1,0 +1,17 @@
+DRUG='chemical_substance'
+GENE='gene'
+PATHWAY='pathway'
+PROCESS='biological_process'
+CELL='cell'
+ANATOMY='anatomical_entity'
+PHENOTYPE='phenotypic_feature'
+DISEASE='disease'
+GENETIC_CONDITION='genetic_condition'
+DRUG_NAME = 'NAME.DRUG'
+DISEASE_NAME = 'NAME.DISEASE'
+PHENOTYPE_NAME = 'NAME.PHENOTYPE'
+UNSPECIFIED = 'UnspecifiedType'
+
+node_types = set([DRUG, GENE, PATHWAY, PROCESS, CELL, ANATOMY, PHENOTYPE, DISEASE, GENETIC_CONDITION, DRUG_NAME, DISEASE_NAME, PHENOTYPE_NAME, UNSPECIFIED])
+
+type_codes = { 'S': DRUG, 'G':GENE, 'P':PROCESS, 'C':CELL, 'A':ANATOMY, 'T':PHENOTYPE, 'D':DISEASE, 'X':GENETIC_CONDITION , 'W': PATHWAY, '?': UNSPECIFIED}
