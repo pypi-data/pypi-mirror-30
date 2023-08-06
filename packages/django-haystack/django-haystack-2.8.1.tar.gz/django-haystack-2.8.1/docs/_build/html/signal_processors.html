@@ -1,0 +1,210 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Signal Processors &#8212; Haystack 2.5.0 documentation</title>
+    
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '2.5.0',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Multiple Indexes" href="multiple_index.html" />
+    <link rel="prev" title="Boost" href="boost.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head>
+  <body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="signal-processors">
+<span id="ref-signal-processors"></span><h1>Signal Processors<a class="headerlink" href="#signal-processors" title="Permalink to this headline">¶</a></h1>
+<p>Keeping data in sync between the (authoritative) database &amp; the
+(non-authoritative) search index is one of the more difficult problems when
+using Haystack. Even frequently running the <code class="docutils literal"><span class="pre">update_index</span></code> management command
+still introduces lag between when the data is stored &amp; when it’s available
+for searching.</p>
+<p>A solution to this is to incorporate Django’s signals (specifically
+<code class="docutils literal"><span class="pre">models.db.signals.post_save</span></code> &amp; <code class="docutils literal"><span class="pre">models.db.signals.post_delete</span></code>), which then
+trigger <em>individual</em> updates to the search index, keeping them in near-perfect
+sync.</p>
+<p>Older versions of Haystack (pre-v2.0) tied the <code class="docutils literal"><span class="pre">SearchIndex</span></code> directly to the
+signals, which caused occasional conflicts of interest with third-party
+applications.</p>
+<p>To solve this, starting with Haystack v2.0, the concept of a <code class="docutils literal"><span class="pre">SignalProcessor</span></code>
+has been introduced. In it’s simplest form, the <code class="docutils literal"><span class="pre">SignalProcessor</span></code> listens
+to whatever signals are setup &amp; can be configured to then trigger the updates
+without having to change any <code class="docutils literal"><span class="pre">SearchIndex</span></code> code.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">Incorporating Haystack’s <code class="docutils literal"><span class="pre">SignalProcessor</span></code> into your setup <strong>will</strong>
+increase the overall load (CPU &amp; perhaps I/O depending on configuration).
+You will need to capacity plan for this &amp; ensure you can make the tradeoff
+of more real-time results for increased load.</p>
+</div>
+<div class="section" id="default-basesignalprocessor">
+<h2>Default - <code class="docutils literal"><span class="pre">BaseSignalProcessor</span></code><a class="headerlink" href="#default-basesignalprocessor" title="Permalink to this headline">¶</a></h2>
+<p>The default setup is configured to use the
+<code class="docutils literal"><span class="pre">haystack.signals.BaseSignalProcessor</span></code> class, which includes all the
+underlying code necessary to handle individual updates/deletes, <strong>BUT DOES NOT
+HOOK UP THE SIGNALS</strong>.</p>
+<p>This means that, by default, <strong>NO ACTION IS TAKEN BY HAYSTACK</strong> when a model is
+saved or deleted. The <code class="docutils literal"><span class="pre">BaseSignalProcessor.setup</span></code> &amp;
+<code class="docutils literal"><span class="pre">BaseSignalProcessor.teardown</span></code> methods are both empty to prevent anything
+from being setup at initialization time.</p>
+<p>This usage is configured very simply (again, by default) with the
+<code class="docutils literal"><span class="pre">HAYSTACK_SIGNAL_PROCESSOR</span></code> setting. An example of manually setting this
+would look like:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">HAYSTACK_SIGNAL_PROCESSOR</span> <span class="o">=</span> <span class="s1">&#39;haystack.signals.BaseSignalProcessor&#39;</span>
+</pre></div>
+</div>
+<p>This class forms an excellent base if you’d like to override/extend for more
+advanced behavior. Which leads us to…</p>
+</div>
+<div class="section" id="realtime-realtimesignalprocessor">
+<h2>Realtime - <code class="docutils literal"><span class="pre">RealtimeSignalProcessor</span></code><a class="headerlink" href="#realtime-realtimesignalprocessor" title="Permalink to this headline">¶</a></h2>
+<p>The other included <code class="docutils literal"><span class="pre">SignalProcessor</span></code> is the
+<code class="docutils literal"><span class="pre">haystack.signals.RealtimeSignalProcessor</span></code> class. It is an extremely thin
+extension of the <code class="docutils literal"><span class="pre">BaseSignalProcessor</span></code> class, differing only in that
+in implements the <code class="docutils literal"><span class="pre">setup/teardown</span></code> methods, tying <strong>ANY</strong> Model
+<code class="docutils literal"><span class="pre">save/delete</span></code> to the signal processor.</p>
+<p>If the model has an associated <code class="docutils literal"><span class="pre">SearchIndex</span></code>, the <code class="docutils literal"><span class="pre">RealtimeSignalProcessor</span></code>
+will then trigger an update/delete of that model instance within the search
+index proper.</p>
+<p>Configuration looks like:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">HAYSTACK_SIGNAL_PROCESSOR</span> <span class="o">=</span> <span class="s1">&#39;haystack.signals.RealtimeSignalProcessor&#39;</span>
+</pre></div>
+</div>
+<p>This causes <strong>all</strong> <code class="docutils literal"><span class="pre">SearchIndex</span></code> classes to work in a realtime fashion.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">These updates happen in-process, which if a request-response cycle is
+involved, may cause the user with the browser to sit &amp; wait for indexing to
+be completed. Since this wait can be undesirable, especially under load,
+you may wish to look into queued search options. See the
+<a class="reference internal" href="other_apps.html#ref-other-apps"><span class="std std-ref">Haystack-Related Applications</span></a> documentation for existing options.</p>
+</div>
+</div>
+<div class="section" id="custom-signalprocessors">
+<h2>Custom <code class="docutils literal"><span class="pre">SignalProcessors</span></code><a class="headerlink" href="#custom-signalprocessors" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal"><span class="pre">BaseSignalProcessor</span></code> &amp; <code class="docutils literal"><span class="pre">RealtimeSignalProcessor</span></code> classes are fairly
+simple/straightforward to customize or extend. Rather than forking Haystack to
+implement your modifications, you should create your own subclass within your
+codebase (anywhere that’s importable is usually fine, though you should avoid
+<code class="docutils literal"><span class="pre">models.py</span></code> files).</p>
+<p>For instance, if you only wanted <code class="docutils literal"><span class="pre">User</span></code> saves to be realtime, deferring all
+other updates to the management commands, you’d implement the following code:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">django.contrib.auth.models</span> <span class="k">import</span> <span class="n">User</span>
+<span class="kn">from</span> <span class="nn">django.db</span> <span class="k">import</span> <span class="n">models</span>
+<span class="kn">from</span> <span class="nn">haystack</span> <span class="k">import</span> <span class="n">signals</span>
+
+
+<span class="k">class</span> <span class="nc">UserOnlySignalProcessor</span><span class="p">(</span><span class="n">signals</span><span class="o">.</span><span class="n">BaseSignalProcessor</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Listen only to the ``User`` model.</span>
+        <span class="n">models</span><span class="o">.</span><span class="n">signals</span><span class="o">.</span><span class="n">post_save</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">handle_save</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="n">User</span><span class="p">)</span>
+        <span class="n">models</span><span class="o">.</span><span class="n">signals</span><span class="o">.</span><span class="n">post_delete</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">handle_delete</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="n">User</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">teardown</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Disconnect only for the ``User`` model.</span>
+        <span class="n">models</span><span class="o">.</span><span class="n">signals</span><span class="o">.</span><span class="n">post_save</span><span class="o">.</span><span class="n">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">handle_save</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="n">User</span><span class="p">)</span>
+        <span class="n">models</span><span class="o">.</span><span class="n">signals</span><span class="o">.</span><span class="n">post_delete</span><span class="o">.</span><span class="n">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">handle_delete</span><span class="p">,</span> <span class="n">sender</span><span class="o">=</span><span class="n">User</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>For other customizations (modifying how saves/deletes should work), you’ll need
+to override/extend the <code class="docutils literal"><span class="pre">handle_save/handle_delete</span></code> methods. The source code
+is your best option for referring to how things currently work on your version
+of Haystack.</p>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="toc.html">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Signal Processors</a><ul>
+<li><a class="reference internal" href="#default-basesignalprocessor">Default - <code class="docutils literal"><span class="pre">BaseSignalProcessor</span></code></a></li>
+<li><a class="reference internal" href="#realtime-realtimesignalprocessor">Realtime - <code class="docutils literal"><span class="pre">RealtimeSignalProcessor</span></code></a></li>
+<li><a class="reference internal" href="#custom-signalprocessors">Custom <code class="docutils literal"><span class="pre">SignalProcessors</span></code></a></li>
+</ul>
+</li>
+</ul>
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="toc.html">Documentation overview</a><ul>
+  <li><a href="index.html">Welcome to Haystack!</a><ul>
+      <li>Previous: <a href="boost.html" title="previous chapter">Boost</a></li>
+      <li>Next: <a href="multiple_index.html" title="next chapter">Multiple Indexes</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/signal_processors.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2009-2016, Daniel Lindsley.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.6.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.10</a>
+      
+      |
+      <a href="_sources/signal_processors.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
