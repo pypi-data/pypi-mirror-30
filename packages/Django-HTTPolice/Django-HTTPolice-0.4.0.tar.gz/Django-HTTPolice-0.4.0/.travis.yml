@@ -1,0 +1,55 @@
+language: python
+dist: trusty
+sudo: false
+
+python:
+    - "2.7"
+    - "pypy"
+    - "3.4"
+    - "3.5"
+    - "3.6"
+
+env:
+    - REQUIRES=minimum
+    - REQUIRES=normal
+
+install:
+    - if [ "$REQUIRES" = minimum ]; then tools/minimum_requires.sh; fi
+    - pip install -e .
+    - pip install -r tools/requirements.txt
+
+cache: pip
+
+script:
+    # Make sure there are no "FIXME" marks in the codebase.
+    - test ! "$( git grep -l FIXME | grep -Fv .travis.yml )"
+
+    # Basic stuff.
+    - python setup.py check --strict --restructuredtext
+    - tools/pylint_all.sh -j 2
+    - pytest
+    - tools/check_example.sh
+
+    # Although the docs are processed by Read the Docs,
+    # we still want to check that they are building OK.
+    - sphinx-build -W doc/ doc/_build/
+
+    # Check the assorted reStructuredText documents at the top of the repo.
+    - tools/check_rst.sh
+
+    # Check that the source distribution includes everything it should,
+    # and nothing it shouldn't (including all the files we just built).
+    - check-manifest
+
+deploy:
+    on:
+        tags: true
+        # Only release from one of the environments.
+        python: "3.5"
+        condition: $REQUIRES = normal
+    provider: pypi
+    user: vfaronov
+    password:
+        secure: GiAlVsJzXkvulecS36z33gwaq5/UCEYKE8lLGLXnNiStKqw9jePhf0bFkUdxZJWgEToMkf3bQh6HBDDzJPZahqvcOpBlm67/zkwA+e7fAp9Xo1QFZJHbF0NOtjjofPMEtYb4St+SL77nxfzpkABi2XXPSw6hteCayQ/EkN+sAIokLl2MIF0csORraNlLq5axSwpzhkI0hDnamspwGTSfJOuudRESn4wJJfNwySHYPflMK0dmINax2Uxk2ex1opZrJalFNS9ukWyrDUXls1H/jS0RhtVWJwQQK/L79zaAA9B/iS3DeMew6WcLRkzDsJEXN4M0eOLye8/rmgsl75dOiVOIxq2OQxXIMSXcB4aQSi2BvTnYELs9D81PmDUdg8HZmczVzi7lkIsf++O6qkfK/wXoQzZCNUsdaYiVRqccLYoHbyVUOqx8RgoeXrYdjHkjLe8ATbPuLk1jNh5I3G1blZpv1FMyRL3ykK8C82Fr3EC3cO0QAQif6x0KXlDaGxPtKAPkcfra/Dwpsy1igZAcmnKS/kDsTmXtHDXlkYnz38/1a9hQF6J8ikVfndJpmvf2VPba5jxbF0GUAxfn84I/Dy/oten9hYconxWkpRzegOu4YEBNNzSyI0Jq6NmYQKNw4Lnve1vIxkJGJFZsGy5Hdp8Lm69kMXcvXwb82VJ2QUc=
+    distributions: "sdist bdist_wheel"
+    skip_upload_docs: true
