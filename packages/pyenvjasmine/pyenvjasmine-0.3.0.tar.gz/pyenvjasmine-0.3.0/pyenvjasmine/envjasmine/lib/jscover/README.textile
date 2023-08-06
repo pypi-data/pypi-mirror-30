@@ -1,0 +1,157 @@
+h1. JSCover and Sonar integration for EnvJasmine (beta)
+
+Allows you to pull code coverage metrics for EnvJasmine tests and view the results in Sonar.
+
+h2. 3rd Party Tools
+
+JSCover is a code coverage tool for javascript. See http://tntim96.github.com/JSCover/
+
+Sonar is a free, open source, code quality analytics tool. See http://www.sonarsource.org/
+
+Sonar has a plugin to report on javascript quality metrics. See http://docs.codehaus.org/display/SONAR/JavaScript+Plugin
+
+Maven (included example) or Sonar Runner (default example). See http://maven.apache.org/ or http://docs.codehaus.org/display/SONAR/Installing+and+Configuring+Sonar+Runner
+
+h2. Prerequisites
+
+This readme assumes: 
+
+you already familiar with Sonar,
+you are already the concept of code coverage,
+you have maven or Sonar Runner installed (depending on which example you plan to run)
+
+h2. Running The example
+
+To calculate and report code coverage metrics to Sonar:
+
+Install Sonar.
+Install Sonar-Runner.
+Install the Sonar javascript plugin.
+Run your local Sonar server.
+In @include/dependencies.js@, uncomment @EnvJasmine.loadGlobal(EnvJasmine.libDir + "/jscover/envjasmine-sonar-coverage-properties.js");@
+In @include/dependencies.js@, uncomment @EnvJasmine.loadGlobal(EnvJasmine.coverage.envjasmine_coverage_js);@
+Execute @bin/run_coverage.sh --sonarMethod=sonar-runner@
+Find the project in Sonar and add the code coverage widget to your dashboard.
+
+h2. How to configure for use in your project
+
+h3. dependencies.js
+
+In your @dependencies.js@ uncomment the 2 lines loading the coverage properties file and the coverage plugin.
+
+h3. command line options
+
+projectRoot - the root folder of your project.
+originalDir - the root folder of your javascript.
+instrumentedDir - the folder you want your javascript copied to.
+reportsDir - the output directory for sonar reports.
+sonarMethod - "sonar-runner" or "maven" depending on which method you use. Or "none" if you are going to run sonar manually.
+noInstrument - files you want excluded from instrumentation (such as jquery). This can be set multiple times. This path is relative to the originalDir.
+debug - will output extra information to the console.
+cleanup - will delete the reports and instrumentation directory after completion.
+
+h3. sonar.js.xml (if you use maven)
+
+This must stay in the root directory.
+The "modelVersion" property must be compatible with your version of maven.
+"sourceDirectory" should be set to the root javascript directory.
+"sonar.exclusions" will exclude files from sonar analytics. "*" and "**" wildcards can be used.
+"sonar.javascript.testframework" must not be edited
+"sonar.javascript.jstestdriver.reportsfolder" should be set to your temp reports folder.
+All other properties are identifying labels and can be edited as long as no other process relies on them.
+
+h3. sonar-project.properties (if you use sonar-runner)
+
+Check out the documentation at http://docs.codehaus.org/display/SONAR/Installing+and+Configuring+Sonar+Runner
+
+h2. File overview
+
+@bin/run_coverage.sh@ is the main files which kick off the process.
+@include/dependencies.js@ loads EnvJasmine dependencies including the coverage plugin.
+@lib/envjasmine.js@ is the same EnvJasmine file you're been using to run your EnvJasmine tests.
+@lib/jscover/envjasmine-sonar-coverage-runner.js@ is the main execution script called by run_coverage.
+@lib/jscover/envjasmine-sonar-coverage-properties.js@ contains almost of the variables you will need to set to configure your setup.
+@lib/jscover/envjasmine-sonar-coverage-helper.js@ contains helper functions.
+@lib/jscover/envjasmine-coverage.js@ is the EnvJasmine coverage plugin. This adds itself to EnvJasmine's post test functions and writes the coverage data to disk.
+@lib/jscover/JSCover-all.jar@ is a copy of the JSCover jar.
+@samples/notCoveredDemo.js@ and @specs/notCoveredDemo.js@ are files that demo coverage gaps.
+@sonar.js.xml@ is the minimal pom file needed to get data into sonar if you use maven. Unfortunately, this needs to be in the project root.
+@sonar-project.properties@ is the config file for sonar-runner.
+
+h2. Detailed discussion of envjasmine-sonar-coverage-runner.js
+
+h3. Initialization
+
+This script file starts by reading the command line arguments and loading it's dependencies including properties and helper functions. It also create temp directories.
+
+h3. Instrumenting javascript code
+
+We need to create an instrumented copy of javascript code using JSCover. We pass in "no-instrument" args to tell jscover not instrument a file or directory and instead copy the original(s). This is good for ignoring vendor code, such as jquery which takes a long time to instrument and some vendor minified code breaks JSCover.
+
+h3. Exposing coverage data to EnvJasmine
+
+JSCover creates instrumented code that puts the output data into a local javascript variable. That variable is inaccessible to EnvJasmine. For now we're implementing a hack to find/replace the variable with an EnvJasmine scoped variable in the instrumented code files.
+
+h3. Run all EnvJasmine tests against the instrumented code
+
+Run the tests as normal against the instrumented code. Since the envjasmine-coverage plugin was included in @include/dependencies.js@ the plugin will write out the code coverage json data object to the reports directory.
+
+h3. Convert the json data to lcov format
+
+Sonar uses lcov format. JSCover has the ability to do this conversion.
+
+h3. Fix source code location in the lcov file
+
+For some reason, the source code root is set to the reports directory. Change this to the original source directory.
+
+h3. Remove branch data
+
+JSCover supports branch data. The Sonar javascript plugin doesn't. (It's on their roadmap.) For now we have to strip out branch data or sonar will break.
+
+h3. Run Sonar
+
+Runs sonar against the reports directory
+
+h3. Cleanup
+
+Deletes temp directories.
+
+h2. FAQ/Common Problems
+
+h3. Directory/Path problems
+
+It's really easy to be looking for the wrong file in the wrong place.  The important directories are the source directory, the instrumented directory, the reports directory, and the lib directory. If you're having trouble make sure the files are all being read and output in the correct places. Debug statements can be helpful if you've lost your way setting this up.
+
+h3. Could not find jscoverage.json
+
+Exception in thread "main" java.lang.RuntimeException: Problem loading file: '/my/reports/directory/jscoverage.json'
+
+Make sure to uncomment the necessary lines in the dependencies.js files.
+
+h3. Everything looks like it's working correctly but Sonar is failing to include the coverage results.
+
+Check the final lcov file (@reports/jsTestDriver.conf-coverage.dat@). Each original javascript source file should be referenced by the correct absolute path. If the path is not correct, the "Fix source code location" step failed. Double check that your directories have trailing slashes EXCEPT for the reports directory which can't have a trailing slash.
+
+h3. What's with all the jsTestDriver references?
+
+The sonar javascript plugin has been designed to work with two different javascript testing frameworks. One of them is jsTestDriver. We have to select one in order for sonar to know that there's coverage data ready. But as long as the data output is the same, Sonar doesn't really care who made the output.
+
+h3. Why is the runner written in rhino/js? Wouldn't ruby/python/etc be easier to maintain?
+
+Yes it would. The prototypes were actually written in ruby and python, but I thought it would be more valuable to get rid of the external dependency.
+
+h2. Roadmap
+
+Add unit test success/failure metrics to sonar
+Add a .bat file
+Un-remove branch coverage (blocked by lack of sonar-javascript plugin support)
+Remove "data cleaning" when writing out coverage results (will require help jscover project modification)
+
+h2. Release Notes
+
+version beta: initial release. 1/11/2013
+version 1.7.1: Removed python dependency. Simplified configuration. Made sonar-runner the default sonar method. 1/17/2013
+version 1.7.2: Now works as ruby gem. Made many properties configurable from command line. There is no longer a default sonar method. 2/12/2013
+  
+
+Please contact Daniel Freiman (https://github.com/DannyJF) or Trevor Lalish-Menagh (https://github.com/trevmex) through github with any defects or feature requests!
