@@ -1,0 +1,5 @@
+__version__ = '0.0.5'
+__description__ = 'A gui for interacting with the a hierarchical scene graph'
+__author__ = 'Paxton Gerrish'
+__email__ = 'creaturecastlabs@gmail.com'
+__url__ = 'https://github.com/Paxtongerrish/creaturecast_scenegraph.git'
