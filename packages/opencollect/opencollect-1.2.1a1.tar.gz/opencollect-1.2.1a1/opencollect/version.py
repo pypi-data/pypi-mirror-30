@@ -1,0 +1,8 @@
+__author__ = "James K Bowler"
+__copyright__ = "Copyright 2018"
+__license__ = "MIT"
+__version__ = "1.2.1a1"
+__maintainer__ = "JamesKbowler"
+__email__ = "james.bowler@datacentauri.com"
+__status__ = "Development"
+__url__ = "https://github.com/JamesKBowler/opencollect"
