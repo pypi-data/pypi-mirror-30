@@ -1,0 +1,2 @@
+class NavitaireException(Exception):
+    pass
