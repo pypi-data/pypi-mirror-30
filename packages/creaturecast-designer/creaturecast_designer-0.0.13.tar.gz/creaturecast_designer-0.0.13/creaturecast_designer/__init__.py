@@ -1,0 +1,5 @@
+__version__ = '0.0.13'
+__description__ = 'A gui for downloading launching and managing creaturecast tools'
+__author__ = 'Paxton Gerrish'
+__email__ = 'creaturecastlabs@gmail.com'
+__url__ = 'https://github.com/Paxtongerrish/creaturecast_designer.git'
