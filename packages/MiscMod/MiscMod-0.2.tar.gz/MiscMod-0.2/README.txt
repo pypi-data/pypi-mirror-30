@@ -1,0 +1,1 @@
+MiscMod! Random modules packaged because why not?Import mathy for the math moduleMathy.a10() adds 2 or more numbers and up to 10 of them hence a10 not a100Import cpu for cpu core count using cpu.cores()Secret module! See if you can find it!!
