@@ -1,0 +1,3 @@
+import WarcraftClass
+
+WarcraftClass.setup()
