@@ -1,0 +1,55 @@
+=============================
+Manage computer communication
+=============================
+
+-------------------------------------------------
+with the computer_communication_framework library
+-------------------------------------------------
+This uses the README.rst file from https://github.com/pypa/sampleproject as a template.
+
+This is the README file for the project.
+
+This is primarily meant to be a quick an easy way to implement programs over multiple computers. It is intended for someone that has never implemented a program across multiple computers and is not sure what tools to use. This provides a very basic framework to send commands to other computers whilst making sure the connection is made whilst not DDoS attacking when there's a connection problem. It should enable quick proof-of-concept type projects to get off the ground quickly. Once the user has done her proof-of-concept then hopefully she will better know what skills and tools she needs to start learning inorder to create a proper implementation of the project.
+
+This is meant to be very basic in-order to be quick to pick up but as a result probably not very good to do proper development.
+
+This provides abstract classes that act as templates with which to build child classes in a modular and consistent manner. It aims to start with the most atomistic type commands like create files and transfer to other computers and builds up to running complex multi-generation algorithms across multiple clusters.
+
+Level 0:
+========
+
+One should create a class that holds methods for the most basic types of tasks needed. This class will inherit from the Connection class in base_connection.py. All communication to this specific computer can now got through the checkSuccess method inherited from the Connection base class.
+
+Level 1:
+========
+
+Normal computers:
+-----------------
+
+If your automation task is simple then you may just need to write a Python script that directly uses the connection class from Level 0 to control the other computers.
+
+If your automation task is a little more omplex you may wish to add methods to your class that group complex task up together and then carry on as in the simple version.
+
+If your automation task is much more complex then you may need to create a whole new class that creates connection instances as and when needed - an example of this can be seen in the next section 'computer clusters'.
+
+Computer clusters:
+------------------
+
+Clusters normally have some kind of queuing system as well as non-standard commands (e.g. computers with shared disk storage sometimes have bespoke commands to get a users disk quota).
+
+In order to take into account these difficulties we created another abstract class to provide a template with which to submit jobs to a cluster queue and then also to monitor the progress of the job and perform other related tasks (e.g. data processing or updating a database once a job is finished).
+
+This is split into two different base classes:
+* base_cluster_submissions.BaseJobSubmission - This contains all the information needed to prepare a job for submission and then to submit the job. All connections to the cluster are performed through the connection instance.
+* base_cluster_submissions.BaseManageSubmission - This prepares and submits jobs using instances of classes that inherit from the BaseJobSubmission class. Using these objects it is able to monitor the jobs progress and perform additional tasks.
+
+Level 2:
+========
+
+Multi-generation algorithms
+---------------------------
+Multi-generation algorithms are algorithms that perform tasks (this is the start of a generation), wait for the tasks to finish and potentially gain data from the tasks before then performing new tasks (this is the start of a new generation). For multi-generation algorithms we use the names 'parents' and 'children' to differentiate between two connected generations.
+
+base_mga.MGA is an abstract class that acts as a template for all multi-generation algorithms. The specific details of the multi-generation algorithm will be coded into a child class that inherits from the MGA class. 
+
+These multigeneration algoritms can then use connection objects that inherit from the base_connection.Connection class and/or the submission classes from base_cluster_submissions.py in order to split their task across multiple computers and/or clusters.
