@@ -1,0 +1,110 @@
+#!/usr/bin/env python
+from __future__ import division
+from builtins import input
+
+import os
+import sys
+import shutil
+import argparse
+from tqdm import tqdm
+
+import abraia
+
+IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp']
+
+
+def processBatch(args):
+    filenames = []
+    dirname = None
+    path = args['path']
+
+    if os.path.isfile(path):
+        filenames.append(path)
+
+    if os.path.isdir(path):
+        dirname = path.rstrip('/').rstrip('\\')
+        for root, subdirs, files in os.walk(path):
+            filenames.extend([os.path.join(root, file) for file in files])
+
+    for filename in tqdm(filenames, unit='file'):
+        path, name = os.path.split(filename)
+        nam, ext = os.path.splitext(name)
+        fileout = os.path.join(path, nam+'_o'+ext)
+        if dirname:
+            relpath = os.path.relpath(path, dirname)
+            if not os.path.exists(os.path.join(dirname+'_o', relpath)):
+                os.makedirs(os.path.join(dirname+'_o', relpath))
+            fileout = os.path.join(dirname+'_o', relpath, nam+ext)
+        if ext.lower() in IMAGE_EXTS:
+            try:
+                abraia.from_file(filename).resize(
+                    width=args.get('width'),
+                    height=args.get('height')).to_file(fileout)
+            except:
+                shutil.copy2(filename, fileout)
+            if os.path.getsize(fileout) > os.path.getsize(filename):
+                shutil.copy2(filename, fileout)
+            sizein = os.path.getsize(filename) / 1024
+            sizeout = os.path.getsize(fileout) / 1024
+            tqdm.write('[{3:04.1f}%] {1:6.1f}KB -> {2:6.1f}KB ({0})'.format(
+                name, sizein, sizeout, 100 * (1 - sizeout / sizein)))
+        else:
+            shutil.copy2(filename, fileout)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Abraia image optimization tool')
+    parser.add_argument('-V', '--version', action='version', version='0.2.7')
+    subparsers = parser.add_subparsers(dest='command')
+    parser_configure = subparsers.add_parser(
+        'configure', help='configure the access keys')
+    parser_optimize = subparsers.add_parser(
+        'optimize', help='optimize the image or directory of images')
+    parser_optimize.add_argument(
+        'path', nargs='?', help='image path or directory of images to process')
+    parser_resize = subparsers.add_parser(
+        'resize', help='resize the image or directory of images')
+    parser_resize.add_argument(
+        '--width', type=int, help='requested image width')
+    parser_resize.add_argument(
+        '--height', type=int, help='requested image height')
+    parser_resize.add_argument(
+        'path', nargs='?', help='image path or directory of images to process')
+    parser_list = subparsers.add_parser('ls', help='list stored files')
+    parser_remove = subparsers.add_parser('rm', help='remove a stored file')
+    parser_remove.add_argument('path', nargs='?', help='image path to remove')
+    args = vars(parser.parse_args())
+
+    if args['command'] is None:
+        parser.print_help()
+        sys.exit()
+
+    if args['command'] == 'configure':
+        api_key, api_secret = abraia.config.load_auth()
+        key = input('Abraia Api Key [{}]: '.format(api_key))
+        api_key = api_key if key == '' else key
+        secret = input('Abraia Api Secret [{}]: '.format(api_secret))
+        api_secret = api_secret if secret == '' else secret
+        abraia.config.save_auth(api_key, api_secret)
+
+    if args['command'] == 'optimize':
+        if args['path'] is None:
+            parser_optimize.print_help()
+            sys.exit()
+        processBatch(args)
+
+    if args['command'] == 'resize':
+        if args['path'] is None:
+            parser_resize.print_help()
+            sys.exit()
+        processBatch(args)
+
+    if args['command'] == 'ls':
+        print(abraia.list())
+
+    if args['command'] == 'rm':
+        if args['path'] is None:
+            parser_remove.print_help()
+            sys.exit()
+        print(abraia.remove(args['path']))
