@@ -1,0 +1,409 @@
+#!/usr/bin/env python
+#
+# A git command that opens an editor to stage or unstage files.
+#
+# Home page:
+#
+#    https://github.com/s3rvac/git-edit-index
+#
+# License:
+#
+#    The MIT License (MIT)
+#
+#    Copyright (c) 2015 Petr Zemek <s3rvac@gmail.com> and contributors.
+#
+#    Permission is hereby granted, free of charge, to any person obtaining a
+#    copy of this software and associated documentation files (the "Software"),
+#    to deal in the Software without restriction, including without limitation
+#    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+#    and/or sell copies of the Software, and to permit persons to whom the
+#    Software is furnished to do so, subject to the following conditions:
+#
+#    The above copyright notice and this permission notice shall be included in
+#    all copies or substantial portions of the Software.
+#
+#    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+#    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+#    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+#    DEALINGS IN THE SOFTWARE.
+#
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+# In Python 2.x, we have to use raw_input() instead of input() because the
+# latter evaluates the entered string while the former just returns it. In
+# Python 3.x, raw_input() was renamed to input() and the evaluating version was
+# removed.
+try:
+    from __builtin__ import raw_input as input
+except ImportError:
+    # Import input() even in Python 3.x to make the mocking of
+    # 'git_edit_index.input' in unit tests working.
+    from builtins import input
+
+
+__version__ = '0.5.1'
+
+
+class Index(list):
+    """Representation of a git index.
+
+    It is represented as a list of index entries.
+    """
+
+    def entry_for(self, file):
+        """Returns the entry for the given file."""
+        for entry in self:
+            if entry.file == file:
+                return entry
+        return NoIndexEntry(file)
+
+    @classmethod
+    def from_text(cls, text, line_sep='\n'):
+        """Creates an index from the given text."""
+        index = cls()
+        for line in text.split(line_sep):
+            entry = IndexEntry.from_line(line)
+            if entry is not None:
+                index.append(entry)
+        return index
+
+    def __repr__(self):
+        return '{}({})'.format(
+            self.__class__.__name__,
+            super(Index, self).__repr__()
+        )
+
+    def __str__(self):
+        # When there are entries, ensure that the resulting string ends with a
+        # newline. Otherwise, when the last entry does not end with a newline,
+        # some editors may have problems displaying it.
+        s = '\n'.join(str(entry) for entry in self)
+        return s + '\n' if s else s
+
+
+class IndexEntry(object):
+    """Representation of an entry in the git index."""
+
+    def __init__(self, status, file):
+        self.status = status
+        self.file = file
+
+    @classmethod
+    def from_line(cls, line):
+        """Returns an index entry from the given line of text."""
+        # Format (the spaces before and after 'M' are relevant, see `man
+        # git-status` for more info):
+        #
+        #     git format | our format | meaning
+        #     ----------------------------------------
+        #     M  FILE    | A FILE     | added file
+        #      M FILE    | M FILE     | modified file
+        #      D FILE    | D FILE     | deleted file
+        #     ?? FILE    | ? FILE     | untracked file
+        #
+        # The script also supports the following custom status that is not
+        # present in git:
+        #
+        #        -       | P FILE     | use --patch with add/reset
+        #
+        m = re.match(r'(.{2} ?)(.+)', line)
+        if m is None:
+            return None
+
+        status, file = m.groups()
+        status = status.upper()
+        if re.match(r'(M  |A)', status):
+            return cls('A', file)
+        elif re.match(r'( M|M)', status):
+            return cls('M', file)
+        elif re.match(r'( D|D)', status):
+            return cls('D', file)
+        elif re.match(r'\?', status):
+            return cls('?', file)
+        elif re.match(r'P', status):
+            return cls('P', file)
+
+        return None
+
+    def __repr__(self):
+        return '{}({!r}, {!r})'.format(
+            self.__class__.__name__,
+            self.status,
+            self.file
+        )
+
+    def __str__(self):
+        return '{} {}'.format(self.status, self.file)
+
+
+class NoIndexEntry(IndexEntry):
+    """Representation of an entry that does not exist.
+
+    This class utilizes the Null object design pattern.
+    """
+
+    def __init__(self, file):
+        IndexEntry.__init__(self, status=None, file=file)
+
+    def __repr__(self):
+        return '{}({!r})'.format(
+            self.__class__.__name__,
+            self.file
+        )
+
+    def __str__(self):
+        return '- {}'.format(self.file)
+
+
+def current_index():
+    """Returns the current index of the git repository."""
+    return Index.from_text(git_status(), line_sep='\0')
+
+
+def git_status():
+    """Returns the current status of the git repository as text, where
+    individual lines are separated by the null byte.
+    """
+    return subprocess.check_output(
+        # Arguments --porcelain and -z are needed to make the output
+        # parsing-friendly. They (1) cause paths to be shown relatively from
+        # the repository's root (thus disregarding user's preferences), (2) use
+        # the null byte to separate lines instead of LF, and (3) prevent
+        # formatting of special characters. See `main git-status` for more
+        # details.
+        ['git', 'status', '--porcelain', '-z'],
+        universal_newlines=True
+    )
+
+
+def edit_index(index):
+    """Edits the given index by showing it to the user in an editor and returns
+    the edited version.
+
+    The original index is not modified.
+    """
+    # We need to use a temporary file to store the current index and show it to
+    # the user in an editor.
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix='git-edit-index-')
+    try:
+        # Due to file locking on Windows, we need to write the index and close
+        # the temporary file before we open the editor. Otherwise, the editor
+        # would not be able to read or change the file.
+        with os.fdopen(tmp_fd, mode='w') as f:
+            f.write(str(index))
+        subprocess.call(editor_cmd() + [tmp_path])
+        with open(tmp_path, mode='r') as f:
+            return Index.from_text(f.read(), line_sep='\n')
+    finally:
+        os.remove(tmp_path)
+
+
+def editor_cmd():
+    """Returns a command to start an editor."""
+    editor = subprocess.check_output(
+        ['git', 'var', 'GIT_EDITOR'],
+        universal_newlines=True
+    )
+    # The editor may include parameters (such as 'gvim -f'), so split it to
+    # get a complete command.
+    return editor.split()
+
+
+def reflect_index_changes(orig_index, new_index):
+    """Reflects changes in the given index."""
+    for orig_entry, new_entry in changed_entries(orig_index, new_index):
+        reflect_index_change(orig_entry, new_entry)
+
+
+def changed_entries(orig_index, new_index):
+    """Generates entries that differ in the given indexes as pairs (original
+    entry, new entry).
+    """
+    for orig_entry in orig_index:
+        new_entry = new_index.entry_for(orig_entry.file)
+        if orig_entry.status != new_entry.status:
+            yield orig_entry, new_entry
+
+
+def reflect_index_change(orig_entry, new_entry):
+    """Reflects the change of the given entry.
+
+    This function assumes that the status of the given entry has changed.
+    """
+    if new_entry.status is None:
+        # The file is not present in the new index, so either delete it or
+        # revert the changes done to the file since the last commit, depending
+        # on its original status.
+        if orig_entry.status == 'A':
+            perform_git_action('reset', orig_entry.file)
+            # Ignore stderr because the file might originally be untracked, in
+            # which case the checkout would result in an error ('error:
+            # pathspec X did not match any file(s) known to git').
+            perform_git_action('checkout', orig_entry.file, ignore_stderr=True)
+        elif orig_entry.status in ['D', 'M']:
+            perform_git_action('checkout', orig_entry.file)
+        elif orig_entry.status == '?':
+            remove(orig_entry.file)
+    elif new_entry.status == 'A':
+        perform_git_action('add', new_entry.file)
+    elif new_entry.status in ['D', 'M']:
+        perform_git_action('reset', new_entry.file)
+    elif new_entry.status == '?':
+        perform_git_action(['rm', '--cached'], new_entry.file)
+    # 'P' is a custom status that is not present in git. It signalizes that
+    # add/reset with --patch should be used.
+    elif new_entry.status == 'P':
+        # Do not ignore stdout because --patch needs it to print the hunks.
+        if orig_entry.status == 'A':
+            perform_git_action(['reset', '--patch'], new_entry.file,
+                               ignore_stdout=False)
+        elif orig_entry.status in ['D', 'M']:
+            perform_git_action(['add', '--patch'], new_entry.file,
+                               ignore_stdout=False)
+
+
+def full_path_to(file):
+    """Returns an absolute path to the given file."""
+    # We need to use full paths to files because `git status --porcelain` shows
+    # paths relative to the repository's root.
+    return os.path.join(repository_path(), file)
+
+
+def remove(file):
+    """Removes the given file or directory from the filesytem."""
+    file = full_path_to(file)
+    # Directories have to be removed differently than files.
+    if os.path.isdir(file):
+        shutil.rmtree(file)
+    else:
+        os.remove(file)
+
+
+def perform_git_action(action, file, ignore_stdout=True, ignore_stderr=False):
+    """Performs the given git action over the given file."""
+    if isinstance(action, str):
+        action = [action]
+    # '--' prevents confusion when the file looks like a branch or tag.
+    subprocess.call(
+        ['git'] + action + ['--', full_path_to(file)],
+        stdout=subprocess.PIPE if ignore_stdout else None,
+        stderr=subprocess.PIPE if ignore_stderr else None
+    )
+
+
+def repository_path():
+    """Returns a path to the top-level directory of the repository.
+    """
+    path = subprocess.check_output(
+        ['git', 'rev-parse', '--show-toplevel'],
+        universal_newlines=True
+    )
+    return path.strip()
+
+
+def should_reflect_changes_on_empty_buffer():
+    """Should we reflect changes when the editor buffer is empty?"""
+    OPTION = 'git-edit-index.onEmptyBuffer'
+    on_empty_buffer = value_for_config_option(OPTION)
+    if on_empty_buffer == 'act':
+        return True
+    elif on_empty_buffer == 'nothing':
+        return False
+    elif on_empty_buffer == 'ask' or on_empty_buffer is None:
+        return ask_user_whether_reflect_changes_on_empty_buffer()
+
+    handle_unsupported_config_option_value(OPTION, on_empty_buffer)
+
+
+def ask_user_whether_reflect_changes_on_empty_buffer():
+    """Asks the user whether changes should be reflected when the editor buffer
+    is empty.
+    """
+    answer = input('The buffer is empty. Apply the changes? [y/N] ')
+    return answer.lower() == 'y'
+
+
+def handle_unsupported_config_option_value(option, value):
+    """Handles a situation when the given value of the given option is
+    unsupported.
+    """
+    # React in the same way as git reacts when it encounters an invalid value.
+    error_msg = 'error: unsupported config value {!r} for {!r}\n'.format(
+        value,
+        option
+    )
+    sys.stderr.write(error_msg)
+    sys.exit(1)
+
+
+def value_for_config_option(option):
+    """Returns the value of the given config option.
+
+    If there is no value for the given option, None is returned.
+    """
+    try:
+        value = subprocess.check_output(
+            ['git', 'config', option],
+            universal_newlines=True
+        )
+        return value.strip()
+    except subprocess.CalledProcessError:
+        # The given option does not exist (`git config` ends with a non-zero
+        # return code in such a case).
+        return None
+
+
+def parse_args(argv):
+    """Parses the given argument list."""
+    parser = argparse.ArgumentParser(
+        description=("""
+            Opens an editor to stage or unstage files in a git repository.
+        """)
+    )
+    parser.add_argument(
+        '-V', '--version',
+        action='version',
+        version='%(prog)s {}'.format(__version__)
+    )
+    parser.parse_args(argv)
+
+
+def main(argv):
+    parse_args(argv[1:])
+
+    orig_index = current_index()
+    if not orig_index:
+        # There is nothing in the index, so do not bother the user with an
+        # empty editor.
+        return
+
+    new_index = edit_index(orig_index)
+    if not new_index:
+        if not should_reflect_changes_on_empty_buffer():
+            return
+
+    reflect_index_changes(orig_index, new_index)
+
+
+if __name__ == '__main__':
+    try:
+        main(sys.argv)
+    except subprocess.CalledProcessError as ex:
+        # An external command (e.g. git) failed. For example, this may happen
+        # when `git edit-index` is run outside of a git repository. In such a
+        # case, simply exit the script because we assume that the failed
+        # command has printed an error to stderr. For example, when git fails,
+        # it prints an error to stderr. It would be pointless to show the
+        # backtrace to the user because that would only clutter the screen,
+        # thus making the real error less apparent.
+        sys.exit(ex.returncode)
