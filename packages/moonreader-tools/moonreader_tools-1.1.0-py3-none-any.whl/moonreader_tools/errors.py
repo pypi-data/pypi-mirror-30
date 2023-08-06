@@ -1,0 +1,2 @@
+class BookTypeError(ValueError):
+    pass
