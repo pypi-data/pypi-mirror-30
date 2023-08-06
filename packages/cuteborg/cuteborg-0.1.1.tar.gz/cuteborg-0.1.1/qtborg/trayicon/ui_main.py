@@ -1,0 +1,96 @@
+#pylint: skip-file
+# -*- coding: utf-8 -*-
+
+# Form implementation generated from reading ui file 'data/ui/trayicon/ui_main.ui'
+#
+# Created by: PyQt5 UI code generator 5.7
+#
+# WARNING! All changes made in this file will be lost!
+
+from PyQt5 import QtCore, QtGui, QtWidgets
+
+class Ui_StatusWindow(object):
+    def setupUi(self, StatusWindow):
+        StatusWindow.setObjectName("StatusWindow")
+        StatusWindow.resize(851, 398)
+        self.centralwidget = QtWidgets.QWidget(StatusWindow)
+        self.centralwidget.setObjectName("centralwidget")
+        self.verticalLayout = QtWidgets.QVBoxLayout(self.centralwidget)
+        self.verticalLayout.setObjectName("verticalLayout")
+        self.status_box = QtWidgets.QWidget(self.centralwidget)
+        self.status_box.setObjectName("status_box")
+        self.horizontalLayout = QtWidgets.QHBoxLayout(self.status_box)
+        self.horizontalLayout.setContentsMargins(0, 0, 0, 0)
+        self.horizontalLayout.setObjectName("horizontalLayout")
+        self.status_icon = QtWidgets.QLabel(self.status_box)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.status_icon.sizePolicy().hasHeightForWidth())
+        self.status_icon.setSizePolicy(sizePolicy)
+        self.status_icon.setObjectName("status_icon")
+        self.horizontalLayout.addWidget(self.status_icon)
+        self.status_label = QtWidgets.QLabel(self.status_box)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.status_label.sizePolicy().hasHeightForWidth())
+        self.status_label.setSizePolicy(sizePolicy)
+        self.status_label.setText("")
+        self.status_label.setWordWrap(True)
+        self.status_label.setObjectName("status_label")
+        self.horizontalLayout.addWidget(self.status_label)
+        self.verticalLayout.addWidget(self.status_box)
+        self.jobs_view = QtWidgets.QTableView(self.centralwidget)
+        self.jobs_view.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.jobs_view.setAlternatingRowColors(True)
+        self.jobs_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.jobs_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.jobs_view.setShowGrid(False)
+        self.jobs_view.setSortingEnabled(True)
+        self.jobs_view.setWordWrap(False)
+        self.jobs_view.setObjectName("jobs_view")
+        self.jobs_view.horizontalHeader().setHighlightSections(False)
+        self.jobs_view.horizontalHeader().setSortIndicatorShown(True)
+        self.jobs_view.horizontalHeader().setStretchLastSection(True)
+        self.jobs_view.verticalHeader().setVisible(False)
+        self.verticalLayout.addWidget(self.jobs_view)
+        StatusWindow.setCentralWidget(self.centralwidget)
+        self.menubar = QtWidgets.QMenuBar(StatusWindow)
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 851, 25))
+        self.menubar.setObjectName("menubar")
+        self.menuCuteBorg_Status = QtWidgets.QMenu(self.menubar)
+        self.menuCuteBorg_Status.setObjectName("menuCuteBorg_Status")
+        StatusWindow.setMenuBar(self.menubar)
+        self.statusbar = QtWidgets.QStatusBar(StatusWindow)
+        self.statusbar.setObjectName("statusbar")
+        StatusWindow.setStatusBar(self.statusbar)
+        self.action_close = QtWidgets.QAction(StatusWindow)
+        self.action_close.setObjectName("action_close")
+        self.action_quit = QtWidgets.QAction(StatusWindow)
+        self.action_quit.setObjectName("action_quit")
+        self.action_quit_and_stop = QtWidgets.QAction(StatusWindow)
+        self.action_quit_and_stop.setObjectName("action_quit_and_stop")
+        self.menuCuteBorg_Status.addAction(self.action_close)
+        self.menuCuteBorg_Status.addAction(self.action_quit)
+        self.menuCuteBorg_Status.addAction(self.action_quit_and_stop)
+        self.menubar.addAction(self.menuCuteBorg_Status.menuAction())
+
+        self.retranslateUi(StatusWindow)
+        QtCore.QMetaObject.connectSlotsByName(StatusWindow)
+
+    def retranslateUi(self, StatusWindow):
+        _translate = QtCore.QCoreApplication.translate
+        StatusWindow.setWindowTitle(_translate("StatusWindow", "CuteBorg Status"))
+        self.status_icon.setText(_translate("StatusWindow", "TextLabel"))
+        self.menuCuteBorg_Status.setTitle(_translate("StatusWindow", "&CuteBorg Status"))
+        self.action_close.setText(_translate("StatusWindow", "&Close"))
+        self.action_close.setToolTip(_translate("StatusWindow", "Close the status window without stopping CuteBorg Status or CuteBorg itself"))
+        self.action_close.setShortcut(_translate("StatusWindow", "Ctrl+W"))
+        self.action_quit.setText(_translate("StatusWindow", "&Quit CuteBorg Status…"))
+        self.action_quit.setToolTip(_translate("StatusWindow", "Close this window and stop CuteBorg Status, leaving CuteBorg itself running."))
+        self.action_quit.setShortcut(_translate("StatusWindow", "Ctrl+Q"))
+        self.action_quit_and_stop.setText(_translate("StatusWindow", "Q&uit CuteBorg…"))
+        self.action_quit_and_stop.setToolTip(_translate("StatusWindow", "Quit CuteBorg Status and stop CuteBorg"))
+        self.action_quit_and_stop.setShortcut(_translate("StatusWindow", "Ctrl+Shift+Q"))
+
