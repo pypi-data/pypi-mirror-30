@@ -1,0 +1,2 @@
+## Problem
+   If you shot photos in "CR2" format and have a problem in changing the files to ".jpeg". You can change it using *Adobe Photoshop*. If you need an alternative solution you can use this program to solve the problem
