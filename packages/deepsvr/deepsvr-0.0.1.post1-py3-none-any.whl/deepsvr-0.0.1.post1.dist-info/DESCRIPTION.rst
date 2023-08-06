@@ -1,0 +1,3 @@
+Cancer genomic analysis requires accurate identification of somatic variants in sequencing data. Manual review to refine somatic variant calls is required as a final step after automated processing. However, manual variant refinement is time-consuming, costly, poorly standardized, and non-reproducible. Here, we systematized and standardized somatic variant refinement using a machine learning approach. The final model accurately recapitulated manual somatic variant refinement labels using an independent testing set and accurately predicted somatic variants confirmed by orthogonal validation sequencing data. The model improves on manual somatic variant refinement by reducing bias on calls usually subject to high inter-reviewer variability.
+
+
