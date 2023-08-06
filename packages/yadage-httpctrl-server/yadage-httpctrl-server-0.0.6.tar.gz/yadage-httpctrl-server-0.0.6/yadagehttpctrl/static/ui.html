@@ -1,0 +1,246 @@
+<!DOCTYPE>
+
+<html>
+
+  <head>
+    <title>yadage-http-ctrl ui</title>
+
+    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1, maximum-scale=1">
+
+    <!-- order seems important load socket before require -->
+    <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/1.3.5/socket.io.min.js"></script>
+
+    <script src="/static/bower_components/requirejs/require.js"></script>
+    <script src="/static/bower_components/jquery/dist/jquery.min.js"></script>
+
+    <script>
+
+    requirejs.config({
+        paths: {
+          'jquery': "/static/bower_components/jquery/dist/jquery.min",
+          'yadage-js': '/static/bower_components/yadage-js/yadage-js',
+          'cytoscape': '/static/bower_components/cytoscape/dist/cytoscape',
+          'cytoscape-dagre': '/static/bower_components/cytoscape-dagre/cytoscape-dagre',
+          'cytoscape-expand-collapse': '/static/bower_components/cytoscape-expand-collapse/cytoscape-expand-collapse',
+          'dagre': 'https://cdn.rawgit.com/cpettitt/dagre/v0.7.4/dist/dagre'
+        }
+    });
+    </script>
+
+
+    <script>
+
+
+      var ctrl_read_data = {
+        applicable_rules: undefined,
+        submittable_nodes: undefined
+      };
+
+      function sync_and_draw(yadage){
+        console.log('sync and draw')
+        yadage.rest_controller.state().done(function(d){
+          yadage.redraw_graph(d)
+      })
+
+
+      $.when(
+        yadage.rest_controller.applicable_rules(),
+        yadage.rest_controller.submittable_nodes()
+      ).done(function(applicable,submittable){
+
+          ctrl_read_data.submittable_nodes = submittable[0]
+          ctrl_read_data.applicable_rules = applicable[0]
+
+          html = `
+          `
+
+          ctrl_read_data.applicable_rules.forEach(function(v){
+
+
+            yadage.rest_controller.rule(v).done(function(details,_,_){
+              $('#yadage-openrules').append(`
+                <li>
+                  <dl>
+                    <dt>Name</dt>
+                    <dd>${details.rule.name}</dd>
+                    <dt>Scope</dt>
+                    <dd>${details.offset == "" ? "root scope" : details.offset }</dd>
+                    <dt>Scheduler</dt>
+                    <dd>${details.rule.scheduler.scheduler_type}</dd>
+                  </dl>
+                  <button data-ruleid="${details.id}" id="rule-apply-${details.id}">Apply</button>
+                </li>
+              `)
+
+              $(`#rule-apply-${details.id}`).click(function(){
+                var ruleid = $(this).attr('data-ruleid');
+                yadage.rest_controller.apply_rules([ruleid]).done(function(){
+                  sync_and_draw(yadage)
+                })
+                console.log('apply ' + $(this).attr('data-ruleid'))
+              })
+
+
+              console.log(details)
+            })
+
+
+          })
+
+
+        })
+
+      }
+
+      $(document).ready(function(){
+
+          namespace = '/yadage';
+          var socket = io.connect('//' + document.domain + ':' + location.port + namespace);
+          socket.emit('join', {});
+          socket.on('sync', function(msg){
+            console.log('sync!')
+            require(["yadage-js"],function(yadage){
+              sync_and_draw(yadage)
+            })
+
+          })
+
+
+          require(["yadage-js"],function(yadage){
+
+
+            yadage.stageSelectCallback = function(evt){
+              var details = evt.target.data().details
+
+
+              if(details){
+
+                console.log('details')
+
+                console.log(details)
+
+                var html = `
+                  <dl>
+                    <dt>Stage Name</dt>
+                    <dd>${details.name}</dd>
+                  </dl>
+                `
+                $('#yadage-detail').html(html)
+
+              }
+
+
+
+            }
+
+
+
+            yadage.nodeSelectCallback = function(evt){
+              var details = evt.target.data().details
+              if (details) {
+              var submittable = ctrl_read_data.submittable_nodes.indexOf(details.id) >= 0
+              var resettable = true;
+
+              var html = `
+                <dl>
+                  <dt>Node</dt>
+                  <dd>${details.name}</dd>
+                </dl>
+                <button data-nodeid="${details.id}" id="node-submit-${details.id}">Submit</button>
+                <button data-nodeid="${details.id}" id="node-reset-${details.id}">Reset</button>
+              `
+
+
+              $('#yadage-detail').html(html)
+              console.log('added callback to ' + `#node-${details.id}`)
+
+              if(submittable){
+                $(`#node-submit-${details.id}`).click(function(){
+                  var nodeid = $(this).attr('data-nodeid')
+                  console.log('submitting ' + nodeid)
+                  yadage.rest_controller.submit_nodes([nodeid]).done(function(){
+                    sync_and_draw(yadage)
+                  })
+                })
+              }else{
+                console.log('not submittable')
+                $(`#node-submit-${details.id}`).prop("disabled", true);
+              }
+
+              if(resettable){
+                $(`#node-reset-${details.id}`).click(function(){
+                  var nodeid = $(this).attr('data-nodeid')
+                  yadage.rest_controller.reset_nodes([nodeid]).done(function(){
+                    sync_and_draw(yadage)
+                  })
+                })
+              }else{
+                console.log('not resettable')
+                $(`#node-reset-${details.id}`).prop("disabled", true);
+              }
+
+
+            }}
+            yadage.initialize_graph($("#yadage-viz"))
+
+
+
+
+
+            console.log('let us try this')
+
+            yadage.rest_controller.connect(window.location.origin)
+
+
+            sync_and_draw(yadage)
+
+
+        })
+      })
+
+    </script>
+    <style>
+      body {
+        font-family: helvetica;
+        font-size: 14px;
+      }
+      #yadage-viz {
+        width: 50%;
+        height: 50%;
+        border: 1px solid black;
+        left: 0;
+        top: 0;
+        z-index: 999;
+      }
+      h1 {
+        opacity: 0.5;
+        font-size: 1em;
+      }
+    </style>
+
+  </head>
+
+  <body>
+    <div>
+      <div>
+        <button onclick="sync_and_draw(require('yadage-js'))">sync</button>
+        <button onclick="require('yadage-js').redraw_graph();">redraw</button>
+        <button onclick="require('yadage-js').relayout();">relayout</button>
+        <button onclick="require('yadage-js').collapse_api.collapseAll();">collapse</button>
+        <button onclick="require('yadage-js').collapse_api.expandAll();">expand</button>
+      </div>
+      <div id="yadage-viz"></div>
+      <div id="yadage-detail"></div>
+
+      <div>
+        <h3>Open Stages</h3>
+        <ul id="yadage-openrules">
+        </ul>
+      </div>
+
+
+
+    </div>
+  </body>
+
+</html>
