@@ -1,0 +1,32 @@
+import { Subscription } from 'rxjs/Subscription';
+import { QueryList, AfterViewInit, OnDestroy } from '@angular/core';
+import { SectionBaseComponent } from './section-base.component';
+import { ToggleComponent } from '../variables-module/toggle.component';
+import { TickComponent } from '../variables-module/tick.component';
+import { ConditionalComponent } from '../variables-module/conditional.component';
+import { NumberComponent } from '../variables-module/number.component';
+import { SliderComponent } from '../variables-module/slider.component';
+import { VariableTableComponent } from '../variables-module/variable-table.component';
+import { StringComponent } from '../variables-module/string.component';
+import { DropdownComponent } from '../variables-module/dropdown.component';
+import { CodeComponent } from '../code-module/code.component';
+import { VariableComponent } from '../types/variable-component';
+export declare class LiveComponent extends SectionBaseComponent implements AfterViewInit, OnDestroy {
+    sectionType: string;
+    variableComponents: VariableComponent[];
+    subscriptions: Subscription[];
+    toggleComponents: QueryList<ToggleComponent>;
+    tickComponents: QueryList<TickComponent>;
+    conditionalComponents: QueryList<ConditionalComponent>;
+    numberComponents: QueryList<NumberComponent>;
+    sliderComponents: QueryList<SliderComponent>;
+    variableTableComponents: QueryList<VariableTableComponent>;
+    stringComponents: QueryList<StringComponent>;
+    dropdownComponents: QueryList<DropdownComponent>;
+    codeComponents: QueryList<CodeComponent>;
+    ngAfterViewInit(): void;
+    subscribe(): void;
+    unsubscribe(): void;
+    kernelReset(): void;
+    ngOnDestroy(): void;
+}
