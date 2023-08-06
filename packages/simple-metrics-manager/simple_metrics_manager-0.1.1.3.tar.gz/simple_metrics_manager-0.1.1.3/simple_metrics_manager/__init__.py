@@ -1,0 +1,5 @@
+from simple_metrics_manager import dated_cache_manager
+from simple_metrics_manager import storage_interface
+from simple_metrics_manager.dated_cache_manager import *
+from simple_metrics_manager.storage_interface import *
+from simple_metrics_manager._version import *
