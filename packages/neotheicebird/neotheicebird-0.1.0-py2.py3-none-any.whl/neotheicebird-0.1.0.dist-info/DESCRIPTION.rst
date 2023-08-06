@@ -1,0 +1,142 @@
+-------
+
+This software is licensed under CC0 1.0 (http://creativecommons.org/publicdomain/zero/1.0/) and is in the public domain 
+because it contains materials that originally came from the U.S. Geological Survey (USGS), an agency of the United 
+States Department of Interior. For more information, see the official USGS copyright policy 
+(http://www2.usgs.gov/visual-id/credit_usgs.html#copyright/).
+
+
+Disclaimer
+----------
+
+This software is preliminary or provisional and is subject to revision. It is being provided to meet the need for timely
+best science. The software has not received final approval by the U.S. Geological Survey (USGS). No warranty, expressed 
+or implied, is made by the USGS or the U.S. Government as to the functionality of the software and related material nor 
+shall the fact of release constitute any such warranty. The software is provided on the condition that neither the USGS 
+nor the U.S. Government shall be held liable for any damages resulting from the authorized or unauthorized use of the 
+software.
+
+The USGS provides no warranty, expressed or implied, as to the correctness of the furnished software or the suitability 
+for any purpose. The software has been tested, but as with any complex software, there could be undetected errors. Users
+who find errors are requested to report them to the USGS.
+
+References to non-USGS products, trade names, and (or) services are provided for information purposes only and do not
+constitute endorsement or warranty, express or implied, by the USGS, U.S. Department of Interior, or U.S. Government, as
+to their suitability, content, usefulness, functioning, completeness, or accuracy.
+
+Although this program has been used by the USGS, no warranty, expressed or implied, is made by the USGS or the United
+States Government as to the accuracy and functioning of the program and related program material nor shall the fact of
+distribution constitute any such warranty, and no responsibility is assumed by the USGS in connection therewith.
+
+This software is provided "AS IS."
+Description-Content-Type: UNKNOWN
+Description: neotheicebird
+        ===============================
+        
+        Its an "About me" page on Pip index.
+        
+        This "About me" python package contains information about me as a developer.
+        
+        Why did I create this package?
+        
+        This package has 2 purposes:
+        
+        1. Developers can simply install and import this package right from the console to know about me or my works. You can think of this package like a twitter handle and reaching to the tweets under the handle.
+        
+        2. I started this project to learn more about python packaging and deployment. You can learn the best practises used to create and deploy python packages to the PyPi index, by editing this minimal code. You can fork this project here: https://github.com/neotheicebird/neotheicebird.git
+        
+        This is just like creating a Github account, or a Twitter account. Commandline is the canvas, let's express through it. Run a "commandline blog", create jokes, its all possible through a package.
+        
+        For more information, go to: http://neotheicebird.readthedocs.io/en/latest/
+        
+        Installation
+        ------------
+        
+        This package can be installed using:
+        
+        .. highlight::shell
+            pip install neotheicebird
+        
+        Sample usage
+        ------------
+        
+        To see the About-me content, simply import the library
+        
+        .. highlight::python
+            import neotheicebird
+        
+        Learnings
+        ---------
+        
+        You can learn about the best practises to package, build and share python code from this PyCon Talk by Dave Forgac:
+        
+        .. raw:: html
+            <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; max-width: 100%; height: auto;">
+                <iframe width="560" height="315" src="https://www.youtube.com/embed/qOH-h-EKKac" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+        
+        To build this project from scratch follow the tutorial at: http://neotheicebird.readthedocs.io/en/latest/tutorial.html
+        Tests
+        -----
+        
+        You can use `tox` to run automated tests for Py27 and Py36 environments.
+        
+        `pip install tox`
+        
+        
+        Tutorial
+        --------
+        
+        
+        Setting up travis CI
+        --------------------
+        
+        Travis CI is a continuous Integration service. Your code is built, test and even deployed (optionally) on Travis.
+        
+        To setup Travis CI, you need to create an account on https://travis-ci.org using Github Sign-In. To start CI:
+        
+        1. Go to [https://travis-ci.org/profile](https://travis-ci.org/profile) and Switch on this project for CI.
+        2. Add a `.travis.yml` file to your local project repo. The contents of this file could be:
+        
+        ```
+        language: python
+        python:
+          - "2.6"
+          - "2.7"
+          - "3.3"
+          - "3.4"
+          - "3.5"
+          - "3.5-dev"  # 3.5 development branch
+          - "3.6"
+          - "3.6-dev"  # 3.6 development branch
+          - "3.7-dev"  # 3.7 development branch
+        # command to install dependencies
+        install:
+          - pip install -r requirements.txt
+        # command to run tests
+        script:
+          - pytest # or py.test for Python versions 3.5 and below
+        ```
+        3. Commit and Git push to trigger Travis to do its job.
+        
+        Changelog
+        =========
+        
+        Version 0.1.0
+        --------------------
+        
+        - The first release. Probably the last :P. Released on 03-April-2018
+        
+Keywords: neotheicebird about aboutme about-me learn packaging for pypi
+Platform: UNKNOWN
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python :: 2.6
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.3
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
