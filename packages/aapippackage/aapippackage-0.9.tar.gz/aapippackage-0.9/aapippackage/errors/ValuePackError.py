@@ -1,0 +1,2 @@
+class ValuePackError(Exception):
+    pass
