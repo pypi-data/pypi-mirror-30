@@ -1,0 +1,22 @@
+from types import FunctionType, MethodType, GeneratorType
+from .all import All
+
+AllType = All(type, identifier='AllType')
+AllBool = All(bool, identifier='AllBool')
+AllInt = All(int, identifier='AllInt')
+AllFloat = All(float, identifier='AllFloat')
+AllComplex = All(complex, identifier='AllComplex')
+AllStr = All(str, identifier='AllStr')
+AllTuple = All(tuple, identifier='AllTuple')
+AllList = All(list, identifier='AllList')
+AllSet = All(set, identifier='AllSet')
+AllFrozen = All(frozenset, identifier='AllFrozen')
+AllDict = All(dict, identifier='AllDict')
+AllKey = All(type({}.keys()), identifier='AllKey')
+AllValue = All(type({}.values()), identifier='AllValue')
+AllItem = All(type({}.items()), identifier='AllItem')
+AllFunc = All(FunctionType, identifier='AllFunc')
+AllMeth = All(MethodType, identifier='AllMeth')
+AllGen = All(GeneratorType, identifier='AllGen')
+AllRange = All(range, identifier='AllRange')
+AllSlice = All(slice, identifier='AllSlice')

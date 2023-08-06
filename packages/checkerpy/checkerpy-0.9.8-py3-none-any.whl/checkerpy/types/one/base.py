@@ -1,0 +1,22 @@
+from types import FunctionType, MethodType, GeneratorType
+from .just import Just
+
+JustType = Just(type, identifier='JustType')
+JustBool = Just(bool, identifier='JustBool')
+JustInt = Just(int, identifier='JustInt')
+JustFloat = Just(float, identifier='JustFoat')
+JustComplex = Just(complex, identifier='JustComplex')
+JustStr = Just(str, identifier='JustStr')
+JustTuple = Just(tuple, identifier='JustTuple')
+JustList = Just(list, identifier='JustList')
+JustSet = Just(set, identifier='JustSet')
+JustFrozen = Just(frozenset, identifier='JustFrozen')
+JustDict = Just(dict, identifier='JustDict')
+JustKey = Just(type({}.keys()), identifier='JustKey')
+JustValue = Just(type({}.values()), identifier='JustValue')
+JustItem = Just(type({}.items()), identifier='JustItem')
+JustFunc = Just(FunctionType, identifier='JustFunc')
+JustMeth = Just(MethodType, identifier='JustMeth')
+JustGen = Just(GeneratorType, identifier='JustGen')
+JustRange = Just(range, identifier='JustRange')
+JustSlice = Just(slice, identifier='JustSlice')
