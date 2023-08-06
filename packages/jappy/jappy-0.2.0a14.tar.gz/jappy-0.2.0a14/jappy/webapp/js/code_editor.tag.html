@@ -1,0 +1,1119 @@
+<code-editor>
+
+<style type="text/css">
+code-editor {
+    display: flex;
+    flex: 1 1;
+    height: 100%;
+}
+.CodeMirror {
+    height: 100%;
+    width: 100%;
+    font-size: 15pt;
+    font-family: "Noto Mono", "DejaVu Sans Mono", monospace, "Noto Emoji";
+}
+.CodeMirror-scroll {
+    margin-right: -30px;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.CodeMirror-linenumber {
+    font-size: 14pt;
+}
+.cm-s-solarized .CodeMirror-cursor {
+    width: 2px;
+    border: 0;
+    background: transparent;
+    background: rgba(0, 200, 0, .6);
+}
+.CodeMirror-overlayscroll-vertical div, .CodeMirror-overlayscroll-horizontal div {
+    background: #808080;
+    width: 10px;
+}
+.error-marker{
+    border: 1px solid red;
+    background-color: rgba(255, 0, 0,0.2);
+    border-radius: 3px;
+}
+iframe {
+    border: 0px;
+    display: none;
+}
+#split {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    flex: 1 1;
+    height: 100%;
+    float: left;
+}
+#vsplit {
+    display: flex;
+    flex-direction: row;
+    flex: 1 1;
+    height: 100%;
+    overflow: auto;
+}
+#tabs button {
+    font-size: 13pt;
+    border-radius: 0;
+    padding: 10px 10px;
+    border: 0px;
+    margin: 0px;
+}
+#tabs button.selected {
+    background-color: #282828;
+}
+#tabs span.selected {
+    white-space: nowrap;
+}
+#closetab {
+    background-image: url(lib/sugar-web/graphics/icons/actions/entry-cancel-active.svg);
+    background-repeat: no-repeat;
+    background-color: #282828;
+    width: 28px;
+    background-position: center;
+    background-size: 16px 16px;
+}
+#closetab:active {
+    background-image: url(lib/sugar-web/graphics/icons/actions/entry-cancel.svg);
+}
+.CodeMirror-search-label {
+    background-image: url(icons/entry-search.svg);
+    background-repeat: no-repeat;
+    background-color: #282828;
+    width: 28px;
+    background-position: center;
+    background-size: 15px 15px;
+}
+.CodeMirror-search-hint {
+    font-family: sans-serif;
+    color: white;
+}
+#newtab {
+    background-image: url(icons/tab-add.svg);
+    background-repeat: no-repeat;
+    width: 28px;
+    background-position: center;
+    background-size: 20px 20px;
+}
+#tray-button {
+    background-image: url(icons/tray-show.svg);
+    background-repeat: no-repeat;
+    width: 28px;
+    background-position: center;
+    background-size: 20px 20px;
+}
+#vmframe_cont {
+    -webkit-overflow-scrolling: touch;
+    overflow: auto;
+    flex: 1 1;
+    height: 100%;
+}
+#vmframe_cont iframe {
+    width: 100%;
+    height: 100%;
+}
+</style>
+
+<div id='vsplit' ref='vsplit'>
+    <div id='split' ref='split'>
+        <input ref='file_input' id='file-input' type='file' style='display: none;' />
+        <div id='tabs'>
+        <button onclick={ this.newtab } id='newtab'>&nbsp;</button><!--
+        --><span class={selected: name==parent.title} each={name in list(files)}><!--
+        --><button class={ selected: name==parent.title, special_file: name=="template.html" }
+            onclick={ parent.switchtab } ondblclick={ parent.renametab }>{str(name)}</button><!--
+        --><button if={ name==parent.title && len(files)>1 } id='closetab'
+            onclick={ parent.closetab }>&nbsp;</button></span><!--
+        --><button class="pull-right" id="tray-button" ref="traybutton">&nbsp;</button>
+        </div>
+        <textarea id="code-container" ref="code"></textarea>
+    </div>
+    <div ref="vmframe_cont" id="vmframe_cont">
+        <iframe src="{ location.protocol }//{ location.host }/{ getpath() }template.html"
+        allowfullscreen="true"
+        allowTransparency="false" ref="vmframe" name="_vmframe"></iframe>
+    </div>
+</div>
+
+<script type="text/Rapyd">
+
+from gettext import install, gettext as _
+import re
+tag = this
+tag.lang = (navigator.language or navigator.userLanguage)[:2]
+this.marker = None
+tag.cursor_pos = {}
+window.files = {}
+#loadCSS(['lib/cm/theme/solarized.css',
+#         'lib/cm/addon/scroll/simplescrollbars.css', 'css/activity.css'])
+
+tag.getpath = def():
+    if len(location.hash) > 0:
+        path = location.hash.slice(1)
+        return 'dav/' + path + '/'
+    else:
+        return ''
+
+class CollaborationBinding:
+    '''
+    This class is for abstracting away yjs<->codemirror binding.
+    '''
+    def __init__(self):
+        self.currentDoc = None
+
+    def bind(self, filename):
+        if window.y is undefined: # collaboration
+            return # No collaboration available
+        if filename not in y.share.files.keys():
+            console.debug('Creating: ' + filename)
+            y.share.files.set(filename, Y.Text)
+            y.share.files.get(filename).insert(0, '')
+        if filename is self.currentDoc:
+            console.debug('warning: already bound to ' + self.currentDoc)
+        elif self.currentDoc is None:
+            if filename not in y.share.files.keys():
+                y.share.files.set(filename, Y.Text)
+                y.share.files.get(filename).insert(0, editor.getValue())
+            y.share.files.get(filename).bindCodeMirror(editor)
+            self.currentDoc = filename
+        else:
+            y.share.files.get(filename).bindCodeMirror(editor)
+            self.currentDoc = filename
+        if self.currentDoc in tag.cursor_pos:
+            try:
+                editor.setCursor(tag.cursor_pos[self.currentDoc])
+            except:
+                console.debug('warning: could not restore cursor position')
+            del tag.cursor_pos[self.currentDoc]
+
+    def unbind(self):
+        if window.y is undefined: # collaboration
+            return # No collaboration available
+        if self.currentDoc is None:
+            console.debug('warning: not unbinding, not bound!')
+        else:
+            if self.currentDoc in y.share.files.keys():
+                tag.cursor_pos[self.currentDoc] = editor.getCursor()
+                y.share.files.get(self.currentDoc).unbindCodeMirror(editor)
+            self.currentDoc = None
+
+    def unbindAll(self):
+        if window.y is undefined: # collaboration
+            return # No collaboration available
+        y.share.files.get(self.currentDoc).unbindCodeMirrorAll()
+        
+    def deleteDoc(self):
+        if window.y is undefined: # collaboration
+            return # No collaboration available
+        console.debug('Removing: ' + self.currentDoc)
+        toDelete = self.currentDoc
+        self.unbindAll()
+        self.unbind()
+        y.share.files.delete(toDelete)
+
+    def create(self, filename, data=''):
+        if window.y is undefined: # collaboration
+            return # No collaboration available
+        if filename not in y.share.files.keys():
+            y.share.files.set(filename, Y.Text)
+            y.share.files.get(filename).insert(0, data)
+
+    def clear(self, ytext):
+        if window.y is undefined: # collaboration
+            return # No collaboration available
+        ytext.unbindCodeMirror(editor)
+
+
+def init():
+    editor = CodeMirror.fromTextArea(this.refs.code,
+                    { 'lineNumbers': True,
+                      'matchBrackets': True,
+                      'indentUnit': 4,
+                      'fixedGutter': True,
+                      'mode': None,
+                      'showCursorWhenSelecting': True,
+                      'scrollbarStyle': 'overlay',
+                      'styleActiveLine': True,
+                      'theme': 'solarized light' })
+
+    editor.setOption("extraKeys", {
+      'Ctrl-Enter': run,
+      'Alt-R': run,
+      'F9': toggle_tray,
+      'Tab': def():
+                if editor.somethingSelected():
+                    editor.indentSelection("add")
+                else:
+                    editor.execCommand('insertSoftTab')
+    })
+
+    require(["text!../jappy.json"],
+            def(raw_translation_data):
+                translation_data = JSON.parse(raw_translation_data)
+                if translation_data['language']==tag.lang:
+                    install(translation_data)
+                editor.setOption('queryDialog', \
+                    '<span class="CodeMirror-search-label">&nbsp;&nbsp;</span>&nbsp;' + \
+                    '<input type="text" style="width: 10em" class="CodeMirror-search-field"/>' + \
+                    '&nbsp;<span class="CodeMirror-search-hint">'+ _('Find') +'</span>')
+        )
+
+    CodeMirror.commands.replace = undefined
+    CodeMirror.commands.replaceAll = undefined
+
+    collab = CollaborationBinding()
+    iframe = this.refs.vmframe
+
+    def load_localstore():
+        # No datastore probably means we need to handle stuff ourselves
+        if not location.hash:
+            savedSession = localStorage.getItem('jappySession')
+            if savedSession is not None:
+                check_load(None, None, savedSession)
+            tag.update()
+        else:
+            init_collab()
+    event_bus.on("activity-not-ready", load_localstore)
+
+
+    def check_load(error, metadata, data):
+        if (data):
+            window.files = {}
+            parsed_data = JSON.parse(data)
+            for file in parsed_data:
+                if parsed_data[file]:
+                    new_session = CodeMirror.Doc(parsed_data[file])
+                    window.files[file] = new_session
+        if len(window.files) > 0:
+            tag.title = list(parsed_data)[0]
+            if window.files[tag.title]!=undefined:
+                collab.unbind()
+                editor.swapDoc(window.files[tag.title])
+        tag.update()
+
+
+    def load_datastore(activity):
+        datastore = activity.getDatastoreObject()
+        if datastore.objectId is not undefined:
+            datastore.loadAsText(check_load)
+        else:
+            # No datastore probably means we need to handle stuff ourselves
+            event_bus.trigger("enable-standalone")
+            savedSession = localStorage.getItem('jappySession')
+            if savedSession is not None:
+                check_load(None, None, savedSession)
+        tag.update()
+        window.activity = activity
+    event_bus.on("activity-ready", load_datastore)
+
+
+    def update_tabs():
+        toolbar_div = document.getElementById('main-toolbar')
+        if getComputedStyle(toolbar_div).display == 'none':
+            return
+        toolbar_style = window.getComputedStyle(toolbar_div)
+        tabs_div = document.getElementById('tabs')
+        tabs_style = window.getComputedStyle(tabs_div)
+        target_size = window.innerHeight - int(toolbar_style.height) \
+                                         - int(tabs_style.height)
+        canvas = document.getElementById('canvas')
+        canvas.style.top = toolbar_style.height
+        if getComputedStyle(iframe).display == 'none':
+            editor.setSize(window.innerWidth, target_size)
+        else:
+            editor.setSize(window.innerWidth/2, target_size)
+        if len(window.files) > 0:
+            window.document.title = 'Jappy : ' + tag.title + ' @ ' + \
+                location.host + ((' # ' + location.hash[1:]) if location.hash else '')
+            guess_mode()
+    this.on('update', update_tabs)
+    window.addEventListener("resize", deferred_update_tabs)
+    # window.addEventListener("orientationchange", update_tabs)
+
+    def deferred_update_tabs():
+        setTimeout(update_tabs, 50)
+
+    def guess_mode():
+        editor.setOption('lineWrapping', False)
+        if tag.title.toLowerCase().endswith(['.pyj', '.py']):
+            editor.setOption('mode', 'python')
+        elif tag.title.toLowerCase().endswith(['.html', '.htm', '.svg', '.xml']):
+            editor.setOption('mode', 'htmlmixed')
+        elif tag.title.toLowerCase().endswith('.js'):
+            editor.setOption('mode', 'javascript')
+        elif tag.title.toLowerCase().endswith('.css'):
+            editor.setOption('mode', 'css')
+        elif tag.title.toLowerCase().endswith('.md'):
+            editor.setOption('mode', 'markdown')
+            editor.setOption('lineWrapping', True)
+
+    def switchtab(e=None, filename=None):
+        if filename is None:
+            filename = e.target.innerHTML # tab button
+        if filename is not tag.title:
+            tag.title = filename
+            collab.unbind()
+            editor.swapDoc(window.files[tag.title])
+            tag.update()
+            collab.bind(tag.title)
+            editor.focus()
+    tag.switchtab = switchtab
+
+    def renametab(e):
+        e.target.style.display = 'none'
+        filename = e.target.innerHTML # tab button
+        editbox = document.createElement('input')
+        editbox.value = tag.title
+        def do_rename_tab():
+            if editbox.value not in window.files:
+                window.files[editbox.value] = editor.getDoc()
+                del window.files[tag.title]
+                collab.unbindAll()
+                collab.deleteDoc()
+                collab.create(editbox.value, editor.getValue())
+                collab.bind(editbox.value)
+                if window.fs is not undefined:
+                    if window.server_files is not undefined:
+                        path = location.hash.slice(1)
+                        def file_moved(ev):
+                            pass # TODO: Notify user.
+                        console.debug('moving ' + tag.title + ' to ' + editbox.value)
+                        window.fs.file('/' + path + '/' + tag.title)\
+                           .mv('/' + path + '/' + editbox.value, file_moved)
+                tag.title = editbox.value
+            e.target.style.display = 'inline-block'
+            e.target.parentNode.removeChild(editbox)
+            tag.update()
+            editor.focus()
+        editbox.onblur = do_rename_tab
+        editbox.onkeyup = def(e):
+            if e.keyCode==13: # Enter
+                editor.focus()
+            if e.keyCode==27: # Esc
+                editbox.value = tag.title
+                editor.focus()
+        e.target.parentNode.insertBefore(editbox, e.target)
+        editbox.focus()
+        if tag.title.indexOf('.') > 0:
+            editbox.setSelectionRange(0, tag.title.indexOf('.'))
+        else:
+            editbox.select()
+    tag.renametab = renametab
+
+    def closetab(e=None, filename=None):
+        if len(window.files) > 1:
+            active_title = tag.title
+            if filename is None:
+                filename = tag.title
+            if e is not None: # called from a ui event
+                if len(window.files[tag.title].getValue())==0:
+                    # Special case: remove file in server too! :-)
+                    if window.fs is not undefined:
+                        path = location.hash.slice(1)
+                        def file_removed(ev):
+                            pass # TODO: Notify user.
+                        if window.fs is not undefined:
+                            window.fs.file('/' + path + '/' + filename).rm(file_removed)
+            index = list(window.files).index(filename)
+            del window.files[filename]
+            if filename == active_title:
+                if index > 0:
+                    index = index - 1
+                tag.title = list(window.files)[index]
+            if '__stdlib__/' + filename in RapydScript.file_data:
+                del RapydScript.file_data['__stdlib__/' + filename]
+            if e is not None: # called from a ui event
+                collab.deleteDoc()
+            else:
+                collab.unbind()
+            editor.swapDoc(window.files[tag.title])
+            tag.update()
+            collab.bind(tag.title)
+            editor.focus()
+    tag.closetab = closetab
+
+    def get_new_untitled(file=None):
+        if file is None:
+            file = _('untitled') + '.pyj'
+        basename = file.substr(0, file.indexOf('.'))
+        extension = file.substr(file.indexOf('.'))
+        i = 1
+        while file in files:
+            file = basename + "-" + i + extension
+            i = i + 1
+        return file
+
+    def newtab(e):
+        file = get_new_untitled()
+        new_session = CodeMirror.Doc('')
+        window.files[file] = new_session
+        collab.unbind()
+        editor.swapDoc(new_session)
+        tag.title = file
+        tag.update()
+        collab.bind(tag.title)
+        editor.focus()
+    tag.newtab = newtab
+
+    def toggle_tray():
+        if getComputedStyle(iframe).display == 'none':
+            event_bus.trigger("traybutton-open")
+        else:
+            event_bus.trigger("traybutton-close")
+    event_bus.on("toggle-tray", toggle_tray)
+    this.refs.traybutton.onclick = toggle_tray
+
+    def toggle_tray_or_restore():
+        ''' Used by Android `Back` button '''
+        toolbar_div = document.getElementById('main-toolbar')
+        if getComputedStyle(toolbar_div).display == 'none':
+            r = document.getElementById('restore-button')
+            r.click()
+        else:
+            toggle_tray()
+    window.onbackbutton = toggle_tray_or_restore
+
+    def traybutton_close():
+        iframe.style.display = 'none'
+        iframe.style.width = '0%'
+        tag.refs.split.style.width = '100%'
+        tag.refs.traybutton.style.backgroundImage = "url(icons/tray-show.svg)"
+        tag.update()
+        editor.scrollIntoView()
+    event_bus.on("traybutton-close", traybutton_close)
+
+    def traybutton_open():
+        iframe.style.display = 'block'
+        iframe.style.width = '100%'
+        iframe.style.height = '100%'
+        tag.refs.split.style.width = '50%'
+        tag.refs.traybutton.style.backgroundImage = "url(icons/tray-hide.svg)"
+        tag.update()
+        editor.scrollIntoView()
+    event_bus.on("traybutton-open", traybutton_open)
+
+    def publish_script(source, callback=None):
+        path = location.hash.slice(1)
+        filepath = '/' + path + '/' + '.index.html'
+        def file_written(ev):
+            pass # TODO: Notify user.
+            if callback:
+                callback()
+        fs.file(filepath).write(source, "text/plain; charset=UTF-8",
+                                                    file_written)
+
+    def run():
+        window.state = 'run'
+        clear_output()
+        event_bus.trigger('traybutton-open')
+        riot.update()
+        if window.y is not undefined: # collaboration
+            path = location.hash.slice(1)
+            if 'index.html' in window.files:
+                target = 'index.html'
+            else:
+                target = tag.title
+            y.connector.socket.emit( 'jappyTrigger', 
+                                    {'event':'run-code-slave',
+                                     'data': { 'filename': target }},
+                                    path)
+        event_bus.trigger("activity-save")
+        if tag.title.toLowerCase().endswith(['.html', '.htm']):
+            if location.hash:
+                path = location.hash.slice(1)
+                target = 'dav/' + path + '/.index.html'
+                if 'index.html' in window.files:
+                    src = window.files['index.html'].getValue()
+                elif len([fil for fil in parent.server_files \
+                                      if fil.name=='index.html']):
+                    target =  'dav/' + path + '/index.html'
+                else:
+                    src = editor.getValue()
+                publish_script(src, def():
+                        iframe.contentWindow.location = target
+                        if 'index.html' in window.files:
+                            switchtab(filename='index.html')
+                    )
+            else:
+                iframe.contentDocument.open()
+                iframe.contentDocument.write(editor.getValue())
+                iframe.contentDocument.close()
+        elif tag.title.toLowerCase().endswith('.md'):
+            # Not really 'run'
+            render_markdown()
+        else:
+            # This is what we're about after all
+            run_rapydscript()
+    event_bus.on("run-code", run)
+
+    def url_open(url):
+        event_bus.trigger("traybutton-open")
+        riot.update()
+        window.open(url, '_vmframe')
+    event_bus.on('url-open', url_open)
+
+    def trigger_on_next_run(callback):
+        def check_for_index(event):
+            if event.filename=='.index.html':
+                event_bus.off("file-create", check_for_index)
+                event_bus.off("file-update", check_for_index)
+                callback(event)
+        event_bus.on("file-create", check_for_index)
+        event_bus.on("file-update", check_for_index)
+
+    def run_remotely(event):
+        if window.fs is not undefined:
+            path = location.hash.slice(1)
+            rel_url = 'dav/' + path + '/.index.html'
+            makeToast(_('Running from remote: ' + event.filename))
+            iframe.contentWindow.location = rel_url
+            if event.filename is not tag.title:
+                if 'index.html' in window.files:
+                    switchtab(filename='index.html')
+                else:
+                    if event.filename in window.files:
+                        switchtab(filename=event.filename)
+            event_bus.trigger("traybutton-open")
+            if window.innerWidth < 720:
+                run_fullscreen(False)
+            window.state = 'run'
+            riot.update()
+    event_bus.on('run-code-slave', def(ev):
+                 trigger_on_next_run( def():
+                                     run_remotely(ev)
+                    )
+                )
+
+    def run_rapydscript():
+        if window.RapydScript is undefined:
+            event_bus.one('compiler-ready', run)
+        js_output = compile()
+        script = iframe.contentDocument.createElement('script')
+        script.innerHTML = js_output
+        def write_script():
+            iframe.removeEventListener('load', write_script)
+            source = iframe.contentDocument.documentElement.outerHTML
+            if window.fs is not undefined:
+                script_place = source.toLowerCase().indexOf('</body>')
+                if script_place is not -1:
+                    source = source[:script_place] + '\n' + script.outerHTML \
+                                                + '\n' + source[script_place:]
+                publish_script(source)
+            iframe.contentWindow.Jappy = iframe.contentWindow.parent
+            iframe.contentDocument.body.appendChild(script)
+            iframe.contentDocument.close()
+        iframe.addEventListener('load', write_script)
+        if window.y is not undefined: # collaboration
+            path = location.hash.slice(1)
+            if 'template.html' in window.files:
+                iframe.contentDocument.open()
+                iframe.contentDocument.write(files['template.html'].getValue())
+                iframe.contentDocument.close()
+            else:
+                iframe.contentWindow.location = location.protocol + '//' + \
+                                                location.host + '/dav/' + \
+                                                path + '/template.html'
+        else:
+            if 'template.html' in window.files:
+                iframe.contentDocument.open()
+                iframe.contentDocument.write(files['template.html'].getValue())
+                iframe.contentDocument.close()
+            else:
+                iframe.contentWindow.location = location.protocol + '//' + \
+                                                location.host + '/template.html'
+
+    def render_markdown():
+        src = editor.getValue()
+        output = marked(src)
+        def write_output():
+            iframe.removeEventListener('load', write_output)
+            idoc = iframe.contentDocument
+            head = idoc.getElementsByTagName('head')[0]
+            containerDiv = idoc.createElement('div')
+            containerDiv.classList.add('markdown-body')
+            link = idoc.createElement('link')
+            link.rel = 'stylesheet'
+            link.href = 'css/github-markdown.css'
+            head.appendChild(link)
+            link = idoc.createElement('link')
+            link.rel = 'stylesheet'
+            link.href = 'css/markdown-extra.css'
+            head.appendChild(link)
+            containerDiv.innerHTML = output
+            html = idoc.documentElement.outerHTML
+            if window.fs is not undefined:
+                place = html.toLowerCase().indexOf('</html>')
+                if place is not -1:
+                    html = html[:place] + '\n' + containerDiv.outerHTML \
+                                            + '\n' + html[place:]
+                publish_script(html)
+            idoc.body.appendChild(containerDiv)
+            idoc.close()
+        iframe.addEventListener('load', write_output)
+        if len(location.hash) > 0:
+            path = location.hash.slice(1)
+            if 'template.html' in window.files:
+                iframe.contentDocument.open()
+                iframe.contentDocument.write(files['template.html'].getValue())
+                iframe.contentDocument.close()
+            else:
+                iframe.contentWindow.location = location.protocol + '//' + \
+                                                location.host + '/dav/' + \
+                                                path + '/template.html'
+        else:
+            iframe.contentWindow.location = location.protocol + '//' + \
+                                            location.host + '/template.html'
+
+    def break_code():
+        iwindow = iframe.contentWindow
+        # Set a fake timeout to get the highest timeout id
+        highestTimeoutId = iwindow.setTimeout(';')
+        for i in range(0, highestTimeoutId):
+            iwindow.clearTimeout(i)
+        highestIntervalId = iwindow.setInterval(';')
+        for i in range(0, highestIntervalId):
+            iwindow.clearInterval(i)
+        highestAnimationId = iwindow.requestAnimationFrame(def():
+                                                                pass
+                                                          )
+        for i in range(0, highestAnimationId):
+            iwindow.cancelAnimationFrame(i)
+        iwindow.stop()
+        iwindow.document.body.style.opacity = '0.5'
+        inputs = iwindow.document.getElementsByTagName('input')
+        for i in inputs:
+            i.disabled = True
+        iwindow.addEventListener ('click', def(ev):
+            ev.stopPropagation()
+        , True)
+    event_bus.on("break-code", break_code)
+
+    def clear_output():
+        if len(location.hash) > 0:
+            path = location.hash.slice(1)
+            iframe.contentWindow.location = location.protocol + '//' + \
+                                            location.host + '/dav/' + \
+                                            path + '/template.html'
+        else:
+            iframe.contentWindow.location = location.protocol + '//' + \
+                                            location.host + '/template.html'
+    event_bus.on("clear-output", clear_output)
+
+    def serialize():
+        result = {}
+        for file in window.files:
+            result[file] = window.files[file].getValue()
+        return JSON.stringify(result)
+
+    def save_without_datastore():
+        localStorage.jappySession = serialize()
+
+        if location.hash:
+            url_base = location.protocol
+            address = url_base + '//' + location.host + '/dav'
+            if window.fs is undefined:
+                window.fs = new WebDAV.Fs(address)
+
+            def file_written():
+                pass # TODO: Notify user.
+
+            path = location.hash.slice(1)
+            if 'index.html' in window.files:
+                target = 'index.html'
+            else:
+                target = tag.title
+            for item in window.files:
+                if item is not target: # Will be written last
+                    data = window.files[item].getValue() 
+                    if data:
+                        filepath = '/' + path + '/' + item
+                        console.debug('Wrote: ' + filepath)
+                        fs.file(filepath).write(data, "text/plain; charset=UTF-8",
+                                                                file_written)
+            # Target is treated special to be the last to save (Hack!)
+            data = window.files[target].getValue() 
+            if data:
+                filepath = '/' + path + '/' + target
+                setTimeout( def():
+                                fs.file(filepath).write( data, 
+                                        "text/plain; charset=UTF-8", file_written)
+                          , 250)
+
+    def save(activity=window.activity):
+        if activity is not undefined:
+            datastore = activity.getDatastoreObject()
+        if activity and datastore.objectId is not undefined:
+            datastore.setDataAsText(serialize())
+            def check_save(error):
+                if error is None:
+                    console.log("Saved")
+                else:
+                    console.log("NOT Saved")
+            datastore.save(check_save)
+        else:
+            save_without_datastore()
+    event_bus.on("activity-save", save)
+
+    def example_load(file, execute=True):
+        if file in window.files:
+            tag.title = file
+            collab.unbind()
+            editor.swapDoc(window.files[file])
+            tag.update()
+            collab.bind(tag.title)
+            editor.focus()
+            if execute:
+                if window.innerWidth > 720:
+                    event_bus.trigger('run-code')
+                else:
+                    event_bus.trigger('run-fullscreen')
+            return
+
+        url_base = window.location.protocol
+        require(['text!examples/' + file], def(data):
+            new_session = CodeMirror.Doc(data)
+            files[file] = new_session
+            collab.unbind()
+            collab.create(file, data or '')
+            editor.swapDoc(new_session)
+            tag.title = file
+            tag.update()
+            collab.bind(tag.title)
+            editor.focus()
+            if execute:
+                if window.innerWidth > 720:
+                    event_bus.trigger('run-code')
+                else:
+                    event_bus.trigger('run-fullscreen')
+        )
+    event_bus.on("example-load", example_load)
+
+    def new_from_data(data, filename=None, overwrite=False):
+        console.debug('Read: ' + filename)
+        if filename in window.files:
+            tag.title = filename
+            collab.unbind()
+            editor.swapDoc(window.files[filename])
+            if overwrite:
+                if filename in window.files:
+                    window.files[filename].setValue(data)
+            tag.update()
+            collab.bind(tag.title)
+            editor.focus()
+            return
+        if filename is None:
+            filename = get_new_untitled()
+        new_session = CodeMirror.Doc(data or '')
+        window.files[filename] = new_session
+        if tag.title is not undefined:
+            collab.unbind()
+        collab.create(filename, data or '')
+        editor.swapDoc(new_session)
+        if tag.title is not undefined:
+            if tag.title[:8]==(_('untitled')) \
+                        and len(window.files[tag.title].getValue())==0:
+                del window.files[tag.title]
+        tag.title = filename
+        tag.update()
+        collab.bind(tag.title)
+        editor.focus()
+    event_bus.on("new-from-data", new_from_data)
+
+    def process_file():
+        file = tag.refs.file_input.files[0]
+        reader = new FileReader()
+
+        if file.type=='application/zip':
+            JSZip.loadAsync(file).then(def(zip):
+                zip.forEach(def(relpath, zippedfile):
+                    if relpath[:4]==('src/') and relpath!='src/':
+                        if relpath[-4:]=='.pyj':
+                            basepath = relpath[4:]
+                            zippedfile.async('text').then(def(data):
+                                if basepath not in window.files:
+                                    new_session = CodeMirror.Doc(str(data))
+                                    window.files[basepath] = new_session
+                                else:
+                                    window.files[basepath].setValue(str(data))
+                                if window.y is not undefined: # collaboration
+                                    if basepath not in y.share.files.keys():
+                                        y.share.files.set(basepath, Y.Text)
+                                        y.share.files.get(basepath).insert(0, str(data))
+                            )
+                )
+                tag.update()
+            )
+        else:
+            reader.onload = (def():
+                return def(evt):
+                    new_session = CodeMirror.Doc(evt.target.result)
+                    window.files[file.name] = new_session
+                    if window.y is not undefined: # collaboration
+                        y.share.files.set(file.name, Y.Text)
+                        y.share.files.get(file.name).insert(0, evt.target.result)
+                    tag.update()
+            )()
+            reader.readAsText(file)
+    tag.refs.file_input.onchange = process_file
+
+    def import_file():
+        tag.refs.file_input.click()
+    event_bus.on("import-file", import_file)
+
+    def restore(e):
+        code_editor = tag.refs.split
+        code_editor.style.display = 'block'
+        toolbar = document.getElementById('main-toolbar')
+        toolbar.style.display = 'block'
+        e.target.parentNode.removeChild(e.target)
+        toolbar_height = window.getComputedStyle(toolbar)['height']
+        canvas = document.getElementById('canvas')
+        canvas.style.top = toolbar_height
+
+        tabs_div = document.getElementById('tabs')
+        tabs_style = window.getComputedStyle(tabs_div)
+        target_size = window.innerHeight - int(toolbar_height) - int(tabs_style.height)
+        if window.innerWidth > 420:
+            iframe.style.width = '100%'
+            editor.setSize( window.innerWidth / 2, target_size )
+        else:
+            window.state = 'clean'
+            event_bus.trigger('clear-output')
+            event_bus.trigger('traybutton-close')
+            riot.update()
+
+    def run_fullscreen(execute=True):
+        code_editor = tag.refs.split
+        code_editor.style.display = 'none'
+        toolbar = document.getElementById('main-toolbar')
+        toolbar.style.display = 'none'
+        canvas = document.getElementById('canvas')
+        canvas.style.top = '0'
+        iframe.style.width='100%'
+        if execute:
+            run()
+
+        if document.getElementById('restore-button'):
+            return
+
+        restore_button = document.createElement('button')
+        restore_button.id = "restore-button"
+        restore_button.onclick = restore
+        restore_button.style.opacity = '0.5'
+        restore_button.style.position = 'fixed'
+        restore_button.style.right = restore_button.style.top = '0'
+        restore_button.style.padding = '0px'
+        restore_button.style['border-radius'] = '0px'
+        restore_button.style['background-image'] = 'url(icons/view-return.svg)'
+        restore_button.style['background-repeat'] = 'no-repeat'
+        restore_button.style['background-position'] = 'center'
+        restore_button.style.width = restore_button.style.height = '55px'
+        document.body.appendChild(restore_button)
+
+    event_bus.on("run-fullscreen", run_fullscreen)
+
+    def save_zip():
+        event_bus.trigger("activity-save")
+
+        # TODO get activity palette object title
+        if location.hash:
+            bundle_name = location.hash.slice(1)
+        else:
+            bundle_name = tag.title[:tag.title.indexOf('.')]
+
+        js_output = compile()
+
+        url_base = window.location.protocol
+        require(['text!template'], def(data):
+            script = iframe.contentDocument.createElement('script')
+            script.innerHTML = js_output
+            enc_js = script.outerHTML + '\n'
+            closing_tag = data.indexOf('</body>')
+            html = data[:closing_tag] + enc_js + data[closing_tag:]
+
+            external_files = []
+            for match in re.findall('script.*src="(.*)"', data):
+                ref = 'text!' + match[match.indexOf('=')+2:-1]
+                ref = ref.replace('lib/', '')
+                external_files.append(ref)
+
+            zip = new JSZip()
+            zip.file('index.html', html)
+            for name in window.files:
+                zip.file('src/' + name, window.files[name].getValue())
+            require(external_files, def(*data):
+                index = 0
+                for file in external_files:
+                    file = file[5:] # remove 'text!'
+                    if '/' not in file:
+                        file = 'lib/' + file
+                    zip.file(file, data[index])
+                    index = index + 1
+                zip.generateAsync({'type':'blob'}).then(def(blob):
+                    saveAs(blob, bundle_name + '.zip')
+                )
+            )
+        )
+    event_bus.on("save-as-zip", save_zip)
+
+    def reset_collab(ev):
+        # This is by far the simplest and most clear to the user ;-)
+        window.files = []
+        location.reload()
+    window.onhashchange = reset_collab
+
+    def fresh_start():
+        if not location.hash and not len(window.files):
+            require(["text!../jappy.json"],
+                def(raw_translation_data):
+                    translation_data = JSON.parse(raw_translation_data)
+                    if translation_data['language']==tag.lang:
+                        install(translation_data)
+                    newtab()
+                )
+    event_bus.on("activity-not-ready", fresh_start)
+
+    def init_collab():
+        if not location.hash:
+            console.log('Add a hash id to synchronize.')
+            tag.update()
+            return
+        protocol = 'wss' if location.protocol[-2:-1]=='s' else 'ws'
+        address = protocol + '://' + location.host
+        path = location.hash.slice(1)
+        event_bus.trigger('update-workspace-menu')
+
+        Y({'db'       : { 'name': 'memory'},
+           'connector': { 'name': 'websockets-client',
+                          'room': path,
+                          'options': { 'transports': ['websocket'] },
+                          'url': address },
+            'share'   : { 'files': 'Map' }}).then(  
+                def(y):
+                    this.y = y
+                    for filename in window.files:
+                        if filename[:8]==(_('untitled')) \
+                                and len(window.files[filename].getValue())==0:
+                            del window.files[filename]
+                            if '__stdlib__/' + filename in RapydScript.file_data:
+                                del RapydScript.file_data['__stdlib__/' + filename]
+                            continue
+                        if filename not in y.share.files.keys():
+                            y.share.files.set(filename, Y.Text)
+                            y.share.files.get(filename).insert(0, 
+                                                    window.files[filename].getValue())
+                    for filename in y.share.files.keys():
+                        if filename not in window.files:
+                            text = y.share.files.get(filename).toString()
+                            new_session = CodeMirror.Doc(text)
+                            window.files[filename] = new_session
+                    if tag.title not in y.share.files.keys():
+                        tag.title = list(window.files)[-1]
+                    y.share.files.observe(  def(event): 
+                                if event.type == 'delete':
+                                    if event.name is tag.title:
+                                        collab.clear(event.oldValue)
+                                    if event.name in window.files:
+                                        closetab(e=None, filename=event.name)
+                                elif event.type == 'add':
+                                    if event.name not in window.files:
+                                        text = event.object.toString()
+                                        new_session = CodeMirror.Doc(text)
+                                        window.files[event.name] = new_session
+                                        tag.update()
+                        )
+                    y.connector.whenSynced( def():
+                            console.log('Synchronized.')
+                            event_bus.trigger("collaboration-ready")
+                            if len(y.share.files.keys())==0:
+                                event_bus.trigger("restore-last-session")
+                            else:
+                                makeToast('<b>#' + path + '</b><br><br>' + \
+                                    _('Joining live edit session.') + '<br><i>' + \
+                                    str(len(y.share.files.keys())) +  _(' files.') + '</i>')
+                                riot.update()
+
+                            if tag.title is not undefined:
+                                collab.bind(tag.title)
+                        )
+                    y.connector.socket.on('jappyEvent', def(msg):
+                            if msg:
+                                event = msg.event
+                                data = msg.data
+                                event_bus.trigger(event, data)
+                        )
+        )
+
+
+    # Prevent overscroll in Chromium Mobile
+    h = parent.document.getElementsByTagName('html')[0]
+    h.style['overscroll-behavior'] = 'contain'
+
+    this.editor = editor
+    window.editor = editor
+    window.init_collab = init_collab
+    editor.focus()
+
+def makeToast(msg):
+    toast = document.createElement('div')
+    toast.innerHTML = msg
+    toast.classList.add('toast')
+    toast.style.right =  '30px'
+    toast.style.bottom = '30px'
+
+    document.body.appendChild(toast)
+
+    setTimeout(def():
+        toast.style.opacity = '0'
+    )
+
+    def clearToast():
+        document.body.removeChild(toast)
+
+    toast.addEventListener('transitionend', clearToast)
+    toast.addEventListener('click', clearToast)
+window.makeToast = makeToast
+
+require(['rapydscript'], def(RapydScript):
+        print('RapydScript-ng ' + RapydScript.rs_version)
+
+        compiler = RapydScript.create_embedded_compiler()
+        
+        def compile(inputcode=None):
+            editor = window.editor
+            options = {'basedir':'__stdlib__',
+                       'bare': True,
+                       'js_version': 5,
+                       'omit_baselib':True}
+
+            for file in window.files:
+                if file is not tag.title:
+                    RapydScript.file_data['__stdlib__/' + file] = window.files[file].getValue()
+
+            session = editor.getDoc()
+            if tag.marker and not inputcode:
+                tag.marker.clear()
+
+            try:
+                result = RapydScript.compile(inputcode or editor.getValue(), tag.title, options)
+
+            except Exception as e:
+                console.log(e)
+                code = "print ('''" + e.name + ": " + e.message + "''')"
+                if e.line and e.col and not inputcode:
+                    tag.marker = editor.markText( CodeMirror.Pos(e.line-1, e.col),
+                                     CodeMirror.Pos(e.line-1, e.col+1),
+                                     {'className': 'error-marker'} )
+                    editor.scrollIntoView(e.line-1, e.col+1)
+                result = compiler.compile(code)
+            return result
+        window.compile = compile
+        window.RapydScript = RapydScript
+        event_bus.trigger('compiler-ready')
+    )
+this.on('mount', init)
+
+</script>
+</code-editor>
