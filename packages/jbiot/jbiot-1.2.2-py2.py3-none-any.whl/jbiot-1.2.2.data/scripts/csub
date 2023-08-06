@@ -1,0 +1,92 @@
+#!python
+#coding=utf-8
+import sys
+reload(sys)
+sys.setdefaultencoding("utf-8")
+import os
+dirpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../")
+sys.path.insert(0,dirpath)
+from jbiot.subjobs.dockersing import dockersing
+import glob
+import time
+import yaml
+import getpass
+from jbiot.subjobs.csub.jblog import readlog
+from jbiot.subjobs.jbmsg import *
+from jbiot.subjobs.csub.csub_strip import stripcmd
+from jbiot.subjobs.csub import csub_run 
+from jbiot.jbio.jmail import jmail
+from jbiot.subjobs.cmd2showdoc import cmd2showdoc
+
+def csub_email(cmdfile,email,name):
+    content = readlog(cmdfile)
+    if email :
+        setemail(email)
+    email = reademail()
+    if email:
+        if name:
+            subject = name
+            jmail(email,subject,content,)
+    if name:
+        cmd2showdoc(name,cmdfile)
+
+def csub(cmd,dry,rerun,verbose,force,email,name):
+    tasks = stripcmd(cmd)
+    if dry:
+        return
+    for task in tasks:
+        cmdfile = task[0]
+        mem = task[1]
+        fail = csub_run.main(cmdfile,mem,rerun,verbose)
+        if fail:
+            print "\033[1;31m"
+            print "contain failure,job should be stopped..."
+            print "\033[0m"
+            if not force:
+                csub_email(cmd,email,name)
+                sys.exit(1)
+            print "\033[1;31mgo on execute cause force mode is set on...\033[0m"
+    csub_email(cmd,email,name)
+
+def main(cmdfile,dryflag,email,name,docker=False,sing=False,rerun=False,verbose=False,force=False,timeout=-1):
+    if docker :
+        cmdfile = dockersing(cmdfile,prefer="docker")
+    if sing:
+        cmdfile = dockersing(cmdfile,prefer="singularity")
+    csub(cmdfile,dryflag,rerun,verbose,force,email,name) 
+
+if __name__ == "__main__":
+
+    from docopt import docopt
+
+    usage = """
+    Usage:
+        csub [options] <cmdfile> 
+
+    Options:
+        -h --help                print this screen
+        --dry                    all done but run script
+        --rerun                  rerun the job from last failure point
+        --force                  force run even error detected
+        --verbose                verbose mode lot of information will print
+        --with-docker            prefer to use docker when run cmd
+        --with-singularity       prefer to user singularity when run cmd
+        -e,--email=<email>       email of you want to remind of
+        -w,--wechat=<name>       wechat name you want to send to
+        -n,--name=<job_name>     the name of this task.
+        --timeout=<timeout>      maxium seconds to run this job [default: -1]
+    """
+    args = docopt(usage)
+    cmdfile = args["<cmdfile>"]
+    dryflag = args["--dry"]
+    docker = args["--with-docker"]
+    sing = args["--with-singularity"]
+    email = args["--email"]
+    wechat = args["--wechat"]
+    name = args["--name"]
+    verbose = args["--verbose"]
+    force = args["--force"]
+    rerun = args["--rerun"]
+    timeout = args["--timeout"]
+    main(cmdfile,dryflag,email,name,docker=docker,sing=sing,rerun=rerun,verbose=verbose,force=force,timeout=timeout)
+    
