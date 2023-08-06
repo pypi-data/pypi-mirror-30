@@ -1,0 +1,99 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+"""News to mail gateway script. Copyright 2000 Cosimo Alfarano
+
+Author: Cosimo Alfarano
+Date: June 11 2000
+
+pygs - Copyright 2000 by Cosimo Alfarano <Alfarano@Students.CS.UniBo.It>
+You can use this software under the terms of the GPL. If we meet some day,
+and you think this stuff is worth it, you can buy me a beer in return.
+
+Thanks to md for this useful formula. Beer is beer.
+
+Gets news article and sends it via SMTP.
+"""
+from __future__ import print_function
+
+import argparse
+import logging
+import mail2news
+import nntplib
+import sys
+
+# logging.basicConfig(level=logging.DEBUG)
+
+def parse_cmdline():
+    parser = argparse.ArgumentParser(
+        description='%s version %s - Copyright 2000 Cosimo Alfarano\n%s' %
+        ('pyg', mail2news.VERSION, mail2news.DESC))
+
+    parser.add_argument('-s', '--newsserver', default='')
+    parser.add_argument('-a', '--approver', default='',
+                        help="address of moderator/approver")
+    parser.add_argument('-n', '--newsgroup', default='',
+                        help='newsgroup[s] (specified as comma separated ' +
+                        'without spaces list)', required=True)
+    parser.add_argument('-u', '--user', default='',
+                        help='NNTP server user (for authentication)')
+    parser.add_argument('-p', '--password', default='',
+                        help='NNTP server password (for authentication)')
+    parser.add_argument('-P', '--port', default='')
+    parser.add_argument('-e', '--envellope', default='')
+    parser.add_argument('-l', '--logfile')
+
+    parser.add_argument('-T', '--test', action='store_true',
+                        help='test mode (not send article via NNTP)')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='verbose output ' +
+                        '(usefull with -T option for debugging)')
+
+    args = parser.parse_args()
+
+    if not args.newsgroup:
+        raise argparse.ArgumentError('Error: Missing Newsgroups\n')
+
+    return args
+
+
+"""main is structured in 4 phases:
+    1) check and set pyg's internal variables
+    2) check whitelist for users' permission
+    3) format rfc 822 headers from input article
+    4) open smtp connection and send e-mail
+"""
+
+
+try:
+
+    """phase 1:
+    check and set pyg's internal variables
+    """
+    opt = parse_cmdline()
+
+    m2n = mail2news.mail2news(opt)
+    owner = None
+
+    """phase 3:
+    format rfc 822 headers from input article
+    """
+    m2n.renameheads()    # rename useless heads
+    m2n.removeheads()    # remove other heads
+
+    m2n.sortheads()        # sort remaining heads :)
+
+    if opt.verbose:
+        print(m2n.message.as_string())
+
+    logging.debug('m2n.payload = len %d', len(m2n.message.get_payload()))
+    if len(m2n.message.get_payload()) > 0:
+#        wl.logmsg(m2n.heads_dict,wl.ACCEPT,owner)
+        if not opt.test:
+            try:
+                resp = m2n.sendemail()
+            except nntplib.NNTPError as ex:
+                print(ex)
+
+except KeyboardInterrupt:
+    print('Keyboard Interrupt')
+    sys.exit(0)
