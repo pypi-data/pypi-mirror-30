@@ -1,0 +1,215 @@
+"""
+Rules for visualizing results in Anvi'o
+"""
+
+Env(name="anvio", base="bioconda", packages=[
+    "anvio",
+    "blast >=2.7.1",  # will pull 2.2 otherwise
+    "python >=3.6",   # unify py version
+])
+
+rule anvio_makedb:
+    """
+    Create the initial Anvi'o database
+    """
+    message: "Creating Anvi'o database"
+    input:   fasta = "{project}.{dir}.anvio/{target}.fa",
+             calls = "{project}.{dir}.anvio/{target}.genecalls.tsv"
+    output:  db    = "{project}.{dir}.anvio/{target}.db"
+    log:             "{project}.{dir}.anvio/{target}.db.log"
+    threads: 1
+    conda:   "anvio"
+    params:  split_length = 20000,
+             kmer_size = 4
+    shell: """
+    anvi-gen-contigs-database \
+    --contigs-fasta {input.fasta} \
+    --project-name {wildcards.project} \
+    --output-db-path {output.db} \
+    --split-length {params.split_length} \
+    --kmer-size {params.kmer_size} \
+    --external-gene-calls {input.calls} \
+    >{log} 2>&1
+    """
+    # project description? --description TEXT_FILE
+
+
+rule anvio_convert_input_fasta:
+    """
+    Anvi'o insists on having only one word in the fasta headers, so we need
+    to unpack the sequences and modify the headers.
+    """
+    message:      "Preparing contigs for Anvio import"
+    input:        "{dir}/{sample}.contigs.fasta.gz"
+    output:  temp("{dir}.anvio/{sample}.fa")
+    threads: 1
+    conda:   "pigz.yml"
+    shell: """
+    unpigz -c {input} | sed '/^>/ s/ .*//' > {output}
+    """
+
+
+localrules: anvio_convert_gff
+rule anvio_convert_gff:
+    """
+    We'd like to use our own gene calling results in Anvi'o, so here we
+    convert them into a format liked by Anvi'o.
+    """
+    message:
+        "Preparing gene predictions for Anvio import"
+    input:
+        "{dir}.genes/{sample}.prodigal.gff.gz"
+    output:
+        "{dir}.anvio/{sample}.genecalls.tsv"
+    run:
+        import gzip, csv
+        from ymp import gff
+        with gzip.GzipFile(input[0], "r") as inf,\
+             open(output[0], "w") as outf:
+            gffreader = gff.reader(inf)
+            tsvwriter = csv.writer(outf, delimiter='\t')
+            tsvwriter.writerow([
+                'gene_callers_id',
+                'contig',
+                'start',
+                'stop',
+                'direction',
+                'partial',
+                'source',
+                'version'
+            ])
+
+            for num, feature in enumerate(gffreader):
+                row = [
+                    # gene_callers_id -- 1 indexed gene id
+                    num+1,
+                    # contig -- name of contig
+                    feature.seqid,
+                    # start -- start pos, 0 indexed
+                    feature.start - 1,
+                    # stop -- stop pos, 0 indexed
+                    feature.end,
+                    # direction -- f or r
+                    "f" if feature.strand == "+" else "r",
+                    # partial -- 0 or 1
+                    0,# if ((feature.end - feature.start + 1) %% 3 == 0) else 1,
+                    # source -- name of caller
+                    feature.source.split("_")[0],
+                    # version -- version of caller
+                    feature.source.split("_")[1]
+                ]
+                tsvwriter.writerow(row)
+                
+
+rule anvio_hmm:
+    """
+    Running Anvio's HMMscan task.
+    TODO: Should we run that ourselves?
+    """
+    message:       "Running Anvio HMMs"
+    input:         "{dir}.anvio/{sample}.db"
+    output:  touch("{dir}.anvio/{sample}.stamp_hmm")
+    threads: 2
+    conda:   "anvio"
+    shell: """
+    anvi-run-hmms -c {input} --num-threads {threads}
+    """
+
+
+rule anvio_export_genes:
+    message:     "Anvi'o exporting gene calls"
+    input:       "{dir}.anvio/{sample}.db"
+    output: temp("{dir}.anvio/{sample}.gene-calls.fa")
+    conda:  "anvio"
+    shell: """
+    anvi-get-dna-sequences-for-gene-calls -c {input} -o {output}
+    """
+
+
+rule anvio_centrifuge:
+    input:                "{dir}.anvio/{sample}.gene-calls.fa",
+            cfdbf       = "{:dir.references:}/centrifuge_phv/p+h+v.1.cf",
+            cfdb        = "{:dir.references:}/centrifuge_phv/"
+    output: hits   = temp("{dir}.anvio/{sample}.centrifuge-hits.tsv"),
+            report = temp("{dir}.anvio/{sample}.centrifuge-report.tsv")
+    log:                  "{dir}.anvio/{sample}.centrifuge.log"
+    shadow:  "shallow"
+    threads: 1
+    conda:  "anvio"
+    shell: """
+    centrifuge -f -x {input.cfdb} {input} -S {output.hits} \
+      -p {threads} -t &> {log}
+    mv centrifuge_report.tsv {output.report}
+    """
+
+
+rule anvio_import_centrifuge:
+    input:
+        db="{dir}.anvio/{sample}.db",
+        hits="{dir}.anvio/{sample}.centrifuge-hits.tsv",
+        report="{dir}.anvio/{sample}.centrifuge-report.tsv"
+    output:
+        stamp="{dir}.anvio/{sample}.stamp_centrifuge"
+    log:
+        "{dir}.anvio/{sample}.centrifuge_import.log"
+    shadow:
+        "shallow"
+    conda:  "anvio"
+    shell: """
+    ln -s {input.hits} centrifuge_hits.tsv
+    ln -s {input.report} centrifuge_report.tsv
+    anvi-import-taxonomy -c {input.db} -i centrifuge_report.tsv centrifuge_hits.tsv -p centrifuge
+    touch {output.stamp}
+    """
+
+
+rule anvio_profile_partial_coassembly:
+    message:
+        "Importing BAM files into Anvio"
+    input:
+        bam="{dir}.map/{target}.contigs.{source}.bowtie2.sorted.bam",
+        bai="{dir}.map/{target}.contigs.{source}.bowtie2.sorted.bam.bai",
+        db="{dir}.anvio/{target}.db",
+        stamp="{dir}.anvio/{target}.stamp_hmm"
+    output:
+        stamp="{dir}.anvio/{target}.stamp_profile_{source}",
+        dir="{dir}.anvio/{target}_{source}.d",
+        runinfo="{dir}.anvio/{target}_{source}.d/RUNINFO.cp"
+    params:
+        sample_name = lambda wc: "s"+wc.source.replace("-","_")
+    conda:  "anvio"
+    shell: """
+    rm -rf {output.dir}
+    anvi-profile -i {input.bam} -c {input.db} -o {output.dir} \
+    --sample-name {params.sample_name} --cluster-contigs
+    touch {output.stamp}
+    """
+
+rule anvio_all_for_target:
+    input:
+        "{dir}{by}.mhc.anvio/{target}.stamp_profile_{:sources:}"
+    output:
+        "{dir}{by}.mhc.anvio/{target}.stamp_profiled"
+    shell:
+        "touch {output}"
+
+rule anvio_merge:
+    input:
+        db="{dir}{by}.mhc.anvio/{target}.db",
+        runinfo="{dir}{by}.mhc.anvio/{target}_{:sources:}.d/RUNINFO.cp"
+    output:
+        stamp = "{dir}{by}.mhc.anvio/{target}.stamp_merged",
+        dir = "{dir}{by}.mhc.anvio/{target}.d"
+    params:
+        sample_name = "s{target}"
+    conda:  "anvio"
+    shell: """
+    anvi-merge \
+    -c {input.db} \
+    -S {params.sample_name} \
+    -o {output.dir} \
+    {input.runinfo}
+    """
+        
+
+#TODO: canonicalize sample names
