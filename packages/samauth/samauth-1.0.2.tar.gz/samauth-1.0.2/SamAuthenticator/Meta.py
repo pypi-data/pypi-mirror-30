@@ -1,0 +1,2 @@
+SOFTWARE_VERSION = "1.0.2"
+__version__ = SOFTWARE_VERSION
