@@ -1,0 +1,74 @@
+# Book Makefile
+
+# ignore the following LaTeX commands when spell checking
+NOSPELL=--add-tex-command="bibliographystyle op" \
+	--add-tex-command="bibliography op" \
+	--add-tex-command="thispagestyle op" \
+	--add-tex-command="hypersetup op" \
+	--add-tex-command="rmdefault op" \
+	--add-tex-command="fancyhead op" \
+	--add-tex-command="setlist op"
+PROJECT={{{ basename }}}
+
+all: clean spell manuscript # doc
+	@echo done
+
+products: all signatures ebook
+	cp .build/$(PROJECT).pdf ./products
+	cp .build/$(PROJECT)-book-odd.pdf ./products
+	cp .build/$(PROJECT)-book-even.pdf ./products
+
+clean:
+	rm -rf .build
+	mkdir -p .build
+
+manuscript: timestamp
+	pdflatex -output-directory=.build $(PROJECT).tex
+	pdflatex -output-directory=.build $(PROJECT).tex
+	pdflatex -output-directory=.build $(PROJECT).tex
+
+watch: timestamp
+	cd .build && latexmk ../$(PROJECT).tex
+
+timestamp:
+	@mkdir -p .build
+	@rm -f .build/gitinfo.tex && touch .build/gitinfo.tex
+	@echo '\\noindent \\texttt{'`date`'}' >> .build/gitinfo.tex
+	@echo '' >> .build/gitinfo.tex
+	@echo '\\noindent \\texttt{'`git rev-parse --verify HEAD`'}' >> .build/gitinfo.tex
+	@echo "Wrote timestamp TeX in: .build/gitinfo.tex"
+
+doc: html
+	pandoc -r html -R -w markdown .build/$(PROJECT).html | perl ~/bin/html-table2pandoc.pl > .build/tmp.md
+	sed 's/^### /\'$$'\n### /g' .build/tmp.md > .build/tmp2.md
+	sed 's/^### /\'$$'\n### /g' .build/tmp2.md > .build/tmp3.md
+	pandoc -f markdown -t docx -o .build/$(PROJECT).docx .build/tmp3.md
+
+html:
+	htlatex $(PROJECT).tex "xhtml,word"
+	pandoc --self-contained -f html -t rtf -o .build/$(PROJECT).rtf $(PROJECT).html
+	mv $(PROJECT).html $(PROJECT).css .build
+	rm -f $(PROJECT).4tc $(PROJECT).4ct $(PROJECT).aux $(PROJECT).fff $(PROJECT).dvi $(PROJECT).idv $(PROJECT).lg $(PROJECT).log $(PROJECT).tmp $(PROJECT).ttt $(PROJECT).xref zz$(PROJECT).ps texput.log
+
+spell:
+	@aspell $(NOSPELL) --master=en_CA --mode=tex check $(PROJECT).tex
+	@echo Finished checking spelling
+
+open:
+	open .build/$(PROJECT).pdf
+
+count:
+	detex $(PROJECT).tex |wc
+
+signatures: all
+	bin/signatures.sh "$(PROJECT)"
+
+cover:
+	convert artwork/cover/front/front.pdf -background white -alpha remove artwork/cover/front/front.png
+	convert artwork/cover/front/front.png artwork/cover/front/front-ebook.pdf
+
+ebook: all
+	pdfjam --papersize '{13.97cm,21.59cm}' --outfile products/ebook.pdf \
+		artwork/cover/front/front.pdf .build/ebook.pdf
+
+.PHONY: all clean manuscript doc spell html open count timestamp journal watch products signatures cover products ebook
